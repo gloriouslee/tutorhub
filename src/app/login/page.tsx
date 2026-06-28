@@ -6,6 +6,7 @@ import Link from "next/link";
 import { GraduationCap, Mail, Lock, Eye, EyeOff, ArrowRight, User, Users, Phone, BookOpen, Target, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { createClient } from "@/lib/supabase/client";
 
 const DEMO_USERS = [
   { role: "student", email: "student@tutorhub.com", label: "Học viên", color: "from-indigo-500 to-purple-600", icon: "🎓" },
@@ -51,18 +52,28 @@ export default function LoginPage() {
     setLoginError("");
     setLoginLoading(true);
 
-    const role = email.split("@")[0];
-    if (["student", "parent", "teacher", "admin"].includes(role)) {
-      document.cookie = `demo_role=${role}; path=/; max-age=86400`;
-      setTimeout(() => {
+    try {
+      const supabase = createClient();
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+
+      if (error) {
+        setLoginError("Email hoặc mật khẩu không đúng.");
         setLoginLoading(false);
-        router.push(`/${role}`);
-      }, 1000);
-    } else {
-      setTimeout(() => {
-        setLoginLoading(false);
-        setLoginError("Tài khoản không hợp lệ. Vui lòng sử dụng các tài khoản dùng thử bên dưới.");
-      }, 800);
+        return;
+      }
+
+      // Get role from profiles table
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", data.user.id)
+        .single();
+
+      const role = profile?.role ?? "student";
+      router.push(`/${role}`);
+    } catch {
+      setLoginError("Đã có lỗi xảy ra. Vui lòng thử lại.");
+      setLoginLoading(false);
     }
   };
 
