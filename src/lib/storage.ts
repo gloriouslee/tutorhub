@@ -209,6 +209,70 @@ export function pushScheduleNotification(notif: Omit<ScheduleNotification, "id" 
   }
 }
 
+// ── Material purchase transactions (localStorage) ────────────────────────────
+
+export type TxStatus = "pending" | "approved" | "rejected";
+
+export interface PurchaseTransaction {
+  id: string;
+  pkg_id: string;
+  pkg_title: string;
+  amount: number;
+  student_id: string;
+  student_name: string;
+  student_email: string;
+  transfer_note: string;
+  status: TxStatus;
+  created_at: string;
+  reviewed_at?: string;
+}
+
+const TX_KEY = "tutorhub_transactions";
+const ACCESS_KEY = "tutorhub_pkg_access";
+
+export function getTransactions(): PurchaseTransaction[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(TX_KEY);
+    return raw ? (JSON.parse(raw) as PurchaseTransaction[]) : [];
+  } catch { return []; }
+}
+
+export function createTransaction(tx: Omit<PurchaseTransaction, "id" | "created_at" | "status">): PurchaseTransaction {
+  const full: PurchaseTransaction = { ...tx, id: crypto.randomUUID(), created_at: new Date().toISOString(), status: "pending" };
+  const existing = getTransactions();
+  localStorage.setItem(TX_KEY, JSON.stringify([full, ...existing]));
+  return full;
+}
+
+export function updateTransactionStatus(txId: string, status: "approved" | "rejected"): void {
+  if (typeof window === "undefined") return;
+  const txs = getTransactions().map(t =>
+    t.id === txId ? { ...t, status, reviewed_at: new Date().toISOString() } : t
+  );
+  localStorage.setItem(TX_KEY, JSON.stringify(txs));
+  if (status === "approved") {
+    const tx = txs.find(t => t.id === txId);
+    if (tx) grantPackageAccess(tx.pkg_id);
+  }
+}
+
+export function grantPackageAccess(pkgId: string): void {
+  if (typeof window === "undefined") return;
+  const existing = getGrantedPackages();
+  if (!existing.includes(pkgId)) {
+    localStorage.setItem(ACCESS_KEY, JSON.stringify([...existing, pkgId]));
+  }
+}
+
+export function getGrantedPackages(): string[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(ACCESS_KEY);
+    return raw ? (JSON.parse(raw) as string[]) : [];
+  } catch { return []; }
+}
+
 export function markScheduleNotificationsRead(): void {
   if (typeof window === "undefined") return;
   try {

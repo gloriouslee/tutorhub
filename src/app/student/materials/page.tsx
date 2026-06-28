@@ -1,11 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { getGrantedPackages } from "@/lib/storage";
 import {
   PlayCircle, FileText, Pencil, Download, CheckCircle2,
   ChevronDown, ChevronRight, BookOpen, Clock, StickyNote,
@@ -341,10 +343,12 @@ function PackageModal({
   pkg,
   onClose,
   onPreview,
+  onBuy,
 }: {
   pkg: PaidPackage;
   onClose: () => void;
   onPreview: (lesson: PaidLesson) => void;
+  onBuy: () => void;
 }) {
   const [openChapters, setOpenChapters] = useState<string[]>([pkg.chapters[0]?.id]);
   const tier = TIER_CONFIG[pkg.tier];
@@ -488,7 +492,7 @@ function PackageModal({
         {/* Footer CTA */}
         <div className="p-4 border-t border-border bg-muted/20 flex gap-3 shrink-0">
           <Button variant="outline" className="flex-1" onClick={onClose}>Để sau</Button>
-          <Button className="flex-1 gap-2">
+          <Button className="flex-1 gap-2" onClick={() => { onClose(); onBuy(); }}>
             <ShoppingCart className="h-4 w-4" /> Mua ngay · {fmt(pkg.price)}
           </Button>
         </div>
@@ -502,9 +506,13 @@ function PackageModal({
 // ─────────────────────────────────────────────────────────────────────────────
 
 function BrowseView({ onSelectCourse }: { onSelectCourse: (c: OwnedCourse) => void }) {
+  const router = useRouter();
   const [search, setSearch] = useState("");
   const [selectedPkg, setSelectedPkg] = useState<PaidPackage | null>(null);
   const [previewLesson, setPreviewLesson] = useState<{ lesson: PaidLesson; pkg: PaidPackage } | null>(null);
+  const [grantedPkgIds, setGrantedPkgIds] = useState<string[]>([]);
+
+  useEffect(() => { setGrantedPkgIds(getGrantedPackages()); }, []);
 
   const filteredPkg = search.trim()
     ? PAID_PACKAGES.filter(p =>
@@ -639,24 +647,33 @@ function BrowseView({ onSelectCourse }: { onSelectCourse: (c: OwnedCourse) => vo
                   </div>
 
                   <div className="border-t border-border pt-3 mt-auto space-y-2">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-base font-bold text-foreground">{fmt(pkg.price)}</p>
-                        {pkg.originalPrice && (
-                          <p className="text-xs text-muted-foreground line-through">{fmt(pkg.originalPrice)}</p>
-                        )}
+                    {grantedPkgIds.includes(pkg.id) ? (
+                      <div className="flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400 text-sm font-medium">
+                        <CheckCircle2 className="h-4 w-4" /> Đã sở hữu
                       </div>
-                      <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={() => setSelectedPkg(pkg)}>
-                        <ShoppingCart className="h-3.5 w-3.5" /> Mua
-                      </Button>
-                    </div>
-                    {previewCount > 0 && (
-                      <button
-                        onClick={() => setSelectedPkg(pkg)}
-                        className="w-full text-xs text-violet-600 dark:text-violet-400 hover:underline flex items-center justify-center gap-1"
-                      >
-                        <Eye className="h-3 w-3" /> Xem thử {previewCount} bài miễn phí
-                      </button>
+                    ) : (
+                      <>
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-base font-bold text-foreground">{fmt(pkg.price)}</p>
+                            {pkg.originalPrice && (
+                              <p className="text-xs text-muted-foreground line-through">{fmt(pkg.originalPrice)}</p>
+                            )}
+                          </div>
+                          <Button size="sm" className="h-8 gap-1.5 text-xs"
+                            onClick={() => router.push(`/student/checkout?pkg=${pkg.id}`)}>
+                            <ShoppingCart className="h-3.5 w-3.5" /> Mua
+                          </Button>
+                        </div>
+                        {previewCount > 0 && (
+                          <button
+                            onClick={() => setSelectedPkg(pkg)}
+                            className="w-full text-xs text-violet-600 dark:text-violet-400 hover:underline flex items-center justify-center gap-1"
+                          >
+                            <Eye className="h-3 w-3" /> Xem thử {previewCount} bài miễn phí
+                          </button>
+                        )}
+                      </>
                     )}
                   </div>
                 </CardContent>
@@ -678,6 +695,7 @@ function BrowseView({ onSelectCourse }: { onSelectCourse: (c: OwnedCourse) => vo
           pkg={selectedPkg}
           onClose={() => setSelectedPkg(null)}
           onPreview={lesson => setPreviewLesson({ lesson, pkg: selectedPkg })}
+          onBuy={() => { setSelectedPkg(null); router.push(`/student/checkout?pkg=${selectedPkg.id}`); }}
         />
       )}
       {previewLesson && (
