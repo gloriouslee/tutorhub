@@ -129,7 +129,7 @@ export default function AdminDashboard() {
                   formatter={val => <span style={{ fontSize: 11, color: "rgb(var(--muted-foreground))" }}>{val}</span>} />
                 <Tooltip
                   contentStyle={{ background: "rgb(var(--card))", border: "1px solid rgb(var(--border))", borderRadius: 12, fontSize: 12 }}
-                  formatter={(v: any, name: string) => [v, name]}
+                  formatter={(v: any, name: any) => [v, name]}
                 />
               </PieChart>
             </ResponsiveContainer>
