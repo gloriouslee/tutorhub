@@ -9,7 +9,7 @@ import { MOCK_STUDENTS } from "@/lib/mock-data";
 import { createClient } from "@/lib/supabase/client";
 import {
   Upload, FileText, PlayCircle, Image as ImageIcon, BookMarked,
-  CheckCircle2, AlertCircle, X, Loader2, Users, User, ChevronDown,
+  CheckCircle2, AlertCircle, X, Loader2, Users, ChevronDown, Search,
 } from "lucide-react";
 
 const ACCEPTED_TYPES = ".pdf,.doc,.docx,.ppt,.pptx,.mp4,.jpg,.jpeg,.png";
@@ -67,13 +67,19 @@ export default function MaterialsUploadForm({ classes, onSaved }: Props) {
   const [targetRole, setTargetRole] = useState<TargetRole>("all");
   const [selectedStudents, setSelectedStudents] = useState<string[]>([]);
   const [showStudentPicker, setShowStudentPicker] = useState(false);
+  const [studentSearch, setStudentSearch] = useState("");
   const [files, setFiles] = useState<UploadedFile[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Mock: all students (in real app, filter by class enrollment)
   const classStudents = MOCK_STUDENTS.slice(0, 5);
+  const filteredStudents = studentSearch.trim()
+    ? classStudents.filter(s =>
+        s.full_name.toLowerCase().includes(studentSearch.toLowerCase()) ||
+        s.email.toLowerCase().includes(studentSearch.toLowerCase())
+      )
+    : classStudents;
 
   const toggleStudent = (id: string) =>
     setSelectedStudents(prev =>
@@ -83,6 +89,7 @@ export default function MaterialsUploadForm({ classes, onSaved }: Props) {
   const handleRoleChange = (role: TargetRole) => {
     setTargetRole(role);
     setSelectedStudents([]);
+    setStudentSearch("");
     setShowStudentPicker(false);
   };
 
@@ -210,15 +217,34 @@ export default function MaterialsUploadForm({ classes, onSaved }: Props) {
 
               {showStudentPicker && (
                 <div className="border-t border-border divide-y divide-border">
-                  <div className="px-4 py-2 flex items-center justify-between bg-muted/10">
-                    <span className="text-xs text-muted-foreground">Bỏ trống = tất cả học viên</span>
-                    {selectedStudents.length > 0 && (
-                      <button onClick={() => setSelectedStudents([])} className="text-xs text-primary hover:underline">
-                        Bỏ chọn tất cả
-                      </button>
-                    )}
+                  <div className="px-3 py-2 border-b border-border bg-muted/10">
+                    <div className="relative">
+                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                      <input
+                        type="text"
+                        placeholder="Tìm theo tên hoặc email..."
+                        value={studentSearch}
+                        onChange={e => setStudentSearch(e.target.value)}
+                        className="w-full pl-8 pr-3 py-1.5 text-sm bg-background border border-border rounded-md outline-none focus:ring-2 focus:ring-primary"
+                      />
+                    </div>
+                    <div className="flex items-center justify-between mt-2">
+                      <span className="text-xs text-muted-foreground">
+                        {filteredStudents.length} học viên{studentSearch ? " phù hợp" : ""}
+                      </span>
+                      {selectedStudents.length > 0 && (
+                        <button onClick={() => setSelectedStudents([])} className="text-xs text-primary hover:underline">
+                          Bỏ chọn tất cả
+                        </button>
+                      )}
+                    </div>
                   </div>
-                  {classStudents.map(student => {
+                  {filteredStudents.length === 0 ? (
+                    <div className="px-4 py-4 text-center text-sm text-muted-foreground">
+                      Không tìm thấy học viên
+                    </div>
+                  ) : null}
+                  {filteredStudents.map(student => {
                     const checked = selectedStudents.includes(student.id);
                     return (
                       <label
@@ -236,7 +262,7 @@ export default function MaterialsUploadForm({ classes, onSaved }: Props) {
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-medium text-foreground">{student.full_name}</p>
-                          <p className="text-xs text-muted-foreground">{student.grade}</p>
+                          <p className="text-xs text-muted-foreground">{student.email} · {student.grade}</p>
                         </div>
                       </label>
                     );
