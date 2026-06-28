@@ -280,3 +280,130 @@ export function markScheduleNotificationsRead(): void {
     localStorage.setItem("tutorhub_schedule_notifications", JSON.stringify(existing));
   } catch { /* ignore */ }
 }
+
+// ── Enrollment requests (localStorage) ──────────────────────────────────────
+
+export type EnrollmentStatus = "pending" | "approved" | "rejected";
+
+export interface EnrollmentRequest {
+  id: string;
+  // Student info from form
+  full_name: string;
+  email: string;
+  dob: string;
+  school: string;
+  grade: string;
+  requested_class_id: string;
+  parent_phone: string;
+  note?: string;
+  // Admin fields (set on approval)
+  status: EnrollmentStatus;
+  assigned_class_id?: string;
+  account_username?: string;
+  account_password?: string;
+  reject_reason?: string;
+  created_at: string;
+  reviewed_at?: string;
+}
+
+export interface StudentAccount {
+  student_id: string;          // e.g. "enr_<id>"
+  full_name: string;
+  email: string;
+  dob: string;
+  school: string;
+  grade: string;
+  assigned_class_id: string;
+  parent_phone: string;
+  username: string;
+  created_at: string;
+}
+
+const ENROLL_KEY  = "tutorhub_enrollments";
+const ACCOUNT_KEY = "tutorhub_student_accounts";
+
+export function getEnrollments(): EnrollmentRequest[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(ENROLL_KEY);
+    return raw ? (JSON.parse(raw) as EnrollmentRequest[]) : [];
+  } catch { return []; }
+}
+
+export function createEnrollment(
+  data: Omit<EnrollmentRequest, "id" | "status" | "created_at">
+): EnrollmentRequest {
+  const request: EnrollmentRequest = {
+    ...data,
+    id: crypto.randomUUID(),
+    status: "pending",
+    created_at: new Date().toISOString(),
+  };
+  const existing = getEnrollments();
+  localStorage.setItem(ENROLL_KEY, JSON.stringify([request, ...existing]));
+  return request;
+}
+
+export function approveEnrollment(
+  id: string,
+  opts: {
+    assigned_class_id: string;
+    account_username: string;
+    account_password: string;
+  }
+): void {
+  if (typeof window === "undefined") return;
+  const enrollments = getEnrollments().map(e =>
+    e.id === id
+      ? { ...e, status: "approved" as EnrollmentStatus, ...opts, reviewed_at: new Date().toISOString() }
+      : e
+  );
+  localStorage.setItem(ENROLL_KEY, JSON.stringify(enrollments));
+
+  // Create student account record
+  const enr = enrollments.find(e => e.id === id)!;
+  const account: StudentAccount = {
+    student_id:        `enr_${id}`,
+    full_name:         enr.full_name,
+    email:             enr.email,
+    dob:               enr.dob,
+    school:            enr.school,
+    grade:             enr.grade,
+    assigned_class_id: opts.assigned_class_id,
+    parent_phone:      enr.parent_phone,
+    username:          opts.account_username,
+    created_at:        new Date().toISOString(),
+  };
+  const accounts = getStudentAccounts();
+  localStorage.setItem(ACCOUNT_KEY, JSON.stringify([
+    ...accounts.filter(a => a.student_id !== account.student_id),
+    account,
+  ]));
+}
+
+export function rejectEnrollment(id: string, reason?: string): void {
+  if (typeof window === "undefined") return;
+  const enrollments = getEnrollments().map(e =>
+    e.id === id
+      ? { ...e, status: "rejected" as EnrollmentStatus, reject_reason: reason, reviewed_at: new Date().toISOString() }
+      : e
+  );
+  localStorage.setItem(ENROLL_KEY, JSON.stringify(enrollments));
+}
+
+export function getStudentAccounts(): StudentAccount[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(ACCOUNT_KEY);
+    return raw ? (JSON.parse(raw) as StudentAccount[]) : [];
+  } catch { return []; }
+}
+
+// Returns the account for the demo student (s1) if an approved enrollment exists,
+// otherwise null (caller falls back to MOCK_STUDENTS).
+export function getCurrentStudentAccount(): StudentAccount | null {
+  // In a real app this would use session/auth. Here we just return the most
+  // recently approved account as a demo stand-in.
+  const accounts = getStudentAccounts();
+  return accounts.length > 0 ? accounts[accounts.length - 1] : null;
+}

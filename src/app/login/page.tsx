@@ -234,9 +234,12 @@ export default function LoginPage() {
             </form>
           )}
 
-          <p className="text-white/40 text-xs mt-8">
-            © 2025 TutorHub · Nền tảng Hybrid Learning
-          </p>
+          <div className="mt-8 flex items-center justify-between">
+            <p className="text-white/40 text-xs">© 2025 TutorHub · Nền tảng Hybrid Learning</p>
+            <Link href="/enroll" className="text-xs text-indigo-300 hover:text-white underline underline-offset-2 transition-colors">
+              Đăng ký qua form mới →
+            </Link>
+          </div>
         </div>
       </div>
 

@@ -58,6 +58,7 @@ const navConfig: Record<UserRole, NavItem[]> = {
     { label: "Giáo viên", href: "/admin/teachers", icon: Users },
     { label: "Lớp học", href: "/admin/classes", icon: BookOpen },
     { label: "Tài liệu", href: "/admin/materials", icon: BookMarked },
+    { label: "Đăng ký HV", href: "/admin/enrollments", icon: GraduationCap },
     { label: "Giao dịch", href: "/admin/transactions", icon: CheckSquare },
     { label: "Thanh toán", href: "/admin/payments", icon: DollarSign },
     { label: "Báo cáo", href: "/admin/reports", icon: BarChart3 },
