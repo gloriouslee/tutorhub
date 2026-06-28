@@ -2,329 +2,392 @@
 
 import { useState } from "react";
 import PortalLayout from "@/components/layout/PortalLayout";
-import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
-import { SectionHeader } from "@/components/shared";
-import { MOCK_CLASS_MATERIALS, MOCK_CLASSES } from "@/lib/mock-data";
-import { 
-  BookMarked, Download, Search, Filter, Lock, 
-  PlayCircle, FileText, ExternalLink, ShoppingCart, 
-  X, CheckCircle2, Star, Image as ImageIcon 
+import { MOCK_CLASSES } from "@/lib/mock-data";
+import {
+  PlayCircle, FileText, Pencil, Download, CheckCircle2,
+  ChevronDown, ChevronRight, BookOpen, Clock, BarChart3,
+  MessageSquare, StickyNote, Check,
 } from "lucide-react";
 
-// Mock data for Premium Marketplace (since MOCK_CLASS_MATERIALS doesn't have prices)
-const PREMIUM_MATERIALS = [
-  { id: "p1", title: "Khóa luyện đề Toán Vận dụng cao (10 đề có đáp án chi tiết)", type: "bundle", subject: "Toán học", price: 150000, purchased: false, rating: 4.8, students: 320, cover: "gradient-1" },
-  { id: "p2", title: "Kho bí kíp Hình học Oxyz (Kèm file bài giảng)", type: "bundle", subject: "Toán học", price: 250000, purchased: true, rating: 4.9, students: 512, cover: "gradient-2" },
-  { id: "p3", title: "Bộ 50 video mẹo giải Hệ phương trình", type: "video", subject: "Đại Số", price: 100000, purchased: false, rating: 4.7, students: 215, cover: "gradient-3" },
-  { id: "p4", title: "Tổng ôn Vật Lý Olympic (Tài liệu độc quyền)", type: "pdf", subject: "Vật lý", price: 90000, purchased: false, rating: 4.9, students: 430, cover: "gradient-4" },
+// ── Course data ──────────────────────────────────────────────────────────────
+
+type LessonType = "video" | "pdf" | "exercise";
+type LessonStatus = "done" | "active" | "locked";
+
+interface Attachment {
+  name: string;
+  size: string;
+  type: "pdf" | "exercise";
+}
+
+interface Lesson {
+  id: string;
+  title: string;
+  type: LessonType;
+  duration?: string;
+  status: LessonStatus;
+  description?: string;
+  attachments?: Attachment[];
+  videoUrl?: string;
+}
+
+interface Chapter {
+  id: string;
+  title: string;
+  lessons: Lesson[];
+}
+
+interface Course {
+  classId: string;
+  chapters: Chapter[];
+}
+
+const COURSES: Course[] = [
+  {
+    classId: "c1",
+    chapters: [
+      {
+        id: "ch1",
+        title: "Hàm số & đồ thị",
+        lessons: [
+          {
+            id: "l1", title: "Lý thuyết hàm số bậc 3", type: "video",
+            duration: "18:40", status: "done",
+            description: "Giới thiệu tổng quan về hàm số bậc 3, hướng dẫn vẽ đồ thị và nhận dạng dạng bài.",
+            attachments: [
+              { name: "Lý thuyết hàm số bậc 3.pdf", size: "2.4 MB", type: "pdf" },
+            ],
+          },
+          {
+            id: "l2", title: "Công thức tổng hợp hàm số", type: "pdf",
+            status: "done",
+            description: "Bảng tổng hợp toàn bộ công thức hàm số cần nhớ cho kỳ thi THPT.",
+            attachments: [
+              { name: "Công thức tổng hợp.pdf", size: "1.2 MB", type: "pdf" },
+            ],
+          },
+          {
+            id: "l3", title: "Bài tập hàm số có hướng dẫn", type: "video",
+            duration: "24:15", status: "active",
+            description: "Giải chi tiết 15 dạng bài từ cơ bản đến nâng cao về hàm số bậc 3.",
+            attachments: [
+              { name: "Bài tập tự luyện — 20 câu.pdf", size: "1.1 MB", type: "exercise" },
+              { name: "Đáp án chi tiết.pdf", size: "0.8 MB", type: "pdf" },
+            ],
+          },
+          {
+            id: "l4", title: "Kiểm tra chương 1", type: "exercise",
+            status: "locked",
+            description: "Bài kiểm tra 30 phút — 15 câu trắc nghiệm và 2 câu tự luận.",
+            attachments: [
+              { name: "Đề kiểm tra chương 1.pdf", size: "0.6 MB", type: "exercise" },
+            ],
+          },
+        ],
+      },
+      {
+        id: "ch2",
+        title: "Đạo hàm & ứng dụng",
+        lessons: [
+          { id: "l5", title: "Định nghĩa và quy tắc tính đạo hàm", type: "video", duration: "22:30", status: "locked" },
+          { id: "l6", title: "Ứng dụng đạo hàm — cực trị", type: "video", duration: "31:10", status: "locked" },
+          { id: "l7", title: "Tài liệu lý thuyết đạo hàm", type: "pdf", status: "locked" },
+          { id: "l8", title: "Bài tập ứng dụng đạo hàm", type: "exercise", status: "locked" },
+        ],
+      },
+      {
+        id: "ch3",
+        title: "Tích phân",
+        lessons: [
+          { id: "l9", title: "Nguyên hàm và tích phân bất định", type: "video", duration: "28:00", status: "locked" },
+          { id: "l10", title: "Tích phân xác định", type: "video", duration: "25:45", status: "locked" },
+          { id: "l11", title: "Ứng dụng tính diện tích", type: "video", duration: "19:20", status: "locked" },
+          { id: "l12", title: "Bộ đề tự luyện tích phân", type: "exercise", status: "locked" },
+        ],
+      },
+      {
+        id: "ch4",
+        title: "Hình học không gian",
+        lessons: [
+          { id: "l13", title: "Mặt phẳng và đường thẳng trong không gian", type: "video", duration: "33:15", status: "locked" },
+          { id: "l14", title: "Hình học tọa độ Oxyz", type: "video", duration: "40:00", status: "locked" },
+          { id: "l15", title: "Tài liệu hình học không gian", type: "pdf", status: "locked" },
+        ],
+      },
+    ],
+  },
 ];
 
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function LessonIcon({ type, size = 16 }: { type: LessonType; size?: number }) {
+  const cls = `h-${size === 16 ? 4 : 5} w-${size === 16 ? 4 : 5}`;
+  if (type === "video") return <PlayCircle className={cls} />;
+  if (type === "pdf") return <FileText className={cls} />;
+  return <Pencil className={cls} />;
+}
+
+function TypeBadge({ type }: { type: LessonType }) {
+  if (type === "video") return <Badge className="text-[10px] px-1.5 py-0 bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 border-0">Video</Badge>;
+  if (type === "pdf") return <Badge className="text-[10px] px-1.5 py-0 bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 border-0">PDF</Badge>;
+  return <Badge className="text-[10px] px-1.5 py-0 bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 border-0">Bài tập</Badge>;
+}
+
+// ── Component ────────────────────────────────────────────────────────────────
+
 export default function StudentMaterialsPage() {
-  const [activeTab, setActiveTab] = useState<"class" | "premium">("class");
-  const [searchQuery, setSearchQuery] = useState("");
-  const [selectedMat, setSelectedMat] = useState<any>(null);
-  const [modalType, setModalType] = useState<"preview" | "purchase" | null>(null);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [premiumData, setPremiumData] = useState(PREMIUM_MATERIALS);
+  const myClass = MOCK_CLASSES[0];
+  const course = COURSES[0];
 
-  const formatVND = (amount: number) => {
-    return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(amount);
-  };
+  const allLessons = course.chapters.flatMap(ch => ch.lessons);
+  const doneCount = allLessons.filter(l => l.status === "done").length;
+  const progress = Math.round((doneCount / allLessons.length) * 100);
 
-  const getFileIcon = (type: string) => {
-    switch (type) {
-      case "video": return <PlayCircle className="h-6 w-6" />;
-      case "bundle": return <BookMarked className="h-6 w-6" />;
-      case "image": return <ImageIcon className="h-6 w-6" />;
-      default: return <FileText className="h-6 w-6" />;
-    }
-  };
-
-  // Lọc tài liệu theo lớp (mặc định s1 học c1, c2)
-  const classMaterials = MOCK_CLASS_MATERIALS.filter(m => ["c1", "c2"].includes(m.class_id));
-  
-  const filteredClassMaterials = classMaterials.filter(m => 
-    m.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    m.description.toLowerCase().includes(searchQuery.toLowerCase())
+  const activeLesson = allLessons.find(l => l.status === "active") ?? allLessons[0];
+  const [selectedId, setSelectedId] = useState(activeLesson.id);
+  const [openChapters, setOpenChapters] = useState<string[]>([course.chapters[0].id]);
+  const [activeTab, setActiveTab] = useState<"files" | "notes" | "discuss">("files");
+  const [completedIds, setCompletedIds] = useState<string[]>(
+    allLessons.filter(l => l.status === "done").map(l => l.id)
   );
 
-  const filteredPremiumMaterials = premiumData.filter(m => 
-    m.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    m.subject.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const selected = allLessons.find(l => l.id === selectedId)!;
+  const selectedIdx = allLessons.findIndex(l => l.id === selectedId);
+  const prevLesson = allLessons[selectedIdx - 1];
+  const nextLesson = allLessons[selectedIdx + 1];
 
-  const handlePurchase = () => {
-    setIsProcessing(true);
-    setTimeout(() => {
-      setPremiumData(prev => prev.map(p => p.id === selectedMat.id ? { ...p, purchased: true } : p));
-      setIsProcessing(false);
-      setModalType(null);
-      setSelectedMat(null);
-    }, 1500);
+  const toggleChapter = (id: string) =>
+    setOpenChapters(prev => prev.includes(id) ? prev.filter(c => c !== id) : [...prev, id]);
+
+  const markDone = () => {
+    if (!completedIds.includes(selectedId)) setCompletedIds(prev => [...prev, selectedId]);
+    if (nextLesson) setSelectedId(nextLesson.id);
   };
+
+  const isDone = (id: string) => completedIds.includes(id);
 
   return (
-    <PortalLayout role="student" userName="Nguyễn Anh Tuấn" pageTitle="Tài liệu">
-      <div className="space-y-8 max-w-6xl mx-auto pb-10">
-        
-        {/* Banner */}
-        <div className="relative rounded-3xl overflow-hidden bg-gradient-to-r from-indigo-900 to-purple-900 p-8 sm:p-12 text-white shadow-xl">
-          <div className="absolute top-0 right-0 p-8 opacity-20 -translate-y-1/4 translate-x-1/4">
-            <BookMarked className="w-64 h-64" />
-          </div>
-          <div className="relative z-10 max-w-2xl">
-            <h1 className="text-3xl sm:text-4xl font-black tracking-tight mb-4">Kho Tài Liệu Điện Tử</h1>
-            <p className="text-indigo-100 text-lg mb-8 leading-relaxed">
-              Truy cập miễn phí tài liệu từ các lớp đang học hoặc mua thêm các gói tài liệu chuyên sâu để nâng cao thành tích học tập.
-            </p>
-            <div className="flex bg-white/10 backdrop-blur-md p-1.5 rounded-xl w-fit border border-white/20">
-              <button
-                onClick={() => setActiveTab("class")}
-                className={`px-6 py-2.5 rounded-lg text-sm font-bold transition-all ${
-                  activeTab === "class" ? "bg-white text-indigo-900 shadow-md" : "text-white/80 hover:text-white hover:bg-white/5"
-                }`}
-              >
-                Tài liệu của Lớp
-              </button>
-              <button
-                onClick={() => setActiveTab("premium")}
-                className={`px-6 py-2.5 rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2 ${
-                  activeTab === "premium" ? "bg-gradient-to-r from-amber-400 to-orange-500 text-white shadow-md" : "text-white/80 hover:text-white hover:bg-white/5"
-                }`}
-              >
-                Tài liệu Cao cấp <Lock className="h-3.5 w-3.5" />
-              </button>
+    <PortalLayout role="student" userName="" pageTitle="Tài liệu">
+      <div className="max-w-7xl mx-auto space-y-4">
+
+        {/* Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-1">
+          <div>
+            <h1 className="text-xl font-semibold text-foreground">{myClass.class_name}</h1>
+            <div className="flex items-center gap-4 mt-1 text-sm text-muted-foreground">
+              <span className="flex items-center gap-1.5"><PlayCircle className="h-3.5 w-3.5" />{allLessons.filter(l => l.type === "video").length} video</span>
+              <span className="flex items-center gap-1.5"><FileText className="h-3.5 w-3.5" />{allLessons.filter(l => l.type === "pdf").length} PDF</span>
+              <span className="flex items-center gap-1.5"><Pencil className="h-3.5 w-3.5" />{allLessons.filter(l => l.type === "exercise").length} bài tập</span>
             </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="text-sm text-muted-foreground">{doneCount}/{allLessons.length} bài</div>
+            <div className="w-32 h-2 bg-muted rounded-full overflow-hidden">
+              <div className="h-full bg-primary rounded-full transition-all" style={{ width: `${progress}%` }} />
+            </div>
+            <span className="text-sm font-medium text-primary">{progress}%</span>
           </div>
         </div>
 
-        {/* Search & Filter */}
-        <div className="flex flex-col sm:flex-row gap-4 justify-between items-center bg-card p-3 rounded-2xl border border-border shadow-sm">
-          <div className="flex items-center gap-3 w-full sm:w-auto px-1">
-            <div className="relative flex-1 sm:w-80">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input 
-                className="pl-9 h-11 bg-muted/50 border-0 rounded-xl" 
-                placeholder={activeTab === "class" ? "Tìm kiếm tài liệu bài giảng..." : "Tìm kiếm khóa học, bộ đề..."} 
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
-            </div>
-            <Button size="icon" variant="outline" className="h-11 w-11 shrink-0 rounded-xl border-border/50 bg-muted/50">
-              <Filter className="h-5 w-5 text-muted-foreground" />
-            </Button>
-          </div>
-          <div className="text-sm font-semibold text-muted-foreground px-3">
-            Hiển thị {activeTab === "class" ? filteredClassMaterials.length : filteredPremiumMaterials.length} kết quả
-          </div>
-        </div>
+        {/* Main layout */}
+        <div className="flex gap-0 border border-border rounded-xl overflow-hidden bg-card" style={{ minHeight: "600px" }}>
 
-        {/* Tab 1: Class Materials */}
-        {activeTab === "class" && (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-            {filteredClassMaterials.map((mat, i) => {
-              const relatedClass = MOCK_CLASSES.find(c => c.id === mat.class_id);
+          {/* Sidebar */}
+          <div className="w-72 shrink-0 border-r border-border flex flex-col bg-muted/20 overflow-y-auto">
+            {course.chapters.map((chapter, ci) => {
+              const isOpen = openChapters.includes(chapter.id);
+              const chDone = chapter.lessons.filter(l => isDone(l.id)).length;
               return (
-                <Card key={mat.id} className="group hover:border-primary/50 hover:shadow-lg transition-all animate-fade-in flex flex-col border-border/60" style={{ animationDelay: `${i * 50}ms` }}>
-                  <CardContent className="p-5 flex-1 flex flex-col">
-                    <div className="flex justify-between items-start mb-4">
-                      <div className="h-12 w-12 rounded-2xl bg-primary/10 text-primary flex items-center justify-center shadow-inner">
-                        {getFileIcon(mat.file_type)}
-                      </div>
-                      <Badge variant="outline" className="text-[10px] bg-primary/5 border-primary/20 text-primary font-bold">{mat.file_type.toUpperCase()}</Badge>
+                <div key={chapter.id}>
+                  <button
+                    onClick={() => toggleChapter(chapter.id)}
+                    className="w-full flex items-center gap-2 px-4 py-3 text-left hover:bg-muted/40 border-b border-border/50 transition-colors"
+                  >
+                    <span className="text-xs text-muted-foreground font-medium min-w-[20px]">C{ci + 1}</span>
+                    <span className="flex-1 text-sm font-medium text-foreground truncate">{chapter.title}</span>
+                    <span className="text-xs text-muted-foreground mr-1">{chDone}/{chapter.lessons.length}</span>
+                    {isOpen ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" /> : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
+                  </button>
+
+                  {isOpen && (
+                    <div className="py-1">
+                      {chapter.lessons.map(lesson => {
+                        const done = isDone(lesson.id);
+                        const isSelected = selectedId === lesson.id;
+                        return (
+                          <button
+                            key={lesson.id}
+                            onClick={() => lesson.status !== "locked" || done ? setSelectedId(lesson.id) : null}
+                            className={`w-full flex items-center gap-2.5 px-4 py-2.5 text-left transition-colors
+                              ${isSelected ? "bg-primary/10 text-primary" : "hover:bg-muted/40 text-foreground/80"}
+                              ${lesson.status === "locked" && !done ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}
+                            `}
+                          >
+                            <div className={`w-2 h-2 rounded-full shrink-0 ${done ? "bg-green-500" : isSelected ? "bg-primary" : "border border-muted-foreground"}`} />
+                            <span className="flex-1 text-xs leading-snug line-clamp-2">{lesson.title}</span>
+                            <div className="shrink-0"><TypeBadge type={lesson.type} /></div>
+                          </button>
+                        );
+                      })}
                     </div>
-                    
-                    <h3 className="font-bold text-foreground text-base line-clamp-2 mb-2 group-hover:text-primary transition-colors">
-                      {mat.title}
-                    </h3>
-                    
-                    <p className="text-xs text-muted-foreground line-clamp-2 mb-4 leading-relaxed flex-1">
-                      {mat.description}
-                    </p>
-                    
-                    <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] font-medium text-muted-foreground mb-5 bg-muted/30 p-2 rounded-lg">
-                      <span className="text-foreground">{relatedClass?.class_name || "Môn học"}</span>
-                      <span>{mat.file_size}</span>
-                    </div>
-                    
-                    <div className="mt-auto pt-4 border-t border-border/50 flex gap-3">
-                      <Button 
-                        size="sm" 
-                        variant="outline" 
-                        className="flex-1 h-9 rounded-lg font-semibold hover:bg-primary/5"
-                        onClick={() => { setSelectedMat(mat); setModalType("preview"); }}
-                      >
-                        <ExternalLink className="h-3.5 w-3.5 mr-1.5" /> Xem
-                      </Button>
-                      <Button size="sm" variant="gradient" className="flex-1 h-9 rounded-lg font-semibold shadow-md">
-                        <Download className="h-3.5 w-3.5 mr-1.5" /> Tải về
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
+                  )}
+                </div>
               );
             })}
           </div>
-        )}
 
-        {/* Tab 2: Premium Materials */}
-        {activeTab === "premium" && (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-            {filteredPremiumMaterials.map((mat, i) => (
-              <Card key={mat.id} className={`group transition-all animate-fade-in flex flex-col overflow-hidden border-2 ${mat.purchased ? 'border-emerald-500/30 shadow-emerald-500/10 shadow-lg' : 'border-border/50 hover:border-amber-500/50 hover:shadow-xl'}`} style={{ animationDelay: `${i * 50}ms` }}>
-                {/* Visual Cover */}
-                <div className={`h-28 w-full relative overflow-hidden ${
-                  mat.cover === 'gradient-1' ? 'bg-gradient-to-r from-violet-500 to-purple-500' :
-                  mat.cover === 'gradient-2' ? 'bg-gradient-to-r from-cyan-500 to-blue-500' :
-                  mat.cover === 'gradient-3' ? 'bg-gradient-to-r from-rose-400 to-red-500' :
-                  'bg-gradient-to-r from-amber-400 to-orange-500'
-                }`}>
-                  <div className="absolute inset-0 opacity-20 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')]" />
-                  {mat.purchased && (
-                    <div className="absolute top-3 right-3 bg-white/20 backdrop-blur-md border border-white/30 text-white text-[10px] font-bold uppercase px-3 py-1 rounded-full flex items-center gap-1">
-                      <CheckCircle2 className="h-3 w-3" /> Đã sở hữu
+          {/* Content */}
+          <div className="flex-1 flex flex-col min-w-0">
+
+            {/* Video area */}
+            {selected.type === "video" ? (
+              <div className="bg-black flex items-center justify-center relative" style={{ height: "280px" }}>
+                <div className="flex flex-col items-center gap-3">
+                  <div className="w-14 h-14 rounded-full border-2 border-white/40 bg-white/10 flex items-center justify-center cursor-pointer hover:bg-white/20 transition-colors">
+                    <PlayCircle className="h-7 w-7 text-white ml-0.5" />
+                  </div>
+                  <span className="text-white/60 text-sm">{selected.title}</span>
+                </div>
+                {selected.duration && (
+                  <div className="absolute bottom-3 right-4 flex items-center gap-1.5 text-white/50 text-xs">
+                    <Clock className="h-3 w-3" />
+                    {selected.duration}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="flex items-center justify-center bg-muted/30 border-b border-border" style={{ height: "140px" }}>
+                <div className="flex flex-col items-center gap-2 text-muted-foreground">
+                  <LessonIcon type={selected.type} size={20} />
+                  <span className="text-sm">{selected.type === "pdf" ? "Tài liệu PDF" : "Bài tập thực hành"}</span>
+                </div>
+              </div>
+            )}
+
+            {/* Info */}
+            <div className="flex-1 flex flex-col overflow-y-auto">
+              <div className="px-6 pt-5 pb-2">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <div className="flex items-center gap-2 mb-1">
+                      <LessonIcon type={selected.type} size={16} />
+                      <h2 className="text-base font-semibold text-foreground">{selected.title}</h2>
+                    </div>
+                    {selected.description && (
+                      <p className="text-sm text-muted-foreground leading-relaxed">{selected.description}</p>
+                    )}
+                  </div>
+                  {isDone(selectedId) && (
+                    <div className="flex items-center gap-1.5 text-green-600 text-sm font-medium shrink-0">
+                      <CheckCircle2 className="h-4 w-4" /> Đã hoàn thành
                     </div>
                   )}
-                  <div className="absolute bottom-3 left-4 text-white/90">
-                    {getFileIcon(mat.type)}
-                  </div>
                 </div>
+              </div>
 
-                <CardContent className="p-6 flex-1 flex flex-col relative z-10 bg-card">
-                  <div className="flex justify-between items-start mb-2">
-                    <Badge variant="outline" className="text-xs bg-muted/50 border-border">{mat.subject}</Badge>
-                    {!mat.purchased && <span className="font-black text-lg text-amber-600 dark:text-amber-500">{formatVND(mat.price)}</span>}
-                  </div>
-                  
-                  <h3 className="font-bold text-foreground text-lg line-clamp-2 mb-3 mt-1 group-hover:text-amber-600 transition-colors">
-                    {mat.title}
-                  </h3>
-                  
-                  <div className="flex items-center gap-4 text-sm text-muted-foreground mb-6 font-medium mt-auto">
-                    <span className="flex items-center gap-1.5 text-amber-500">
-                      <Star className="h-4 w-4 fill-amber-500" /> {mat.rating}
-                    </span>
-                    <span className="w-1 h-1 rounded-full bg-border" />
-                    <span>{mat.students} lượt mua</span>
-                  </div>
-                  
-                  <div className="pt-4 border-t border-border">
-                    {mat.purchased ? (
-                      <div className="flex gap-3">
-                        <Button size="sm" variant="outline" className="flex-1 h-10 font-bold text-emerald-600 border-emerald-200 hover:bg-emerald-50 dark:hover:bg-emerald-950/30">
-                          <ExternalLink className="h-4 w-4 mr-2" /> Học ngay
-                        </Button>
-                        <Button size="sm" className="flex-1 h-10 font-bold bg-emerald-500 hover:bg-emerald-600 text-white shadow-md">
-                          <Download className="h-4 w-4 mr-2" /> Tải về
-                        </Button>
-                      </div>
+              {/* Tabs */}
+              <div className="flex border-b border-border px-6 mt-2">
+                {[
+                  { key: "files", label: "Tài liệu kèm theo", icon: BookOpen },
+                  { key: "notes", label: "Ghi chú", icon: StickyNote },
+                  { key: "discuss", label: "Thảo luận", icon: MessageSquare },
+                ].map(tab => (
+                  <button
+                    key={tab.key}
+                    onClick={() => setActiveTab(tab.key as typeof activeTab)}
+                    className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                      activeTab === tab.key
+                        ? "border-primary text-primary"
+                        : "border-transparent text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    <tab.icon className="h-3.5 w-3.5" />
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex-1 px-6 py-4">
+                {activeTab === "files" && (
+                  <div className="space-y-2">
+                    {selected.attachments && selected.attachments.length > 0 ? (
+                      selected.attachments.map((att, i) => (
+                        <div key={i} className="flex items-center gap-3 p-3 rounded-lg border border-border bg-muted/20 hover:bg-muted/40 transition-colors">
+                          <div className={`w-8 h-8 rounded-md flex items-center justify-center shrink-0 ${att.type === "exercise" ? "bg-green-100 dark:bg-green-900/30" : "bg-red-100 dark:bg-red-900/30"}`}>
+                            {att.type === "exercise"
+                              ? <Pencil className="h-4 w-4 text-green-600 dark:text-green-400" />
+                              : <FileText className="h-4 w-4 text-red-600 dark:text-red-400" />
+                            }
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-foreground truncate">{att.name}</p>
+                            <p className="text-xs text-muted-foreground">{att.size}</p>
+                          </div>
+                          <Button size="sm" variant="outline" className="h-8 gap-1.5 text-xs shrink-0">
+                            <Download className="h-3.5 w-3.5" /> Tải về
+                          </Button>
+                        </div>
+                      ))
                     ) : (
-                      <div className="flex gap-3">
-                        <Button size="sm" variant="outline" className="flex-1 h-10 font-bold">
-                          Xem thử
-                        </Button>
-                        <Button 
-                          size="sm" 
-                          className="flex-[2] h-10 font-bold bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white shadow-md shadow-orange-500/20"
-                          onClick={() => { setSelectedMat(mat); setModalType("purchase"); }}
-                        >
-                          <ShoppingCart className="h-4 w-4 mr-2" /> Mua tài liệu
-                        </Button>
+                      <div className="text-center py-8 text-muted-foreground text-sm">
+                        Không có tài liệu đính kèm
                       </div>
                     )}
                   </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        )}
-      </div>
+                )}
 
-      {/* Modals */}
-      {modalType && selectedMat && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
-          <Card className="w-full max-w-lg shadow-2xl border-0 overflow-hidden">
-            <div className={`p-6 text-white flex justify-between items-start ${
-              modalType === "preview" ? "bg-gradient-to-r from-primary to-purple-600" : "bg-gradient-to-r from-amber-500 to-orange-600"
-            }`}>
-              <div>
-                <h3 className="text-xl font-bold mb-1">
-                  {modalType === "preview" ? "Xem tài liệu" : "Xác nhận thanh toán"}
-                </h3>
-                <p className="text-white/80 text-sm font-medium line-clamp-1">{selectedMat.title}</p>
+                {activeTab === "notes" && (
+                  <textarea
+                    className="w-full h-32 rounded-lg border border-border bg-muted/20 px-3 py-2 text-sm resize-none outline-none focus:ring-2 focus:ring-primary text-foreground placeholder:text-muted-foreground"
+                    placeholder="Ghi chú của bạn về bài học này..."
+                  />
+                )}
+
+                {activeTab === "discuss" && (
+                  <div className="text-center py-8 text-muted-foreground text-sm">
+                    Chức năng thảo luận đang được phát triển
+                  </div>
+                )}
               </div>
-              <Button size="icon" variant="ghost" className="text-white hover:bg-white/20 rounded-full h-8 w-8" onClick={() => { setModalType(null); setSelectedMat(null); }}>
-                <X className="h-5 w-5" />
-              </Button>
+
+              {/* Navigation */}
+              <div className="flex items-center gap-2 px-6 pb-5 pt-2 border-t border-border">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5"
+                  disabled={!prevLesson}
+                  onClick={() => prevLesson && setSelectedId(prevLesson.id)}
+                >
+                  ← Bài trước
+                </Button>
+
+                <div className="flex-1 text-center text-xs text-muted-foreground">
+                  {selectedIdx + 1} / {allLessons.length}
+                </div>
+
+                {!isDone(selectedId) ? (
+                  <Button size="sm" className="gap-1.5" onClick={markDone}>
+                    <Check className="h-3.5 w-3.5" /> Đánh dấu hoàn thành
+                  </Button>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-1.5"
+                    disabled={!nextLesson}
+                    onClick={() => nextLesson && setSelectedId(nextLesson.id)}
+                  >
+                    Bài tiếp →
+                  </Button>
+                )}
+              </div>
             </div>
-            
-            <CardContent className="p-6">
-              {modalType === "preview" && (
-                <div className="space-y-6">
-                  <div className="aspect-video bg-muted/30 rounded-xl border border-border flex flex-col items-center justify-center">
-                    {getFileIcon(selectedMat.file_type || selectedMat.type)}
-                    <p className="text-sm font-medium text-muted-foreground mt-3">Bản xem trước tài liệu</p>
-                  </div>
-                  
-                  <div className="bg-muted/20 p-4 rounded-xl border border-border">
-                    <h4 className="font-bold text-sm mb-2 text-foreground">Chi tiết tệp</h4>
-                    <ul className="text-sm space-y-2 text-muted-foreground">
-                      <li className="flex justify-between"><span className="font-medium">Tên file:</span> <span>{selectedMat.file_url?.split('/').pop() || 'tai_lieu.pdf'}</span></li>
-                      <li className="flex justify-between"><span className="font-medium">Dung lượng:</span> <span>{selectedMat.file_size || 'N/A'}</span></li>
-                      <li className="flex justify-between"><span className="font-medium">Ngày đăng:</span> <span>{new Date(selectedMat.created_at || Date.now()).toLocaleDateString('vi-VN')}</span></li>
-                    </ul>
-                  </div>
-                  
-                  <div className="flex gap-3">
-                    <Button variant="outline" className="flex-1 font-bold" onClick={() => setModalType(null)}>Đóng</Button>
-                    <Button variant="gradient" className="flex-1 font-bold">
-                      <Download className="h-4 w-4 mr-2" /> Tải file gốc
-                    </Button>
-                  </div>
-                </div>
-              )}
-
-              {modalType === "purchase" && (
-                <div className="space-y-6">
-                  <div className="bg-amber-50 dark:bg-amber-950/20 p-4 rounded-xl border border-amber-200 dark:border-amber-900/50">
-                    <h4 className="text-amber-800 dark:text-amber-500 font-bold mb-2">Thông tin hóa đơn</h4>
-                    <div className="flex justify-between items-center text-sm font-medium mb-1">
-                      <span className="text-foreground/80">Sản phẩm:</span>
-                      <span className="text-foreground max-w-[200px] truncate">{selectedMat.title}</span>
-                    </div>
-                    <div className="flex justify-between items-center text-sm font-medium mb-3 pb-3 border-b border-amber-200 dark:border-amber-900/50">
-                      <span className="text-foreground/80">Hình thức:</span>
-                      <span className="text-foreground">Tài liệu điện tử (File/Video)</span>
-                    </div>
-                    <div className="flex justify-between items-end">
-                      <span className="font-bold text-foreground">Tổng thanh toán:</span>
-                      <span className="text-2xl font-black text-amber-600 dark:text-amber-500">{formatVND(selectedMat.price)}</span>
-                    </div>
-                  </div>
-
-                  <p className="text-xs text-muted-foreground text-center">
-                    Bằng việc xác nhận, số tiền sẽ được trừ vào số dư tài khoản của bạn.
-                  </p>
-
-                  <div className="flex gap-3">
-                    <Button variant="outline" className="flex-1 font-bold" onClick={() => setModalType(null)}>Hủy bỏ</Button>
-                    <Button 
-                      className="flex-1 font-bold bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white border-0"
-                      onClick={handlePurchase}
-                      disabled={isProcessing}
-                    >
-                      {isProcessing ? "Đang xử lý..." : "Xác nhận mua"}
-                    </Button>
-                  </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+          </div>
         </div>
-      )}
+      </div>
     </PortalLayout>
   );
 }
