@@ -661,7 +661,7 @@ function BrowseView({ onSelectCourse }: { onSelectCourse: (c: OwnedCourse) => vo
                             )}
                           </div>
                           <Button size="sm" className="h-8 gap-1.5 text-xs"
-                            onClick={() => router.push(`/student/checkout?pkg=${pkg.id}`)}>
+                            onClick={() => router.push(`/student/payments?pkg=${pkg.id}`)}>
                             <ShoppingCart className="h-3.5 w-3.5" /> Mua
                           </Button>
                         </div>
@@ -695,7 +695,7 @@ function BrowseView({ onSelectCourse }: { onSelectCourse: (c: OwnedCourse) => vo
           pkg={selectedPkg}
           onClose={() => setSelectedPkg(null)}
           onPreview={lesson => setPreviewLesson({ lesson, pkg: selectedPkg })}
-          onBuy={() => { setSelectedPkg(null); router.push(`/student/checkout?pkg=${selectedPkg.id}`); }}
+          onBuy={() => { setSelectedPkg(null); router.push(`/student/payments?pkg=${selectedPkg.id}`); }}
         />
       )}
       {previewLesson && (
