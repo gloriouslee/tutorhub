@@ -1,20 +1,20 @@
-"use client";
-
 import PortalLayout from "@/components/layout/PortalLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { SectionHeader } from "@/components/shared";
 import { MOCK_NOTIFICATIONS } from "@/lib/mock-data";
-import { Bell, Check, CheckCircle2, AlertTriangle, Info, MessageSquare } from "lucide-react";
+import { Check, CheckCircle2, AlertTriangle, Info, MessageSquare } from "lucide-react";
 import { formatDate } from "@/lib/utils";
+import { getCurrentUserName } from "@/lib/auth";
 
-export default function TeacherNotificationsPage() {
+export default async function TeacherNotificationsPage() {
+  const userName = await getCurrentUserName();
   const notifications = MOCK_NOTIFICATIONS.filter(
     (n) => n.target_role === "teacher" || n.target_role === "all"
   );
 
   return (
-    <PortalLayout role="teacher" userName="Tiến sĩ Sarah Mitchell" pageTitle="Thông báo hệ thống">
+    <PortalLayout role="teacher" userName={userName} pageTitle="Thông báo hệ thống">
       <div className="space-y-6 max-w-4xl mx-auto">
         <SectionHeader 
           title="Tất cả thông báo" 
@@ -33,13 +33,13 @@ export default function TeacherNotificationsPage() {
             let Icon = Info;
             let iconColorClass = "text-blue-500 bg-blue-100 dark:bg-blue-900/30";
             
-            if (n.type === "system") {
+            if (n.target_role === "admin") {
               Icon = AlertTriangle;
               iconColorClass = "text-amber-500 bg-amber-100 dark:bg-amber-900/30";
-            } else if (n.type === "homework") {
+            } else if (n.target_role === "student") {
               Icon = CheckCircle2;
               iconColorClass = "text-emerald-500 bg-emerald-100 dark:bg-emerald-900/30";
-            } else if (n.type === "message") {
+            } else if (n.target_role === "parent") {
               Icon = MessageSquare;
               iconColorClass = "text-purple-500 bg-purple-100 dark:bg-purple-900/30";
             }
@@ -70,11 +70,6 @@ export default function TeacherNotificationsPage() {
                       {n.content}
                     </p>
                     
-                    {n.link && (
-                      <Button size="sm" variant="link" className="px-0 h-auto mt-2 text-xs">
-                        Xem chi tiết &rarr;
-                      </Button>
-                    )}
                   </div>
                   
                   {isUnread && (
