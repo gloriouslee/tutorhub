@@ -12,29 +12,38 @@ import { LearningModeBadge, SectionHeader, ProgressBar } from "@/components/shar
 import {
   MOCK_CLASSES, MOCK_TEACHERS, MOCK_CLASS_MATERIALS, MOCK_LECTURES, MOCK_CLASS_NOTES, MOCK_STUDENTS
 } from "@/lib/mock-data";
-import { getStudentComments, saveStudentComment } from "@/lib/storage";
 import {
-  BookOpen, Clock, Video, MapPin, Users, ArrowLeft, FileText, Download,
-  PlayCircle, StickyNote, Pin, Eye, ChevronRight, Image, Plus, Upload,
-  Calendar, Presentation, Tag, Trash2, Edit3, MoreVertical, X, Check,
-  GripVertical, Lock, Send, MessageSquare
+  getStudentComments, saveStudentComment,
+  getClassScheduleOverride, saveClassScheduleOverride,
+  pushScheduleNotification,
+} from "@/lib/storage";
+import { ClassSchedule } from "@/types";
+import {
+  BookOpen, Clock, Video, Users, ArrowLeft, FileText, Download,
+  PlayCircle, StickyNote, Pin, Eye, Plus, Upload,
+  Calendar, Presentation, Tag, Trash2, Edit3, X, Check,
+  Lock, Send, MessageSquare, Save, AlertCircle, CheckCircle2,
+  Image, Loader2
 } from "lucide-react";
 
-type TabKey = "overview" | "lectures" | "materials" | "notes" | "students";
+type TabKey = "overview" | "schedule" | "lectures" | "materials" | "notes" | "students";
 
 const TABS: { key: TabKey; label: string; icon: React.ElementType }[] = [
-  { key: "overview", label: "Tổng quan", icon: BookOpen },
-  { key: "lectures", label: "Bài giảng", icon: Presentation },
-  { key: "materials", label: "Tài liệu", icon: FileText },
-  { key: "notes", label: "Ghi chú", icon: StickyNote },
-  { key: "students", label: "Học viên", icon: Users },
+  { key: "overview",  label: "Tổng quan",  icon: BookOpen },
+  { key: "schedule",  label: "Lịch học",   icon: Calendar },
+  { key: "lectures",  label: "Bài giảng",  icon: Presentation },
+  { key: "materials", label: "Tài liệu",   icon: FileText },
+  { key: "notes",     label: "Ghi chú",    icon: StickyNote },
+  { key: "students",  label: "Học viên",   icon: Users },
 ];
 
+const DAYS_VI = ["Thứ 2", "Thứ 3", "Thứ 4", "Thứ 5", "Thứ 6", "Thứ 7", "Chủ nhật"];
+
 const CATEGORY_MAP: Record<string, { label: string; color: string }> = {
-  formula: { label: "Công thức", color: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" },
-  exam_prep: { label: "Ôn thi", color: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" },
-  summary: { label: "Tóm tắt", color: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" },
-  textbook: { label: "Giáo trình", color: "bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400" },
+  formula:  { label: "Công thức", color: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" },
+  exam_prep:{ label: "Ôn thi",    color: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" },
+  summary:  { label: "Tóm tắt",   color: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" },
+  textbook: { label: "Giáo trình",color: "bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400" },
 };
 
 function getFileIcon(type: string) {
@@ -44,16 +53,204 @@ function getFileIcon(type: string) {
 }
 
 const PACKAGE_TYPES: Record<string, { label: string; color: string; description: string }> = {
-  online: { label: "Gói Online", color: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400", description: "Chỉ join online (Miễn phí)" },
+  online:   { label: "Gói Online",   color: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",   description: "Chỉ join online (Miễn phí)" },
   advanced: { label: "Gói Nâng cao", color: "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400", description: "Online + Tài liệu nâng cao" },
-  offline: { label: "Gói Offline", color: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400", description: "Học tại trung tâm + Full tài liệu" },
+  offline:  { label: "Gói Offline",  color: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",  description: "Học tại trung tâm + Full tài liệu" },
 };
 
 function formatDate(dateStr: string) {
   return new Date(dateStr).toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit", year: "numeric" });
 }
 
-// Upload modal component
+// ── Schedule Editor ──────────────────────────────────────────────────────────
+
+function ScheduleEditor({ classId, className, initialSchedule }: {
+  classId: string;
+  className: string;
+  initialSchedule: ClassSchedule[];
+}) {
+  const [rows, setRows] = useState<ClassSchedule[]>(initialSchedule);
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "success" | "error">("idle");
+  const [notifMessage, setNotifMessage] = useState("");
+  const [showNotifField, setShowNotifField] = useState(false);
+  const [dirty, setDirty] = useState(false);
+
+  const updateRow = (idx: number, field: keyof ClassSchedule, value: string) => {
+    setRows(prev => prev.map((r, i) => i === idx ? { ...r, [field]: value } : r));
+    setDirty(true);
+  };
+
+  const addRow = () => {
+    setRows(prev => [...prev, { day: "Thứ 2", start_time: "08:00", end_time: "10:00" }]);
+    setDirty(true);
+  };
+
+  const removeRow = (idx: number) => {
+    setRows(prev => prev.filter((_, i) => i !== idx));
+    setDirty(true);
+  };
+
+  const handleSave = async () => {
+    setSaveState("saving");
+    try {
+      saveClassScheduleOverride(classId, rows);
+
+      // Push schedule-change notification for student portal
+      const scheduleText = rows.map(r => `${r.day} ${r.start_time}–${r.end_time}`).join(", ");
+      pushScheduleNotification({
+        class_id: classId,
+        class_name: className,
+        message: notifMessage.trim() || `Lịch học lớp ${className} đã được cập nhật: ${scheduleText}.`,
+      });
+
+      setSaveState("success");
+      setDirty(false);
+      setShowNotifField(false);
+      setNotifMessage("");
+      setTimeout(() => setSaveState("idle"), 3000);
+    } catch {
+      setSaveState("error");
+      setTimeout(() => setSaveState("idle"), 3000);
+    }
+  };
+
+  return (
+    <div className="space-y-5">
+      {/* Schedule rows */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm flex items-center gap-2">
+            <Calendar className="h-4 w-4 text-primary" /> Buổi học trong tuần
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {rows.map((row, i) => (
+            <div key={i} className="flex flex-col sm:flex-row items-start sm:items-center gap-3 p-3 bg-muted/30 rounded-xl border border-border/60">
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="text-xs font-bold text-muted-foreground w-5 text-center">{i + 1}</span>
+              </div>
+              <select
+                value={row.day}
+                onChange={e => updateRow(i, "day", e.target.value)}
+                className="h-9 flex-1 min-w-0 sm:w-36 sm:flex-none rounded-lg border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-primary"
+              >
+                {DAYS_VI.map(d => <option key={d} value={d}>{d}</option>)}
+              </select>
+              <div className="flex items-center gap-2 flex-1 sm:flex-none">
+                <input
+                  type="time"
+                  value={row.start_time}
+                  onChange={e => updateRow(i, "start_time", e.target.value)}
+                  className="h-9 w-28 rounded-lg border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-primary"
+                />
+                <span className="text-muted-foreground text-sm">–</span>
+                <input
+                  type="time"
+                  value={row.end_time}
+                  onChange={e => updateRow(i, "end_time", e.target.value)}
+                  className="h-9 w-28 rounded-lg border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-primary"
+                />
+              </div>
+              <button
+                onClick={() => removeRow(i)}
+                className="p-1.5 rounded-lg text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors ml-auto sm:ml-0"
+                title="Xoá buổi học"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+            </div>
+          ))}
+
+          <button
+            onClick={addRow}
+            className="flex items-center gap-2 text-sm text-primary hover:underline font-medium"
+          >
+            <Plus className="h-4 w-4" /> Thêm buổi học
+          </button>
+        </CardContent>
+      </Card>
+
+      {/* Notification message */}
+      {dirty && (
+        <Card className="border-amber-200 dark:border-amber-800/50 bg-amber-50/40 dark:bg-amber-900/10">
+          <CardContent className="p-4 space-y-3">
+            <div className="flex items-start gap-3">
+              <AlertCircle className="h-5 w-5 text-amber-500 shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <p className="text-sm font-medium text-amber-800 dark:text-amber-300">Lịch học có thay đổi</p>
+                <p className="text-xs text-amber-600 dark:text-amber-400 mt-0.5">
+                  Khi lưu, hệ thống sẽ đẩy thông báo đến toàn bộ học viên trong lớp.
+                </p>
+              </div>
+              <button
+                onClick={() => setShowNotifField(v => !v)}
+                className="text-xs text-amber-700 dark:text-amber-400 underline whitespace-nowrap"
+              >
+                {showNotifField ? "Ẩn" : "Tuỳ chỉnh nội dung"}
+              </button>
+            </div>
+
+            {showNotifField && (
+              <textarea
+                value={notifMessage}
+                onChange={e => setNotifMessage(e.target.value)}
+                rows={3}
+                placeholder={`VD: Lịch học lớp ${className} đã thay đổi từ tuần sau. Vui lòng kiểm tra lại...`}
+                className="w-full rounded-lg border border-amber-200 dark:border-amber-800 bg-background px-3 py-2 text-sm resize-none outline-none focus:ring-2 focus:ring-amber-400"
+              />
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Save button */}
+      <div className="flex items-center gap-3">
+        <Button
+          className="h-10 px-6"
+          disabled={!dirty || saveState === "saving"}
+          onClick={handleSave}
+        >
+          {saveState === "saving"
+            ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Đang lưu...</>
+            : <><Save className="h-4 w-4 mr-2" />Lưu & gửi thông báo</>}
+        </Button>
+
+        {saveState === "success" && (
+          <span className="flex items-center gap-1.5 text-sm text-emerald-600 font-medium">
+            <CheckCircle2 className="h-4 w-4" /> Đã lưu và gửi thông báo
+          </span>
+        )}
+        {saveState === "error" && (
+          <span className="flex items-center gap-1.5 text-sm text-red-500 font-medium">
+            <AlertCircle className="h-4 w-4" /> Lưu thất bại
+          </span>
+        )}
+      </div>
+
+      {/* Preview */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-xs text-muted-foreground uppercase tracking-wide">Lịch hiện tại (xem trước)</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          {rows.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Chưa có buổi học nào.</p>
+          ) : rows.map((s, i) => (
+            <div key={i} className="flex items-center justify-between p-3 bg-muted/30 rounded-xl border border-border/50">
+              <span className="flex items-center gap-2 text-sm font-medium">
+                <Clock className="h-4 w-4 text-primary" />{s.day}
+              </span>
+              <span className="text-sm text-muted-foreground">{s.start_time} – {s.end_time}</span>
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// ── Upload modal ─────────────────────────────────────────────────────────────
+
 function UploadModal({ type, onClose }: { type: "lecture" | "material" | "note"; onClose: () => void }) {
   const titles = { lecture: "Thêm bài giảng mới", material: "Tải lên tài liệu", note: "Viết ghi chú mới" };
   return (
@@ -108,8 +305,14 @@ function UploadModal({ type, onClose }: { type: "lecture" | "material" | "note";
   );
 }
 
-// Feedback modal component
-function FeedbackModal({ student, commentsList, onSave, onClose }: { student: any; commentsList: any[]; onSave: (text: string, date: string, rating: number) => void; onClose: () => void }) {
+// ── Feedback modal ───────────────────────────────────────────────────────────
+
+function FeedbackModal({ student, commentsList, onSave, onClose }: {
+  student: any;
+  commentsList: any[];
+  onSave: (text: string, date: string, rating: number) => void;
+  onClose: () => void;
+}) {
   const [text, setText] = useState("");
   const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
   const [rating, setRating] = useState(5);
@@ -125,7 +328,6 @@ function FeedbackModal({ student, commentsList, onSave, onClose }: { student: an
           <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground"><X className="h-4 w-4" /></button>
         </div>
         <div className="p-5 space-y-4 max-h-[60vh] overflow-y-auto">
-          {/* History of comments */}
           {commentsList && commentsList.length > 0 && (
             <div className="space-y-2">
               <label className="text-xs font-semibold text-muted-foreground uppercase">Lịch sử nhận xét gần đây</label>
@@ -134,7 +336,7 @@ function FeedbackModal({ student, commentsList, onSave, onClose }: { student: an
                   <div key={i} className="text-xs border-b border-border/50 last:border-0 pb-2 last:pb-0">
                     <div className="flex justify-between font-semibold mb-1">
                       <span className="text-muted-foreground">{c.date}</span>
-                      <span className="text-amber-500">{"★".repeat(c.rating)}{"☆".repeat(5-c.rating)}</span>
+                      <span className="text-amber-500">{"★".repeat(c.rating)}{"☆".repeat(5 - c.rating)}</span>
                     </div>
                     <p className="text-foreground">{c.text}</p>
                   </div>
@@ -142,7 +344,6 @@ function FeedbackModal({ student, commentsList, onSave, onClose }: { student: an
               </div>
             </div>
           )}
-
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="text-xs font-semibold text-muted-foreground uppercase mb-1.5 block">Ngày học *</label>
@@ -151,13 +352,9 @@ function FeedbackModal({ student, commentsList, onSave, onClose }: { student: an
             <div>
               <label className="text-xs font-semibold text-muted-foreground uppercase mb-1.5 block">Đánh giá chung *</label>
               <div className="flex items-center gap-1 h-10">
-                {[1, 2, 3, 4, 5].map((star) => (
-                  <button
-                    type="button"
-                    key={star}
-                    onClick={() => setRating(star)}
-                    className={`text-xl transition-all ${star <= rating ? "text-amber-400 scale-110" : "text-muted hover:text-amber-200"}`}
-                  >
+                {[1, 2, 3, 4, 5].map(star => (
+                  <button type="button" key={star} onClick={() => setRating(star)}
+                    className={`text-xl transition-all ${star <= rating ? "text-amber-400 scale-110" : "text-muted hover:text-amber-200"}`}>
                     ★
                   </button>
                 ))}
@@ -166,26 +363,14 @@ function FeedbackModal({ student, commentsList, onSave, onClose }: { student: an
           </div>
           <div>
             <label className="text-xs font-semibold text-muted-foreground uppercase mb-1.5 block">Nội dung nhận xét <span className="text-red-500">*</span></label>
-            <textarea
-              required
-              rows={4}
-              value={text}
-              onChange={e => setText(e.target.value)}
+            <textarea required rows={4} value={text} onChange={e => setText(e.target.value)}
               className="w-full p-3 rounded-xl border border-border bg-background text-sm resize-none focus:outline-none focus:ring-2 focus:ring-primary/50 text-foreground"
-              placeholder="Nhập nhận xét về thái độ học tập, bài tập về nhà, mức độ tiếp thu..."
-            />
+              placeholder="Nhận xét về thái độ học tập, bài tập về nhà, mức độ tiếp thu..." />
           </div>
         </div>
         <div className="p-5 border-t border-border bg-muted/20 flex justify-end gap-3">
           <Button variant="outline" onClick={onClose}>Hủy</Button>
-          <Button
-            variant="gradient"
-            disabled={!text}
-            onClick={() => {
-              onSave(text, date, rating);
-              onClose();
-            }}
-          >
+          <Button variant="gradient" disabled={!text} onClick={() => { onSave(text, date, rating); onClose(); }}>
             <Check className="h-4 w-4 mr-2" />Lưu nhận xét
           </Button>
         </div>
@@ -194,6 +379,8 @@ function FeedbackModal({ student, commentsList, onSave, onClose }: { student: an
   );
 }
 
+// ── Main page ────────────────────────────────────────────────────────────────
+
 export default function TeacherClassDetailPage() {
   const params = useParams();
   const classId = params.classId as string;
@@ -201,8 +388,17 @@ export default function TeacherClassDetailPage() {
   const [uploadModal, setUploadModal] = useState<"lecture" | "material" | "note" | null>(null);
   const [commentModalStudent, setCommentModalStudent] = useState<any | null>(null);
   const [comments, setComments] = useState<Record<string, { text: string; date: string; rating: number }[]>>({});
+  const [currentSchedule, setCurrentSchedule] = useState<ClassSchedule[] | null>(null);
 
-  const cls = MOCK_CLASSES.find((c) => c.id === classId);
+  const cls = MOCK_CLASSES.find(c => c.id === classId);
+
+  useEffect(() => {
+    if (!cls) return;
+    // Load schedule override from localStorage (falls back to mock if none)
+    const override = getClassScheduleOverride(classId);
+    setCurrentSchedule(override ?? cls.schedule);
+  }, [classId, cls]);
+
   if (!cls) {
     return (
       <PortalLayout role="teacher" userName="Thầy Hùng Toán" pageTitle="Lớp học">
@@ -215,17 +411,16 @@ export default function TeacherClassDetailPage() {
     );
   }
 
-  const teacher = MOCK_TEACHERS.find((t) => t.id === cls.tutor_id);
-  const materials = MOCK_CLASS_MATERIALS.filter((m) => m.class_id === classId);
-  const lectures = MOCK_LECTURES.filter((l) => l.class_id === classId);
-  const notes = MOCK_CLASS_NOTES.filter((n) => n.class_id === classId);
-  
-  // Simulated students for this class with packages
+  const teacher = MOCK_TEACHERS.find(t => t.id === cls.tutor_id);
+  const materials = MOCK_CLASS_MATERIALS.filter(m => m.class_id === classId);
+  const lectures = MOCK_LECTURES.filter(l => l.class_id === classId);
+  const notes = MOCK_CLASS_NOTES.filter(n => n.class_id === classId);
+
   const classStudents = MOCK_STUDENTS.map((s, idx) => ({
     ...s,
     package: idx % 3 === 0 ? "online" : idx % 3 === 1 ? "advanced" : "offline",
     join_date: "2024-09-0" + (idx + 1),
-    progress: Math.floor(Math.random() * 40) + 60
+    progress: [72, 85, 61, 90, 78][idx] ?? 70,
   }));
 
   useEffect(() => {
@@ -240,16 +435,9 @@ export default function TeacherClassDetailPage() {
   }, []);
 
   const handleSaveComment = async (studentId: string, text: string, date: string, rating: number) => {
-    const studentComments = comments[studentId] || [];
-    const updatedComments = [
-      { text, date, rating },
-      ...studentComments
-    ];
-    setComments((prev) => ({
-      ...prev,
-      [studentId]: updatedComments
-    }));
-    await saveStudentComment(studentId, updatedComments);
+    const updated = [{ text, date, rating }, ...(comments[studentId] || [])];
+    setComments(prev => ({ ...prev, [studentId]: updated }));
+    await saveStudentComment(studentId, updated);
   };
 
   const addButton = (type: "lecture" | "material" | "note", label: string) => (
@@ -257,6 +445,8 @@ export default function TeacherClassDetailPage() {
       <Plus className="h-3.5 w-3.5 mr-1.5" />{label}
     </Button>
   );
+
+  const scheduleForDisplay = currentSchedule ?? cls.schedule;
 
   return (
     <PortalLayout role="teacher" userName="Thầy Hùng Toán" pageTitle={cls.class_name}>
@@ -299,8 +489,9 @@ export default function TeacherClassDetailPage() {
 
           {/* Tabs */}
           <div className="bg-card border-b border-border px-4 md:px-8 flex gap-1 overflow-x-auto">
-            {TABS.map((tab) => (
-              <button key={tab.key} onClick={() => setActiveTab(tab.key)} className={`flex items-center gap-2 px-4 py-3.5 text-sm font-medium border-b-2 transition-all whitespace-nowrap ${activeTab === tab.key ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground hover:border-border"}`}>
+            {TABS.map(tab => (
+              <button key={tab.key} onClick={() => setActiveTab(tab.key)}
+                className={`flex items-center gap-2 px-4 py-3.5 text-sm font-medium border-b-2 transition-all whitespace-nowrap ${activeTab === tab.key ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground hover:border-border"}`}>
                 <tab.icon className="h-4 w-4" />{tab.label}
               </button>
             ))}
@@ -309,6 +500,8 @@ export default function TeacherClassDetailPage() {
 
         {/* Tab content */}
         <div className="animate-fade-in">
+
+          {/* ── Overview ── */}
           {activeTab === "overview" && (
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               <div className="lg:col-span-2 space-y-6">
@@ -316,8 +509,17 @@ export default function TeacherClassDetailPage() {
                   <CardHeader><CardTitle className="text-sm">Thông tin lớp học</CardTitle></CardHeader>
                   <CardContent>
                     <p className="text-sm text-muted-foreground leading-relaxed mb-4">{cls.description}</p>
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Lịch học</p>
+                      <button
+                        onClick={() => setActiveTab("schedule")}
+                        className="text-xs text-primary hover:underline"
+                      >
+                        Chỉnh sửa lịch →
+                      </button>
+                    </div>
                     <div className="space-y-2">
-                      {cls.schedule.map((s, i) => (
+                      {scheduleForDisplay.map((s, i) => (
                         <div key={i} className="flex items-center justify-between p-3 bg-muted/30 rounded-xl border border-border/50">
                           <span className="flex items-center gap-2 text-sm font-medium"><Clock className="h-4 w-4 text-primary" />{s.day}</span>
                           <span className="text-sm text-muted-foreground">{s.start_time} – {s.end_time}</span>
@@ -327,7 +529,6 @@ export default function TeacherClassDetailPage() {
                   </CardContent>
                 </Card>
 
-                {/* Quick actions */}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   <button onClick={() => { setActiveTab("lectures"); setUploadModal("lecture"); }} className="p-5 rounded-2xl border-2 border-dashed border-border hover:border-primary/50 hover:bg-primary/5 transition-all text-center group">
                     <Presentation className="h-8 w-8 text-muted-foreground mx-auto mb-2 group-hover:text-primary transition-colors" />
@@ -352,9 +553,9 @@ export default function TeacherClassDetailPage() {
                   <CardHeader><CardTitle className="text-sm">Thống kê nhanh</CardTitle></CardHeader>
                   <CardContent>
                     <div className="space-y-3">
-                      <div className="flex justify-between text-sm"><span className="text-muted-foreground">Bài giảng đã đăng</span><span className="font-bold">{lectures.filter(l=>l.is_published).length}/{lectures.length}</span></div>
+                      <div className="flex justify-between text-sm"><span className="text-muted-foreground">Bài giảng đã đăng</span><span className="font-bold">{lectures.filter(l => l.is_published).length}/{lectures.length}</span></div>
                       <div className="flex justify-between text-sm"><span className="text-muted-foreground">Tài liệu</span><span className="font-bold">{materials.length} file</span></div>
-                      <div className="flex justify-between text-sm"><span className="text-muted-foreground">Ghi chú đã ghim</span><span className="font-bold">{notes.filter(n=>n.is_pinned).length}</span></div>
+                      <div className="flex justify-between text-sm"><span className="text-muted-foreground">Ghi chú đã ghim</span><span className="font-bold">{notes.filter(n => n.is_pinned).length}</span></div>
                       <div className="flex justify-between text-sm pt-2 border-t border-border/50"><span className="text-muted-foreground">Sĩ số</span><span className="font-bold">{classStudents.length}/{cls.max_students}</span></div>
                     </div>
                   </CardContent>
@@ -366,18 +567,36 @@ export default function TeacherClassDetailPage() {
             </div>
           )}
 
+          {/* ── Schedule ── */}
+          {activeTab === "schedule" && currentSchedule !== null && (
+            <div className="max-w-2xl">
+              <div className="mb-5">
+                <h2 className="text-base font-semibold">Cài đặt lịch học</h2>
+                <p className="text-sm text-muted-foreground mt-0.5">
+                  Chỉnh sửa lịch buổi học. Khi lưu, hệ thống tự động đẩy thông báo đến toàn bộ học viên trong lớp <strong>{cls.class_name}</strong>.
+                </p>
+              </div>
+              <ScheduleEditor
+                classId={classId}
+                className={cls.class_name}
+                initialSchedule={currentSchedule}
+              />
+            </div>
+          )}
+
+          {/* ── Lectures ── */}
           {activeTab === "lectures" && (
             <div className="space-y-4">
               <div className="flex justify-between items-center">
                 <p className="text-sm text-muted-foreground">{lectures.length} bài giảng</p>
                 {addButton("lecture", "Thêm bài giảng")}
               </div>
-              {lectures.sort((a,b)=>a.order-b.order).map((lec, i) => (
-                <Card key={lec.id} className={`overflow-hidden animate-fade-in transition-all hover:shadow-md ${!lec.is_published ? 'border-dashed' : ''}`} style={{animationDelay:`${i*60}ms`}}>
+              {lectures.sort((a, b) => a.order - b.order).map((lec, i) => (
+                <Card key={lec.id} className={`overflow-hidden animate-fade-in transition-all hover:shadow-md ${!lec.is_published ? "border-dashed" : ""}`} style={{ animationDelay: `${i * 60}ms` }}>
                   <CardContent className="p-0">
                     <div className="flex flex-col sm:flex-row">
-                      <div className={`sm:w-44 flex items-center justify-center p-6 ${lec.is_published ? 'bg-primary/5' : 'bg-amber-50 dark:bg-amber-900/10'}`}>
-                        <div className={`h-14 w-14 rounded-2xl flex items-center justify-center ${lec.is_published ? 'bg-primary/10 text-primary' : 'bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400'}`}>
+                      <div className={`sm:w-44 flex items-center justify-center p-6 ${lec.is_published ? "bg-primary/5" : "bg-amber-50 dark:bg-amber-900/10"}`}>
+                        <div className={`h-14 w-14 rounded-2xl flex items-center justify-center ${lec.is_published ? "bg-primary/10 text-primary" : "bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400"}`}>
                           {lec.is_published ? <PlayCircle className="h-7 w-7" /> : <Lock className="h-5 w-5" />}
                         </div>
                       </div>
@@ -408,6 +627,7 @@ export default function TeacherClassDetailPage() {
             </div>
           )}
 
+          {/* ── Materials ── */}
           {activeTab === "materials" && (
             <div className="space-y-5">
               <div className="flex justify-between items-center">
@@ -418,10 +638,10 @@ export default function TeacherClassDetailPage() {
                 {materials.map((mat, i) => {
                   const cat = CATEGORY_MAP[mat.category] || { label: mat.category, color: "bg-muted text-muted-foreground" };
                   return (
-                    <Card key={mat.id} className="group hover:shadow-lg hover:border-primary/30 transition-all animate-fade-in flex flex-col" style={{animationDelay:`${i*60}ms`}}>
+                    <Card key={mat.id} className="group hover:shadow-lg hover:border-primary/30 transition-all animate-fade-in flex flex-col" style={{ animationDelay: `${i * 60}ms` }}>
                       <CardContent className="p-5 flex-1 flex flex-col">
                         <div className="flex justify-between items-start mb-3">
-                          <div className={`h-12 w-12 rounded-xl flex items-center justify-center ${mat.file_type === 'pdf' ? 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400' : 'bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400'}`}>
+                          <div className={`h-12 w-12 rounded-xl flex items-center justify-center ${mat.file_type === "pdf" ? "bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400" : "bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400"}`}>
                             {getFileIcon(mat.file_type)}
                           </div>
                           <div className="flex items-center gap-1">
@@ -446,17 +666,18 @@ export default function TeacherClassDetailPage() {
             </div>
           )}
 
+          {/* ── Notes ── */}
           {activeTab === "notes" && (
             <div className="space-y-4">
               <div className="flex justify-between items-center">
                 <p className="text-sm text-muted-foreground">{notes.length} ghi chú</p>
                 {addButton("note", "Viết ghi chú")}
               </div>
-              {notes.sort((a,b) => (b.is_pinned ? 1 : 0) - (a.is_pinned ? 1 : 0) || new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).map((note, i) => (
-                <Card key={note.id} className={`animate-fade-in transition-all hover:shadow-md ${note.is_pinned ? 'border-amber-200 dark:border-amber-800/50 bg-amber-50/30 dark:bg-amber-900/5' : ''}`} style={{animationDelay:`${i*60}ms`}}>
+              {notes.sort((a, b) => (b.is_pinned ? 1 : 0) - (a.is_pinned ? 1 : 0) || new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).map((note, i) => (
+                <Card key={note.id} className={`animate-fade-in transition-all hover:shadow-md ${note.is_pinned ? "border-amber-200 dark:border-amber-800/50 bg-amber-50/30 dark:bg-amber-900/5" : ""}`} style={{ animationDelay: `${i * 60}ms` }}>
                   <CardContent className="p-5 md:p-6">
                     <div className="flex items-start gap-4">
-                      <div className={`h-10 w-10 rounded-xl flex items-center justify-center shrink-0 ${note.is_pinned ? 'bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400' : 'bg-primary/10 text-primary'}`}>
+                      <div className={`h-10 w-10 rounded-xl flex items-center justify-center shrink-0 ${note.is_pinned ? "bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400" : "bg-primary/10 text-primary"}`}>
                         {note.is_pinned ? <Pin className="h-4 w-4" /> : <StickyNote className="h-4 w-4" />}
                       </div>
                       <div className="flex-1 min-w-0">
@@ -468,7 +689,7 @@ export default function TeacherClassDetailPage() {
                         <p className="text-sm text-muted-foreground mt-2 whitespace-pre-line leading-relaxed">{note.content}</p>
                         {note.tags && note.tags.length > 0 && (
                           <div className="flex flex-wrap gap-1.5 mt-3">
-                            {note.tags.map(tag => (
+                            {note.tags.map((tag: string) => (
                               <span key={tag} className="inline-flex items-center gap-1 text-[10px] font-medium bg-muted px-2 py-0.5 rounded-full text-muted-foreground">
                                 <Tag className="h-2.5 w-2.5" />{tag}
                               </span>
@@ -487,6 +708,7 @@ export default function TeacherClassDetailPage() {
             </div>
           )}
 
+          {/* ── Students ── */}
           {activeTab === "students" && (
             <div className="space-y-6">
               <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -508,7 +730,7 @@ export default function TeacherClassDetailPage() {
                   <Card key={key} className="bg-card/50">
                     <CardContent className="p-4 flex items-center justify-between">
                       <div className="flex items-center gap-3">
-                        <div className={`h-2 w-2 rounded-full ${info.color.split(' ')[1]}`} />
+                        <div className={`h-2 w-2 rounded-full ${info.color.split(" ")[1]}`} />
                         <div>
                           <p className="text-xs text-muted-foreground uppercase font-bold tracking-wider">{info.label}</p>
                           <p className="text-sm font-semibold">{classStudents.filter(s => s.package === key).length} học viên</p>
@@ -531,7 +753,7 @@ export default function TeacherClassDetailPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border">
-                      {classStudents.map((student) => (
+                      {classStudents.map(student => (
                         <tr key={student.id} className="hover:bg-muted/30 transition-colors group">
                           <td className="p-4">
                             <div className="flex items-center gap-3">
@@ -570,12 +792,8 @@ export default function TeacherClassDetailPage() {
                           </td>
                           <td className="p-4 text-right">
                             <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => setCommentModalStudent(student)}
-                                className="text-xs h-8 flex items-center gap-1 hover:bg-primary/5 hover:text-primary transition-all font-semibold"
-                              >
+                              <Button size="sm" variant="outline" onClick={() => setCommentModalStudent(student)}
+                                className="text-xs h-8 flex items-center gap-1 hover:bg-primary/5 hover:text-primary transition-all font-semibold">
                                 <MessageSquare className="h-3.5 w-3.5" /> Nhận xét
                               </Button>
                               <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground"><Eye className="h-4 w-4" /></Button>

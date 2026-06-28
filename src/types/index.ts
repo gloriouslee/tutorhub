@@ -12,6 +12,7 @@ export interface Student {
   id: string;
   user_id: string;
   full_name: string;
+  email?: string;
   dob: string;
   school: string;
   grade: string;
@@ -44,6 +45,7 @@ export interface Class {
   id: string;
   class_name: string;
   subject: string;
+  grade?: number;
   learning_mode: "online" | "offline" | "hybrid";
   tutor_id: string;
   classroom?: string;

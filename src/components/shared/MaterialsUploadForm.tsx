@@ -9,10 +9,12 @@ import { MOCK_STUDENTS } from "@/lib/mock-data";
 import { createClient } from "@/lib/supabase/client";
 import {
   Upload, FileText, PlayCircle, Image as ImageIcon, BookMarked,
-  CheckCircle2, AlertCircle, X, Loader2, Users, ChevronDown, Search,
+  CheckCircle2, AlertCircle, X, Loader2, Users, ChevronDown,
+  ChevronRight, Search,
 } from "lucide-react";
 
 const ACCEPTED_TYPES = ".pdf,.doc,.docx,.ppt,.pptx,.mp4,.jpg,.jpeg,.png";
+const ALL_GRADES = [9, 10, 11, 12];
 
 type TargetRole = "all" | "student" | "parent" | "teacher";
 
@@ -46,11 +48,11 @@ function getFileType(mime: string): string {
   return "doc";
 }
 
-const ROLE_OPTIONS: { value: TargetRole; label: string; desc: string }[] = [
-  { value: "all", label: "Tất cả", desc: "Mọi người trong lớp" },
-  { value: "student", label: "Học viên", desc: "Chỉ học viên (có thể chọn cụ thể)" },
-  { value: "parent", label: "Phụ huynh", desc: "Chỉ phụ huynh" },
-  { value: "teacher", label: "Giáo viên", desc: "Chỉ giáo viên" },
+const ROLE_OPTIONS: { value: TargetRole; label: string }[] = [
+  { value: "all", label: "Tất cả" },
+  { value: "student", label: "Học viên" },
+  { value: "parent", label: "Phụ huynh" },
+  { value: "teacher", label: "Giáo viên" },
 ];
 
 interface Props {
@@ -60,18 +62,51 @@ interface Props {
 
 type SaveState = "idle" | "saving" | "success" | "error";
 
+// ── Distribution summary label ───────────────────────────────────────────────
+
+function distributionLabel(
+  selectedGrades: number[],
+  selectedClasses: string[],
+  selectedStudents: string[],
+  classes: Class[],
+) {
+  if (selectedStudents.length > 0) return `${selectedStudents.length} học viên cụ thể`;
+  if (selectedClasses.length > 0) {
+    const names = classes.filter(c => selectedClasses.includes(c.id)).map(c => c.class_name);
+    return names.join(", ");
+  }
+  if (selectedGrades.length > 0) return `Khối ${selectedGrades.join(", ")}`;
+  return "Chưa chọn";
+}
+
+// ── Component ────────────────────────────────────────────────────────────────
+
 export default function MaterialsUploadForm({ classes, onSaved }: Props) {
-  const [selectedClass, setSelectedClass] = useState("");
+  // Distribution state
+  const [selectedGrades, setSelectedGrades] = useState<number[]>([]);
+  const [selectedClasses, setSelectedClasses] = useState<string[]>([]);
+  const [selectedStudents, setSelectedStudents] = useState<string[]>([]);
+  const [expandClasses, setExpandClasses] = useState(false);
+  const [expandStudents, setExpandStudents] = useState(false);
+  const [studentSearch, setStudentSearch] = useState("");
+
+  // Visibility
+  const [targetRole, setTargetRole] = useState<TargetRole>("all");
+
+  // Content
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [targetRole, setTargetRole] = useState<TargetRole>("all");
-  const [selectedStudents, setSelectedStudents] = useState<string[]>([]);
-  const [showStudentPicker, setShowStudentPicker] = useState(false);
-  const [studentSearch, setStudentSearch] = useState("");
+
+  // Upload
   const [files, setFiles] = useState<UploadedFile[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Derived
+  const classesInGrade = selectedGrades.length > 0
+    ? classes.filter(c => c.grade !== undefined && selectedGrades.includes(c.grade))
+    : classes;
 
   const classStudents = MOCK_STUDENTS.slice(0, 5);
   const filteredStudents = studentSearch.trim()
@@ -81,17 +116,26 @@ export default function MaterialsUploadForm({ classes, onSaved }: Props) {
       )
     : classStudents;
 
+  // Handlers
+  const toggleGrade = (g: number) => {
+    setSelectedGrades(prev =>
+      prev.includes(g) ? prev.filter(x => x !== g) : [...prev, g]
+    );
+    setSelectedClasses([]);
+    setSelectedStudents([]);
+  };
+
+  const toggleClass = (id: string) => {
+    setSelectedClasses(prev =>
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    );
+    setSelectedStudents([]);
+  };
+
   const toggleStudent = (id: string) =>
     setSelectedStudents(prev =>
-      prev.includes(id) ? prev.filter(s => s !== id) : [...prev, id]
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
     );
-
-  const handleRoleChange = (role: TargetRole) => {
-    setTargetRole(role);
-    setSelectedStudents([]);
-    setStudentSearch("");
-    setShowStudentPicker(false);
-  };
 
   const handleFiles = async (fileList: FileList | null) => {
     if (!fileList || fileList.length === 0) return;
@@ -113,24 +157,26 @@ export default function MaterialsUploadForm({ classes, onSaved }: Props) {
 
   const handleSave = async () => {
     const doneFiles = files.filter(f => f.status === "done");
-    if (!selectedClass || !title || doneFiles.length === 0) return;
+    if (!title || doneFiles.length === 0) return;
     setSaveState("saving");
     try {
       const supabase = createClient();
       for (const file of doneFiles) {
         await supabase.from("materials").insert({
-          class_id: selectedClass,
           title,
           description,
           file_url: file.url,
           file_type: file.type,
           target_role: targetRole,
-          target_student_ids: targetRole === "student" && selectedStudents.length > 0 ? selectedStudents : null,
+          target_grades: selectedGrades.length > 0 ? selectedGrades : null,
+          target_class_ids: selectedClasses.length > 0 ? selectedClasses : null,
+          target_student_ids: selectedStudents.length > 0 ? selectedStudents : null,
         });
       }
       setSaveState("success");
-      setTitle(""); setDescription(""); setSelectedClass("");
-      setFiles([]); setTargetRole("all"); setSelectedStudents([]);
+      setTitle(""); setDescription("");
+      setSelectedGrades([]); setSelectedClasses([]); setSelectedStudents([]);
+      setFiles([]); setTargetRole("all");
       onSaved?.();
       setTimeout(() => setSaveState("idle"), 3000);
     } catch {
@@ -141,187 +187,243 @@ export default function MaterialsUploadForm({ classes, onSaved }: Props) {
 
   const doneCount = files.filter(f => f.status === "done").length;
   const uploadingCount = files.filter(f => f.status === "uploading").length;
-  const canSave = selectedClass && title && doneCount > 0 && uploadingCount === 0 && saveState === "idle";
-
-  const visibilitySummary = () => {
-    if (targetRole === "all") return "Tất cả trong lớp";
-    if (targetRole === "parent") return "Chỉ phụ huynh";
-    if (targetRole === "teacher") return "Chỉ giáo viên";
-    if (selectedStudents.length === 0) return "Tất cả học viên";
-    return `${selectedStudents.length} học viên được chọn`;
-  };
+  const canSave = title && doneCount > 0 && uploadingCount === 0 && saveState === "idle";
 
   return (
     <Card>
-      <CardContent className="p-6 space-y-5">
+      <CardContent className="p-6 space-y-6">
 
-        {/* Row 1: Class + Title */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {/* ── Bước 1: Phân phối đến ── */}
+        <div className="space-y-3">
+          <div>
+            <p className="text-sm font-medium text-foreground">Bước 1 — Phân phối đến</p>
+            <p className="text-xs text-muted-foreground mt-0.5">Chọn khối, sau đó thu hẹp xuống lớp hoặc học viên cụ thể</p>
+          </div>
+
+          {/* Khối */}
           <div className="space-y-1.5">
-            <label className="text-sm font-medium text-foreground">Lớp học *</label>
-            <select
-              className="flex h-10 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary"
-              value={selectedClass}
-              onChange={e => setSelectedClass(e.target.value)}
-            >
-              <option value="">Chọn lớp</option>
-              {classes.map(c => (
-                <option key={c.id} value={c.id}>{c.class_name} — {c.subject}</option>
+            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Khối</p>
+            <div className="flex flex-wrap gap-2">
+              {ALL_GRADES.map(g => (
+                <button
+                  key={g}
+                  onClick={() => toggleGrade(g)}
+                  className={`px-4 py-1.5 rounded-lg border text-sm font-medium transition-colors ${
+                    selectedGrades.includes(g)
+                      ? "border-primary bg-primary/10 text-primary"
+                      : "border-border text-foreground hover:border-primary/50"
+                  }`}
+                >
+                  Khối {g}
+                </button>
               ))}
-            </select>
+              <button
+                onClick={() => { setSelectedGrades([]); setSelectedClasses([]); setSelectedStudents([]); }}
+                className={`px-4 py-1.5 rounded-lg border text-sm font-medium transition-colors ${
+                  selectedGrades.length === 0 && selectedClasses.length === 0 && selectedStudents.length === 0
+                    ? "border-primary bg-primary/10 text-primary"
+                    : "border-border text-foreground hover:border-primary/50"
+                }`}
+              >
+                Tất cả khối
+              </button>
+            </div>
           </div>
-          <div className="space-y-1.5">
-            <label className="text-sm font-medium text-foreground">Tiêu đề *</label>
-            <Input
-              placeholder="VD: Bài giảng Chương 3 — Hàm số"
-              value={title}
-              onChange={e => setTitle(e.target.value)}
-              className="h-10"
-            />
+
+          {/* Lớp — chỉ hiện khi đã chọn khối hoặc muốn thu hẹp */}
+          <div className="border border-border rounded-lg overflow-hidden">
+            <button
+              onClick={() => setExpandClasses(v => !v)}
+              className="w-full flex items-center justify-between px-4 py-2.5 bg-muted/20 hover:bg-muted/40 transition-colors text-sm"
+            >
+              <span className="flex items-center gap-2 text-foreground">
+                {expandClasses ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
+                Thu hẹp theo lớp
+                {selectedClasses.length > 0 && (
+                  <span className="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full font-medium">
+                    {selectedClasses.length} lớp
+                  </span>
+                )}
+              </span>
+              {selectedClasses.length > 0 && (
+                <button onClick={e => { e.stopPropagation(); setSelectedClasses([]); }} className="text-xs text-muted-foreground hover:text-red-500">
+                  Bỏ chọn
+                </button>
+              )}
+            </button>
+
+            {expandClasses && (
+              <div className="border-t border-border divide-y divide-border max-h-48 overflow-y-auto">
+                {classesInGrade.length === 0 ? (
+                  <p className="px-4 py-3 text-sm text-muted-foreground">Không có lớp nào</p>
+                ) : classesInGrade.map(c => (
+                  <label key={c.id} className="flex items-center gap-3 px-4 py-2.5 cursor-pointer hover:bg-muted/20">
+                    <input
+                      type="checkbox"
+                      checked={selectedClasses.includes(c.id)}
+                      onChange={() => toggleClass(c.id)}
+                      className="h-4 w-4 rounded border-border accent-primary"
+                    />
+                    <div className="w-2 h-2 rounded-full shrink-0" style={{ background: c.color ?? "#6366f1" }} />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-foreground">{c.class_name}</p>
+                      <p className="text-xs text-muted-foreground">{c.subject} · Khối {c.grade}</p>
+                    </div>
+                  </label>
+                ))}
+              </div>
+            )}
           </div>
+
+          {/* Học viên cụ thể */}
+          <div className="border border-border rounded-lg overflow-hidden">
+            <button
+              onClick={() => setExpandStudents(v => !v)}
+              className="w-full flex items-center justify-between px-4 py-2.5 bg-muted/20 hover:bg-muted/40 transition-colors text-sm"
+            >
+              <span className="flex items-center gap-2 text-foreground">
+                {expandStudents ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
+                Thu hẹp theo học viên cụ thể
+                {selectedStudents.length > 0 && (
+                  <span className="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full font-medium">
+                    {selectedStudents.length} học viên
+                  </span>
+                )}
+              </span>
+              {selectedStudents.length > 0 && (
+                <button onClick={e => { e.stopPropagation(); setSelectedStudents([]); }} className="text-xs text-muted-foreground hover:text-red-500">
+                  Bỏ chọn
+                </button>
+              )}
+            </button>
+
+            {expandStudents && (
+              <div className="border-t border-border">
+                <div className="px-3 py-2 border-b border-border bg-muted/10">
+                  <div className="relative">
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                    <input
+                      type="text"
+                      placeholder="Tìm theo tên hoặc email..."
+                      value={studentSearch}
+                      onChange={e => setStudentSearch(e.target.value)}
+                      className="w-full pl-8 pr-3 py-1.5 text-sm bg-background border border-border rounded-md outline-none focus:ring-2 focus:ring-primary"
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1.5">{filteredStudents.length} học viên{studentSearch ? " phù hợp" : ""}</p>
+                </div>
+                <div className="divide-y divide-border max-h-48 overflow-y-auto">
+                  {filteredStudents.length === 0 ? (
+                    <p className="px-4 py-4 text-sm text-center text-muted-foreground">Không tìm thấy</p>
+                  ) : filteredStudents.map(s => (
+                    <label key={s.id} className="flex items-center gap-3 px-4 py-2.5 cursor-pointer hover:bg-muted/20">
+                      <input
+                        type="checkbox"
+                        checked={selectedStudents.includes(s.id)}
+                        onChange={() => toggleStudent(s.id)}
+                        className="h-4 w-4 rounded border-border accent-primary"
+                      />
+                      <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center text-xs font-medium text-primary shrink-0">
+                        {s.full_name.split(" ").pop()?.charAt(0)}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-foreground">{s.full_name}</p>
+                        <p className="text-xs text-muted-foreground">{s.email} · {s.grade}</p>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Summary */}
+          <p className="text-xs text-muted-foreground">
+            Phân phối đến: <span className="font-medium text-foreground">{distributionLabel(selectedGrades, selectedClasses, selectedStudents, classes)}</span>
+          </p>
         </div>
 
-        {/* Row 2: Visibility */}
+        {/* ── Bước 2: Hiển thị cho ── */}
         <div className="space-y-2">
-          <label className="text-sm font-medium text-foreground">Hiển thị cho</label>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <p className="text-sm font-medium text-foreground">Bước 2 — Hiển thị cho</p>
+          <div className="flex flex-wrap gap-2">
             {ROLE_OPTIONS.map(opt => (
               <button
                 key={opt.value}
-                onClick={() => handleRoleChange(opt.value)}
-                className={`flex flex-col items-start gap-0.5 px-3 py-2.5 rounded-lg border text-left transition-colors ${
+                onClick={() => setTargetRole(opt.value)}
+                className={`px-4 py-1.5 rounded-lg border text-sm font-medium transition-colors ${
                   targetRole === opt.value
-                    ? "border-primary bg-primary/5 text-primary"
-                    : "border-border hover:border-border-strong text-foreground"
+                    ? "border-primary bg-primary/10 text-primary"
+                    : "border-border text-foreground hover:border-primary/50"
                 }`}
               >
-                <span className="text-sm font-medium">{opt.label}</span>
-                <span className="text-[11px] text-muted-foreground leading-tight">{opt.desc}</span>
+                {opt.label}
               </button>
             ))}
           </div>
+        </div>
 
-          {/* Student picker — chỉ hiện khi chọn "Học viên" */}
-          {targetRole === "student" && (
-            <div className="mt-2 border border-border rounded-lg overflow-hidden">
-              <button
-                onClick={() => setShowStudentPicker(v => !v)}
-                className="w-full flex items-center justify-between px-4 py-2.5 text-sm bg-muted/20 hover:bg-muted/40 transition-colors"
-              >
-                <span className="flex items-center gap-2 text-foreground">
-                  <Users className="h-4 w-4 text-muted-foreground" />
-                  {visibilitySummary()}
-                </span>
-                <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${showStudentPicker ? "rotate-180" : ""}`} />
-              </button>
+        {/* ── Bước 3: Nội dung ── */}
+        <div className="space-y-4">
+          <p className="text-sm font-medium text-foreground">Bước 3 — Nội dung tài liệu</p>
 
-              {showStudentPicker && (
-                <div className="border-t border-border divide-y divide-border">
-                  <div className="px-3 py-2 border-b border-border bg-muted/10">
-                    <div className="relative">
-                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-                      <input
-                        type="text"
-                        placeholder="Tìm theo tên hoặc email..."
-                        value={studentSearch}
-                        onChange={e => setStudentSearch(e.target.value)}
-                        className="w-full pl-8 pr-3 py-1.5 text-sm bg-background border border-border rounded-md outline-none focus:ring-2 focus:ring-primary"
-                      />
-                    </div>
-                    <div className="flex items-center justify-between mt-2">
-                      <span className="text-xs text-muted-foreground">
-                        {filteredStudents.length} học viên{studentSearch ? " phù hợp" : ""}
-                      </span>
-                      {selectedStudents.length > 0 && (
-                        <button onClick={() => setSelectedStudents([])} className="text-xs text-primary hover:underline">
-                          Bỏ chọn tất cả
-                        </button>
-                      )}
-                    </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-1.5 sm:col-span-2">
+              <label className="text-xs font-medium text-muted-foreground">Tiêu đề *</label>
+              <Input
+                placeholder="VD: Tổng ôn Đạo hàm — Khối 12"
+                value={title}
+                onChange={e => setTitle(e.target.value)}
+                className="h-10"
+              />
+            </div>
+            <div className="space-y-1.5 sm:col-span-2">
+              <label className="text-xs font-medium text-muted-foreground">Mô tả <span className="font-normal">(tuỳ chọn)</span></label>
+              <textarea
+                className="flex min-h-[68px] w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary resize-none"
+                placeholder="Nội dung tài liệu này gồm..."
+                value={description}
+                onChange={e => setDescription(e.target.value)}
+              />
+            </div>
+          </div>
+
+          {/* Drop zone */}
+          <div
+            onDragOver={e => { e.preventDefault(); setIsDragging(true); }}
+            onDragLeave={() => setIsDragging(false)}
+            onDrop={e => { e.preventDefault(); setIsDragging(false); handleFiles(e.dataTransfer.files); }}
+            onClick={() => fileInputRef.current?.click()}
+            className={`border-2 border-dashed rounded-xl py-7 text-center cursor-pointer transition-colors ${
+              isDragging ? "border-primary bg-primary/5" : "border-border hover:border-primary/40 hover:bg-muted/30"
+            }`}
+          >
+            <input ref={fileInputRef} type="file" multiple accept={ACCEPTED_TYPES} className="hidden" onChange={e => handleFiles(e.target.files)} />
+            <Upload className="h-7 w-7 mx-auto mb-2 text-muted-foreground" />
+            <p className="text-sm font-medium text-foreground">Kéo thả hoặc nhấn để chọn file</p>
+            <p className="text-xs text-muted-foreground mt-1">PDF, Word, PowerPoint, MP4, JPG, PNG</p>
+          </div>
+
+          {files.length > 0 && (
+            <div className="space-y-2">
+              {files.map(file => (
+                <div key={file.id} className="flex items-center gap-3 px-3 py-2.5 bg-muted/30 rounded-lg border border-border">
+                  <div className="text-muted-foreground shrink-0">{getFileIcon(file.type)}</div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">{file.name}</p>
+                    <p className="text-xs text-muted-foreground">{file.size}</p>
                   </div>
-                  {filteredStudents.length === 0 ? (
-                    <div className="px-4 py-4 text-center text-sm text-muted-foreground">
-                      Không tìm thấy học viên
-                    </div>
-                  ) : null}
-                  {filteredStudents.map(student => {
-                    const checked = selectedStudents.includes(student.id);
-                    return (
-                      <label
-                        key={student.id}
-                        className="flex items-center gap-3 px-4 py-2.5 cursor-pointer hover:bg-muted/20 transition-colors"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() => toggleStudent(student.id)}
-                          className="h-4 w-4 rounded border-border accent-primary"
-                        />
-                        <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center text-xs font-medium text-primary shrink-0">
-                          {student.full_name.split(" ").pop()?.charAt(0)}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-foreground">{student.full_name}</p>
-                          <p className="text-xs text-muted-foreground">{student.email} · {student.grade}</p>
-                        </div>
-                      </label>
-                    );
-                  })}
+                  {file.status === "uploading" && <Loader2 className="h-4 w-4 text-primary animate-spin shrink-0" />}
+                  {file.status === "done" && <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />}
+                  {file.status === "error" && <AlertCircle className="h-4 w-4 text-red-500 shrink-0" />}
+                  <button onClick={() => setFiles(prev => prev.filter(f => f.id !== file.id))} className="text-muted-foreground hover:text-red-500 transition-colors shrink-0">
+                    <X className="h-4 w-4" />
+                  </button>
                 </div>
-              )}
+              ))}
             </div>
           )}
         </div>
-
-        {/* Description */}
-        <div className="space-y-1.5">
-          <label className="text-sm font-medium text-foreground">
-            Mô tả <span className="text-muted-foreground font-normal">(tuỳ chọn)</span>
-          </label>
-          <textarea
-            className="flex min-h-[68px] w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary resize-none"
-            placeholder="Nội dung tài liệu này gồm..."
-            value={description}
-            onChange={e => setDescription(e.target.value)}
-          />
-        </div>
-
-        {/* Drop zone */}
-        <div
-          onDragOver={e => { e.preventDefault(); setIsDragging(true); }}
-          onDragLeave={() => setIsDragging(false)}
-          onDrop={e => { e.preventDefault(); setIsDragging(false); handleFiles(e.dataTransfer.files); }}
-          onClick={() => fileInputRef.current?.click()}
-          className={`border-2 border-dashed rounded-xl py-7 text-center cursor-pointer transition-colors ${
-            isDragging ? "border-primary bg-primary/5" : "border-border hover:border-primary/40 hover:bg-muted/30"
-          }`}
-        >
-          <input ref={fileInputRef} type="file" multiple accept={ACCEPTED_TYPES} className="hidden" onChange={e => handleFiles(e.target.files)} />
-          <Upload className="h-7 w-7 mx-auto mb-2 text-muted-foreground" />
-          <p className="text-sm font-medium text-foreground">Kéo thả hoặc nhấn để chọn file</p>
-          <p className="text-xs text-muted-foreground mt-1">PDF, Word, PowerPoint, MP4, JPG, PNG</p>
-        </div>
-
-        {/* File list */}
-        {files.length > 0 && (
-          <div className="space-y-2">
-            {files.map(file => (
-              <div key={file.id} className="flex items-center gap-3 px-3 py-2.5 bg-muted/30 rounded-lg border border-border">
-                <div className="text-muted-foreground shrink-0">{getFileIcon(file.type)}</div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate">{file.name}</p>
-                  <p className="text-xs text-muted-foreground">{file.size}</p>
-                </div>
-                {file.status === "uploading" && <Loader2 className="h-4 w-4 text-primary animate-spin shrink-0" />}
-                {file.status === "done" && <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />}
-                {file.status === "error" && <AlertCircle className="h-4 w-4 text-red-500 shrink-0" />}
-                <button onClick={() => setFiles(prev => prev.filter(f => f.id !== file.id))} className="text-muted-foreground hover:text-red-500 transition-colors shrink-0">
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
 
         {/* Save */}
         <div className="flex items-center gap-3">
@@ -340,6 +442,7 @@ export default function MaterialsUploadForm({ classes, onSaved }: Props) {
             </span>
           )}
         </div>
+
       </CardContent>
     </Card>
   );

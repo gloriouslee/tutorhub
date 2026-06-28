@@ -1,5 +1,5 @@
 import { createClient } from "./supabase/client";
-import { Student, Teacher, Class, Payment, Attendance, Notification } from "@/types";
+import { Student, Teacher, Class, Payment, Attendance, Notification, ClassSchedule } from "@/types";
 
 const supabase = createClient();
 
@@ -151,4 +151,68 @@ export async function saveStudentComment(studentId: string, commentsList: { text
   } catch (e) {
     console.error("Error saving comments to localStorage", e);
   }
+}
+
+// ── Schedule overrides (localStorage) ───────────────────────────────────────
+
+export function getClassScheduleOverride(classId: string): ClassSchedule[] | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(`tutorhub_schedule_${classId}`);
+    if (raw) return JSON.parse(raw) as ClassSchedule[];
+  } catch { /* ignore */ }
+  return null;
+}
+
+export function saveClassScheduleOverride(classId: string, schedule: ClassSchedule[]): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(`tutorhub_schedule_${classId}`, JSON.stringify(schedule));
+  } catch (e) {
+    console.error("Error saving schedule to localStorage", e);
+  }
+}
+
+// ── Schedule-change notifications (localStorage) ─────────────────────────────
+
+export interface ScheduleNotification {
+  id: string;
+  class_id: string;
+  class_name: string;
+  message: string;
+  created_at: string;
+  is_read: boolean;
+}
+
+export function getScheduleNotifications(): ScheduleNotification[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem("tutorhub_schedule_notifications");
+    if (raw) return JSON.parse(raw) as ScheduleNotification[];
+  } catch { /* ignore */ }
+  return [];
+}
+
+export function pushScheduleNotification(notif: Omit<ScheduleNotification, "id" | "created_at" | "is_read">): void {
+  if (typeof window === "undefined") return;
+  const existing = getScheduleNotifications();
+  const next: ScheduleNotification = {
+    ...notif,
+    id: crypto.randomUUID(),
+    created_at: new Date().toISOString(),
+    is_read: false,
+  };
+  try {
+    localStorage.setItem("tutorhub_schedule_notifications", JSON.stringify([next, ...existing]));
+  } catch (e) {
+    console.error("Error saving schedule notification", e);
+  }
+}
+
+export function markScheduleNotificationsRead(): void {
+  if (typeof window === "undefined") return;
+  try {
+    const existing = getScheduleNotifications().map(n => ({ ...n, is_read: true }));
+    localStorage.setItem("tutorhub_schedule_notifications", JSON.stringify(existing));
+  } catch { /* ignore */ }
 }
