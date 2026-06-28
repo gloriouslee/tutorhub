@@ -1,127 +1,306 @@
 "use client";
 
-import { useState } from "react";
-
+import { useState, useMemo } from "react";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { SectionHeader } from "@/components/shared";
 import { MOCK_CLASSES } from "@/lib/mock-data";
-import { Calendar, Clock, MapPin, Video, ChevronLeft, ChevronRight } from "lucide-react";
+import {
+  Clock, MapPin, Video, ChevronLeft, ChevronRight,
+  CalendarDays, CalendarRange, BookOpen,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 
-const DAYS_OF_WEEK = ["Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy", "Chủ Nhật"];
+// ─────────────────────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────────────────────
 
-const mapDay = (day: string) => {
-  const map: Record<string, string> = {
-    "Monday": "Thứ Hai", "Tuesday": "Thứ Ba", "Wednesday": "Thứ Tư",
-    "Thursday": "Thứ Năm", "Friday": "Thứ Sáu", "Saturday": "Thứ Bảy", "Sunday": "Chủ Nhật"
-  };
-  return map[day] || day;
+const DAY_EN: Record<string, number> = {
+  Monday: 1, Tuesday: 2, Wednesday: 3, Thursday: 4,
+  Friday: 5, Saturday: 6, Sunday: 0,
 };
 
-export default function StudentSchedulePage() {
-  const [weekOffset, setWeekOffset] = useState(0);
+const DAY_LABEL = ["CN", "T2", "T3", "T4", "T5", "T6", "T7"];
+const DAY_FULL  = ["Chủ Nhật", "Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy"];
 
-  const scheduleByDay: Record<string, any[]> = {};
-  DAYS_OF_WEEK.forEach(day => { scheduleByDay[day] = []; });
+function addDays(date: Date, n: number) {
+  const d = new Date(date);
+  d.setDate(d.getDate() + n);
+  return d;
+}
 
-  MOCK_CLASSES.forEach(cls => {
-    cls.schedule.forEach(slot => {
-      const vDay = mapDay(slot.day);
-      if (scheduleByDay[vDay]) {
-        scheduleByDay[vDay].push({ ...cls, start_time: slot.start_time, end_time: slot.end_time });
-      }
+function sameDay(a: Date, b: Date) {
+  return a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate();
+}
+
+function formatDate(d: Date) {
+  return d.toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit" });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Build flat list of sessions per day-of-week index (0=Sun … 6=Sat)
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface Session {
+  classId: string;
+  className: string;
+  subject: string;
+  start: string;
+  end: string;
+  color: string;
+  classroom?: string;
+  teacher?: string;
+}
+
+const SESSION_BY_DOW: Record<number, Session[]> = { 0: [], 1: [], 2: [], 3: [], 4: [], 5: [], 6: [] };
+
+MOCK_CLASSES.forEach(cls => {
+  cls.schedule.forEach(slot => {
+    const dow = DAY_EN[slot.day];
+    if (dow === undefined) return;
+    SESSION_BY_DOW[dow].push({
+      classId:   cls.id,
+      className: cls.class_name,
+      subject:   cls.subject,
+      start:     slot.start_time,
+      end:       slot.end_time,
+      color:     cls.color,
+      classroom: cls.classroom,
     });
   });
+});
 
-  Object.keys(scheduleByDay).forEach(day => {
-    scheduleByDay[day].sort((a, b) => a.start_time.localeCompare(b.start_time));
-  });
+Object.values(SESSION_BY_DOW).forEach(arr => arr.sort((a, b) => a.start.localeCompare(b.start)));
 
-  const realToday = new Date();
-  const currentBaseDate = new Date(realToday);
-  currentBaseDate.setDate(realToday.getDate() + weekOffset * 7);
-  
-  const currentDayIndex = currentBaseDate.getDay() === 0 ? 6 : currentBaseDate.getDay() - 1;
-  const startOfWeek = new Date(currentBaseDate);
-  startOfWeek.setDate(currentBaseDate.getDate() - currentDayIndex);
+// ─────────────────────────────────────────────────────────────────────────────
+// Component
+// ─────────────────────────────────────────────────────────────────────────────
 
-  const nextWeek = () => setWeekOffset(prev => prev + 1);
-  const prevWeek = () => setWeekOffset(prev => prev - 1);
-  const isCurrentWeek = weekOffset === 0;
+type Range = "2w" | "1m";
+
+export default function StudentSchedulePage() {
+  const [range, setRange]       = useState<Range>("2w");
+  const [offset, setOffset]     = useState(0);   // in units of the selected range
+
+  const today = useMemo(() => {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    return d;
+  }, []);
+
+  // Start of current view window (always Monday of today's week, shifted by offset)
+  const windowStart = useMemo(() => {
+    // find Monday of today's week
+    const dow = today.getDay(); // 0=Sun
+    const diffToMon = dow === 0 ? -6 : 1 - dow;
+    const mon = addDays(today, diffToMon);
+
+    if (range === "2w") return addDays(mon, offset * 14);
+    // 1 month: first day of current month shifted by offset months
+    const firstOfMonth = new Date(today.getFullYear(), today.getMonth() + offset, 1);
+    // shift to Monday of that week
+    const dowFOM = firstOfMonth.getDay();
+    const diffFOM = dowFOM === 0 ? -6 : 1 - dowFOM;
+    return addDays(firstOfMonth, diffFOM);
+  }, [today, range, offset]);
+
+  const totalDays = range === "2w" ? 14 : 35; // 5 weeks covers any month
+
+  // Build day objects for the window
+  const days = useMemo(() => {
+    return Array.from({ length: totalDays }, (_, i) => {
+      const date = addDays(windowStart, i);
+      const dow  = date.getDay();
+      return {
+        date,
+        dow,
+        label:    DAY_FULL[dow],
+        short:    DAY_LABEL[dow],
+        isToday:  sameDay(date, today),
+        isPast:   date < today,
+        sessions: SESSION_BY_DOW[dow] ?? [],
+      };
+    });
+  }, [windowStart, totalDays, today]);
+
+  // For 1-month view: cut to only days in the target month
+  const visibleDays = useMemo(() => {
+    if (range === "2w") return days;
+    const targetMonth = new Date(today.getFullYear(), today.getMonth() + offset, 1).getMonth();
+    return days.filter(d => d.date.getMonth() === targetMonth);
+  }, [days, range, offset, today]);
+
+  // Label for the nav bar
+  const windowLabel = useMemo(() => {
+    if (range === "2w") {
+      const end = addDays(windowStart, 13);
+      return `${formatDate(windowStart)} – ${formatDate(end)}`;
+    }
+    const d = new Date(today.getFullYear(), today.getMonth() + offset, 1);
+    return d.toLocaleDateString("vi-VN", { month: "long", year: "numeric" });
+  }, [windowStart, range, offset, today]);
+
+  const totalSessions = visibleDays.reduce((s, d) => s + d.sessions.length, 0);
 
   return (
     <PortalLayout role="student" userName="Nguyễn Anh Tuấn" pageTitle="Lịch học">
-      <div className="space-y-6 max-w-6xl mx-auto">
-        <SectionHeader 
-          title="Lịch học của tôi" 
-          subtitle="Thời khóa biểu các lớp trong tuần"
-          action={
-            <div className="flex items-center gap-2">
-              <Button size="icon" variant="outline" className="h-8 w-8" onClick={prevWeek}><ChevronLeft className="h-4 w-4" /></Button>
-              <span className="text-sm font-medium px-2 min-w-[80px] text-center">
-                {isCurrentWeek ? "Tuần này" : `Tuần ${weekOffset > 0 ? '+' : ''}${weekOffset}`}
-              </span>
-              <Button size="icon" variant="outline" className="h-8 w-8" onClick={nextWeek}><ChevronRight className="h-4 w-4" /></Button>
-            </div>
-          }
+      <div className="space-y-5 max-w-3xl mx-auto">
+
+        <SectionHeader
+          title="Lịch học của tôi"
+          subtitle={`${totalSessions} buổi học trong kỳ này`}
         />
 
-        <div className="grid grid-cols-1 md:grid-cols-7 gap-4">
-          {DAYS_OF_WEEK.map((day, i) => {
-            const classes = scheduleByDay[day];
-            
-            const dateObj = new Date(startOfWeek);
-            dateObj.setDate(startOfWeek.getDate() + i);
-            const dateNumber = dateObj.getDate();
-            
-            const isToday = isCurrentWeek && i === (realToday.getDay() === 0 ? 6 : realToday.getDay() - 1);
-            
-            return (
-              <div key={day} className="flex flex-col gap-3 min-h-[500px] animate-fade-in" style={{ animationDelay: `${i * 100}ms` }}>
-                <div className={`p-3 rounded-xl text-center border-b-2 ${
-                  isToday 
-                    ? "bg-primary text-primary-foreground border-primary shadow-md" 
-                    : "bg-muted/50 text-muted-foreground border-transparent"
-                }`}>
-                  <p className="text-xs uppercase font-bold tracking-wider">{day}</p>
-                  <p className={`text-xl font-black mt-1 ${isToday ? "text-white" : "text-foreground"}`}>{dateNumber}</p>
-                </div>
+        {/* Controls */}
+        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+          {/* Range toggle */}
+          <div className="flex rounded-xl border border-border bg-muted/40 p-1 gap-1">
+            {([
+              { value: "2w", icon: CalendarRange, label: "2 tuần" },
+              { value: "1m", icon: CalendarDays,  label: "1 tháng" },
+            ] as const).map(opt => (
+              <button
+                key={opt.value}
+                onClick={() => { setRange(opt.value); setOffset(0); }}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                  range === opt.value
+                    ? "bg-primary text-primary-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <opt.icon className="h-3.5 w-3.5" />
+                {opt.label}
+              </button>
+            ))}
+          </div>
 
-                <div className="flex flex-col gap-3 flex-1 relative">
-                  {classes.length === 0 ? (
-                    <div className="absolute inset-0 flex flex-col items-center justify-center opacity-30 text-muted-foreground">
-                      <div className="h-px w-full bg-border absolute top-1/2 -translate-y-1/2" />
-                      <span className="bg-background px-2 text-[10px] uppercase font-semibold relative z-10">Trống</span>
-                    </div>
-                  ) : (
-                    classes.map((cls, idx) => (
-                      <Card key={`${cls.id}-${idx}`} className={`overflow-hidden border-0 shadow-sm transition-transform hover:-translate-y-1 ${isToday ? "ring-2 ring-primary/20" : ""}`}>
-                        <div className="h-1.5 w-full" style={{ background: cls.color }} />
-                        <CardContent className="p-3">
-                          <div className="flex items-center gap-1.5 mb-2">
-                            <Clock className="h-3.5 w-3.5 text-muted-foreground" />
-                            <span className="text-[11px] font-bold text-foreground">{cls.start_time} - {cls.end_time}</span>
-                          </div>
-                          <h4 className="font-semibold text-sm text-foreground leading-tight mb-1">{cls.class_name}</h4>
-                          <p className="text-[10px] text-muted-foreground mb-3">{cls.subject}</p>
-                          <div className="flex items-center justify-between mt-auto pt-2 border-t border-border/50">
-                            {cls.classroom ? (
-                              <Badge variant="outline" className="text-[9px] bg-muted/50 border-0 flex items-center gap-1">
-                                <MapPin className="h-2.5 w-2.5" /> {cls.classroom}
-                              </Badge>
-                            ) : (
-                              <Badge variant="outline" className="text-[9px] bg-blue-50 text-blue-600 border-0 flex items-center gap-1 dark:bg-blue-900/30 dark:text-blue-400">
-                                <Video className="h-2.5 w-2.5" /> Online
-                              </Badge>
-                            )}
-                          </div>
-                        </CardContent>
-                      </Card>
-                    ))
+          {/* Navigation */}
+          <div className="flex items-center gap-2 sm:ml-auto">
+            <Button size="icon" variant="outline" className="h-8 w-8" onClick={() => setOffset(o => o - 1)}>
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <button
+              onClick={() => setOffset(0)}
+              className="text-sm font-semibold px-3 py-1.5 rounded-lg hover:bg-muted transition-colors min-w-[130px] text-center"
+            >
+              {windowLabel}
+            </button>
+            <Button size="icon" variant="outline" className="h-8 w-8" onClick={() => setOffset(o => o + 1)}>
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+
+        {/* Day list */}
+        <div className="space-y-2">
+          {visibleDays.map(({ date, dow, label, short, isToday, isPast, sessions }) => {
+            const hasSessions = sessions.length > 0;
+
+            return (
+              <div key={date.toISOString()} className={`rounded-2xl overflow-hidden transition-all ${
+                isToday
+                  ? "ring-2 ring-primary shadow-md shadow-primary/10"
+                  : hasSessions
+                    ? "border border-border"
+                    : "border border-border/40 opacity-50"
+              }`}>
+
+                {/* Day header */}
+                <div className={`flex items-center gap-3 px-4 py-3 ${
+                  isToday
+                    ? "bg-primary text-primary-foreground"
+                    : hasSessions
+                      ? "bg-muted/40"
+                      : "bg-muted/20"
+                }`}>
+                  {/* Date circle */}
+                  <div className={`h-9 w-9 rounded-full flex flex-col items-center justify-center shrink-0 font-bold leading-none ${
+                    isToday
+                      ? "bg-white/20 text-white"
+                      : isPast
+                        ? "bg-muted text-muted-foreground"
+                        : "bg-background text-foreground shadow-sm"
+                  }`}>
+                    <span className="text-[9px] uppercase font-bold opacity-70">{short}</span>
+                    <span className="text-sm">{date.getDate()}</span>
+                  </div>
+
+                  <div className="flex-1 min-w-0">
+                    <span className={`text-sm font-semibold ${isToday ? "text-white" : "text-foreground"}`}>
+                      {label}
+                      {isToday && <span className="ml-2 text-xs font-medium opacity-80">· Hôm nay</span>}
+                    </span>
+                    <p className={`text-xs mt-0.5 ${isToday ? "text-white/70" : "text-muted-foreground"}`}>
+                      {formatDate(date)} {new Date().getFullYear() !== date.getFullYear() ? date.getFullYear() : ""}
+                    </p>
+                  </div>
+
+                  {hasSessions && (
+                    <Badge
+                      className={`shrink-0 text-[10px] ${isToday ? "bg-white/20 text-white border-0" : ""}`}
+                      variant={isToday ? "secondary" : "outline"}
+                    >
+                      {sessions.length} buổi
+                    </Badge>
                   )}
                 </div>
+
+                {/* Sessions */}
+                {hasSessions && (
+                  <div className="divide-y divide-border/50 bg-card">
+                    {sessions.map((s, idx) => (
+                      <div key={`${s.classId}-${idx}`} className="flex items-stretch gap-0 group hover:bg-muted/20 transition-colors">
+                        {/* Color strip */}
+                        <div className="w-1 shrink-0 rounded-none" style={{ background: s.color }} />
+
+                        <div className="flex-1 flex flex-col sm:flex-row sm:items-center gap-2 px-4 py-3">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1 flex-wrap">
+                              <span className="text-sm font-semibold text-foreground">{s.className}</span>
+                              <span className="text-xs text-muted-foreground">{s.subject}</span>
+                            </div>
+                            <div className="flex items-center gap-3 flex-wrap">
+                              <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                                <Clock className="h-3 w-3" />
+                                {s.start} – {s.end}
+                              </span>
+                              {s.classroom ? (
+                                <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                                  <MapPin className="h-3 w-3" />
+                                  {s.classroom}
+                                </span>
+                              ) : (
+                                <span className="flex items-center gap-1 text-xs text-blue-500">
+                                  <Video className="h-3 w-3" /> Online
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="shrink-0">
+                            <span
+                              className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold text-white"
+                              style={{ background: s.color }}
+                            >
+                              <BookOpen className="h-2.5 w-2.5 inline mr-0.5" />
+                              {s.subject}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Empty day (no class) */}
+                {!hasSessions && (
+                  <div className="px-4 py-2 bg-card">
+                    <p className="text-xs text-muted-foreground italic">Không có buổi học</p>
+                  </div>
+                )}
               </div>
             );
           })}
