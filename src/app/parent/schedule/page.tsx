@@ -1,13 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { SectionHeader } from "@/components/shared";
 import { MOCK_STUDENTS, MOCK_CLASSES } from "@/lib/mock-data";
-import { Calendar, Clock, MapPin, Video, ChevronLeft, ChevronRight, Filter } from "lucide-react";
+import { Calendar, Clock, MapPin, Video, ChevronLeft, ChevronRight, Filter, StickyNote, ChevronDown, BookOpen } from "lucide-react";
+import { getCurriculum } from "@/lib/storage";
+import type { CurriculumSession } from "@/lib/storage";
 
 const DAYS_OF_WEEK = ["Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy", "Chủ Nhật"];
 
@@ -26,9 +28,33 @@ const getClassesForChild = (childId: string) => {
   return [];
 };
 
+// per-class note + curriculum maps loaded from localStorage
+type NoteMap = Record<string, string>; // dateStr → note text
+type CurrMap = Record<string, CurriculumSession>; // dateStr → session
+
 export default function ParentSchedulePage() {
   const [weekOffset, setWeekOffset] = useState(0);
   const [selectedChildId, setSelectedChildId] = useState<string>("all");
+  const [expandedCard, setExpandedCard] = useState<string | null>(null); // key = `${classId}-${date}`
+  const [notesByClass, setNotesByClass] = useState<Record<string, NoteMap>>({});
+  const [currByClass, setCurrByClass] = useState<Record<string, CurrMap>>({});
+
+  useEffect(() => {
+    const nb: Record<string, NoteMap> = {};
+    const cb: Record<string, CurrMap> = {};
+    MOCK_CLASSES.forEach(cls => {
+      try {
+        const raw = localStorage.getItem(`tutorhub_session_notes_${cls.id}`);
+        if (raw) nb[cls.id] = JSON.parse(raw);
+      } catch {}
+      const chapters = getCurriculum(cls.id);
+      const byDate: CurrMap = {};
+      chapters.forEach(ch => ch.sessions.forEach(s => { if (s.date) byDate[s.date] = s; }));
+      if (Object.keys(byDate).length) cb[cls.id] = byDate;
+    });
+    setNotesByClass(nb);
+    setCurrByClass(cb);
+  }, []);
 
   const children = MOCK_STUDENTS.filter(s => s.parent_id === "p1");
   const childColors: Record<string, string> = {
@@ -164,43 +190,83 @@ export default function ParentSchedulePage() {
                       <span className="bg-background px-2 text-[10px] uppercase font-semibold relative z-10">Trống</span>
                     </div>
                   ) : (
-                    classes.map((cls, idx) => (
-                      <Card key={`${cls.id}-${idx}`} className={`overflow-hidden border border-border/50 shadow-sm transition-all hover:shadow-md hover:-translate-y-1 ${isToday ? "ring-2 ring-primary/20" : ""}`}>
-                        <div className={`h-1.5 w-full bg-gradient-to-r ${childColors[cls.child.id]}`} />
-                        <CardContent className="p-3">
-                          
-                          {/* Child Identifier */}
-                          {selectedChildId === "all" && (
-                            <div className="mb-2 flex items-center gap-1.5">
-                              <div className={`h-5 w-5 rounded-full bg-gradient-to-br ${childColors[cls.child.id]} flex items-center justify-center text-[9px] font-bold text-white`}>
-                                {cls.child.full_name.charAt(0)}
+                    classes.map((cls, idx) => {
+                      const dateStr = dateObj.toISOString().slice(0, 10);
+                      const cardKey = `${cls.id}-${dateStr}-${idx}`;
+                      const note = notesByClass[cls.id]?.[dateStr];
+                      const currSession = currByClass[cls.id]?.[dateStr];
+                      const hasExtra = !!(note || currSession);
+                      const isExpanded = expandedCard === cardKey;
+                      return (
+                        <Card key={cardKey} className={`overflow-hidden border border-border/50 shadow-sm transition-all ${isToday ? "ring-2 ring-primary/20" : ""} ${hasExtra ? "hover:shadow-md" : "hover:shadow-md hover:-translate-y-1"}`}>
+                          <div className={`h-1.5 w-full bg-gradient-to-r ${childColors[cls.child.id]}`} />
+                          <CardContent className="p-3">
+                            {/* Child Identifier */}
+                            {selectedChildId === "all" && (
+                              <div className="mb-2 flex items-center gap-1.5">
+                                <div className={`h-5 w-5 rounded-full bg-gradient-to-br ${childColors[cls.child.id]} flex items-center justify-center text-[9px] font-bold text-white`}>
+                                  {cls.child.full_name.charAt(0)}
+                                </div>
+                                <span className="text-[10px] font-semibold text-muted-foreground truncate">{cls.child.full_name}</span>
                               </div>
-                              <span className="text-[10px] font-semibold text-muted-foreground truncate">{cls.child.full_name}</span>
-                            </div>
-                          )}
-
-                          <div className="flex items-center gap-1.5 mb-1.5">
-                            <Clock className="h-3.5 w-3.5 text-muted-foreground" />
-                            <span className="text-[11px] font-bold text-foreground">{cls.start_time} - {cls.end_time}</span>
-                          </div>
-                          
-                          <h4 className="font-bold text-sm text-foreground leading-tight mb-1">{cls.class_name}</h4>
-                          <p className="text-[10px] text-muted-foreground mb-3 font-medium">{cls.subject}</p>
-                          
-                          <div className="flex items-center justify-between mt-auto pt-2 border-t border-border/50">
-                            {cls.classroom ? (
-                              <Badge variant="outline" className="text-[9px] bg-muted/50 border-0 flex items-center gap-1">
-                                <MapPin className="h-2.5 w-2.5" /> {cls.classroom}
-                              </Badge>
-                            ) : (
-                              <Badge variant="outline" className="text-[9px] bg-blue-50 text-blue-600 border-0 flex items-center gap-1 dark:bg-blue-900/30 dark:text-blue-400">
-                                <Video className="h-2.5 w-2.5" /> Online
-                              </Badge>
                             )}
-                          </div>
-                        </CardContent>
-                      </Card>
-                    ))
+
+                            <div className="flex items-center gap-1.5 mb-1.5">
+                              <Clock className="h-3.5 w-3.5 text-muted-foreground" />
+                              <span className="text-[11px] font-bold text-foreground">{cls.start_time} - {cls.end_time}</span>
+                            </div>
+
+                            <h4 className="font-bold text-sm text-foreground leading-tight mb-1">{cls.class_name}</h4>
+                            <p className="text-[10px] text-muted-foreground mb-2 font-medium">{cls.subject}</p>
+
+                            <div className="flex items-center justify-between pt-2 border-t border-border/50">
+                              {cls.classroom ? (
+                                <Badge variant="outline" className="text-[9px] bg-muted/50 border-0 flex items-center gap-1">
+                                  <MapPin className="h-2.5 w-2.5" /> {cls.classroom}
+                                </Badge>
+                              ) : (
+                                <Badge variant="outline" className="text-[9px] bg-blue-50 text-blue-600 border-0 flex items-center gap-1 dark:bg-blue-900/30 dark:text-blue-400">
+                                  <Video className="h-2.5 w-2.5" /> Online
+                                </Badge>
+                              )}
+                              {hasExtra && (
+                                <button
+                                  onClick={() => setExpandedCard(isExpanded ? null : cardKey)}
+                                  className="flex items-center gap-0.5 text-[9px] font-semibold text-primary hover:underline"
+                                >
+                                  {note && <StickyNote className="h-3 w-3" />}
+                                  {currSession && <BookOpen className="h-3 w-3" />}
+                                  <ChevronDown className={`h-3 w-3 transition-transform ${isExpanded ? "rotate-180" : ""}`} />
+                                </button>
+                              )}
+                            </div>
+
+                            {/* Expanded session detail */}
+                            {isExpanded && hasExtra && (
+                              <div className="mt-2 space-y-1.5 border-t border-border/40 pt-2">
+                                {note && (
+                                  <div className="flex items-start gap-1.5 p-2 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800/50">
+                                    <StickyNote className="h-3 w-3 text-blue-500 shrink-0 mt-0.5" />
+                                    <p className="text-[10px] text-blue-800 dark:text-blue-300 leading-relaxed">{note}</p>
+                                  </div>
+                                )}
+                                {currSession && currSession.lessons.filter(l => l.is_published).length > 0 && (
+                                  <div className="space-y-0.5">
+                                    <p className="text-[9px] font-semibold text-muted-foreground uppercase">{currSession.title}</p>
+                                    {currSession.lessons.filter(l => l.is_published).map(l => (
+                                      <div key={l.id} className="flex items-center gap-1 text-[10px] text-foreground/80">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-primary/40 shrink-0" />
+                                        {l.title}
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </CardContent>
+                        </Card>
+                      );
+                    })
                   )}
                 </div>
               </div>

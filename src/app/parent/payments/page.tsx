@@ -1,128 +1,162 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { SectionHeader } from "@/components/shared";
-import { DollarSign, CreditCard, Receipt, Clock, CheckCircle2, AlertCircle, ArrowRight, X, QrCode, UploadCloud, Users } from "lucide-react";
-import { useState } from "react";
+import {
+  getInvoices, updateInvoiceStatus, type TuitionInvoice,
+} from "@/lib/storage";
 import { MOCK_STUDENTS } from "@/lib/mock-data";
+import {
+  DollarSign, CreditCard, Receipt, Clock, CheckCircle2,
+  AlertCircle, ArrowRight, X, QrCode, UploadCloud, Users,
+} from "lucide-react";
 
-// Generate some mock invoices specifically for parent "p1"
-const PARENT_INVOICES = [
-  { id: "INV-2025-05-01", child_id: "s1", title: "Học phí Toán cao cấp - Tháng 5", amount: 1500000, due_date: "2025-05-15", status: "pending" },
-  { id: "INV-2025-05-02", child_id: "s1", title: "Tài liệu ôn thi cuối kỳ", amount: 350000, due_date: "2025-05-20", status: "pending" },
-  { id: "INV-2025-05-03", child_id: "s4", title: "Học phí Hóa học cơ bản - Tháng 5", amount: 1200000, due_date: "2025-05-15", status: "pending" },
-  { id: "INV-2025-04-01", child_id: "s1", title: "Học phí Toán cao cấp - Tháng 4", amount: 1500000, due_date: "2025-04-15", status: "paid", paid_at: "2025-04-12" },
-  { id: "INV-2025-04-02", child_id: "s4", title: "Học phí Hóa học cơ bản - Tháng 4", amount: 1200000, due_date: "2025-04-15", status: "paid", paid_at: "2025-04-13" },
-];
+const PARENT_ID = "p1";
+
+const formatVND = (n: number) =>
+  new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" }).format(n);
 
 export default function ParentPaymentsPage() {
-  const [invoices, setInvoices] = useState(PARENT_INVOICES);
-  const [selectedInvoice, setSelectedInvoice] = useState<any>(null);
-  const [receiptFile, setReceiptFile] = useState<File | null>(null);
+  const children = MOCK_STUDENTS.filter(s => s.parent_id === PARENT_ID);
+  const childIds  = children.map(c => c.id);
 
-  const children = MOCK_STUDENTS.filter(s => s.parent_id === "p1");
-  const getChildName = (id: string) => children.find(c => c.id === id)?.full_name || "Học viên";
-  
-  const pendingInvoices = invoices.filter(inv => inv.status === "pending");
-  const paidInvoices = invoices.filter(inv => inv.status === "paid" || inv.status === "pending_verification");
-  const totalPending = pendingInvoices.reduce((sum, inv) => sum + inv.amount, 0);
+  const [invoices,     setInvoices]     = useState<TuitionInvoice[]>([]);
+  const [modalInvoice, setModalInvoice] = useState<TuitionInvoice | null>(null);
+  const [receiptFile,  setReceiptFile]  = useState<File | null>(null);
+  const [submitting,   setSubmitting]   = useState(false);
 
-  const formatVND = (amount: number) => {
-    return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(amount);
-  };
+  const load = () => setInvoices(getInvoices().filter(inv => childIds.includes(inv.child_id)));
+  useEffect(() => { load(); }, []);
 
-  const handleCloseModal = () => {
-    setSelectedInvoice(null);
+  const getChildName = (id: string) => children.find(c => c.id === id)?.full_name ?? "Học viên";
+
+  const pendingInvoices = invoices.filter(i => i.status === "pending");
+  const otherInvoices   = invoices.filter(i => i.status !== "pending");
+  const totalPending    = pendingInvoices.reduce((s, i) => s + i.amount, 0);
+
+  // invoices already submitted by student
+  const studentSubmitted = invoices.filter(i => i.status === "pending_verification" && i.submitted_by === "student");
+
+  const openModal = (inv: TuitionInvoice) => {
+    setModalInvoice(inv);
     setReceiptFile(null);
   };
 
-  const handleConfirmTransfer = () => {
-    if (!selectedInvoice || !receiptFile) return;
-    
-    if (selectedInvoice.id === "ALL") {
-      setInvoices(prev => prev.map(inv => 
-        inv.status === "pending" ? { ...inv, status: "pending_verification" } : inv
-      ));
-    } else {
-      setInvoices(prev => prev.map(inv => 
-        inv.id === selectedInvoice.id ? { ...inv, status: "pending_verification" } : inv
-      ));
-    }
-    
-    handleCloseModal();
+  const openPayAll = () => {
+    if (totalPending === 0) return;
+    setModalInvoice({
+      id: "ALL",
+      child_id: "ALL",
+      title: "Thanh toán gộp tất cả hóa đơn",
+      amount: totalPending,
+      due_date: "",
+      status: "pending",
+    });
+    setReceiptFile(null);
   };
+
+  const closeModal = () => {
+    setModalInvoice(null);
+    setReceiptFile(null);
+  };
+
+  const handleConfirm = async () => {
+    if (!modalInvoice || !receiptFile) return;
+    setSubmitting(true);
+    await new Promise(r => setTimeout(r, 600));
+    updateInvoiceStatus(modalInvoice.id, "pending_verification", "parent");
+    load();
+    setSubmitting(false);
+    closeModal();
+  };
+
+  const transferNote = modalInvoice
+    ? `PH THANH TOAN ${modalInvoice.id}`
+    : "";
 
   return (
     <PortalLayout role="parent" userName="Trần Văn Minh" pageTitle="Thanh toán">
       <div className="space-y-6 max-w-5xl mx-auto pb-10">
-        <SectionHeader 
-          title="Thanh toán Học phí" 
-          subtitle="Quản lý và thanh toán học phí cho các con một cách tiện lợi, an toàn." 
+        <SectionHeader
+          title="Thanh toán Học phí"
+          subtitle="Quản lý và thanh toán học phí cho các con một cách tiện lợi, an toàn."
         />
+
+        {/* Banner: student already submitted */}
+        {studentSubmitted.length > 0 && (
+          <div className="flex items-start gap-3 p-4 rounded-xl bg-emerald-50 dark:bg-emerald-900/10 border border-emerald-200 dark:border-emerald-800/50">
+            <CheckCircle2 className="h-5 w-5 text-emerald-500 shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-semibold text-emerald-800 dark:text-emerald-300">
+                Học viên đã nộp biên lai cho {studentSubmitted.length} hóa đơn
+              </p>
+              <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-0.5">
+                Đang chờ admin xác nhận — bạn không cần thanh toán lại.
+              </p>
+            </div>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 space-y-6">
-            
-            {/* Main Total Card */}
+
+            {/* Hero card */}
             <Card className="overflow-hidden border-0 shadow-lg relative animate-fade-in group">
               <div className="absolute inset-0 bg-gradient-to-br from-indigo-600 via-purple-600 to-indigo-800 transition-transform duration-500 group-hover:scale-105" />
-              <div className="absolute top-0 right-0 p-8 opacity-10 transition-transform duration-500 group-hover:rotate-12 group-hover:scale-110">
+              <div className="absolute top-0 right-0 p-8 opacity-10 group-hover:rotate-12 transition-transform duration-500">
                 <DollarSign className="w-40 h-40" />
               </div>
               <CardContent className="p-8 relative z-10 text-white">
                 <p className="text-indigo-100 font-medium mb-1">Tổng học phí cần thanh toán</p>
-                <div className="flex items-end gap-4 mb-6">
-                  <h2 className="text-4xl sm:text-5xl font-black tracking-tight drop-shadow-sm">{formatVND(totalPending)}</h2>
-                </div>
-                <div className="flex flex-wrap items-center gap-3 mt-8">
-                  <Button 
-                    size="lg" 
-                    className="bg-white text-indigo-600 hover:bg-indigo-50 border-0 font-bold px-8 shadow-[0_4px_20px_rgba(255,255,255,0.3)] transition-all hover:shadow-[0_8px_30px_rgba(255,255,255,0.4)] hover:-translate-y-1 rounded-xl" 
-                    onClick={() => {
-                      if (totalPending > 0) {
-                        setSelectedInvoice({ id: "ALL", title: "Thanh toán gộp tất cả hóa đơn", amount: totalPending });
-                      }
-                    }}
+                <h2 className="text-4xl sm:text-5xl font-black tracking-tight drop-shadow-sm mb-6">
+                  {formatVND(totalPending)}
+                </h2>
+                <div className="flex flex-wrap items-center gap-3">
+                  <Button
+                    size="lg"
+                    className="bg-white text-indigo-600 hover:bg-indigo-50 border-0 font-bold px-8 shadow-[0_4px_20px_rgba(255,255,255,0.3)] hover:-translate-y-1 transition-all rounded-xl"
+                    disabled={totalPending === 0}
+                    onClick={openPayAll}
                   >
                     <CreditCard className="h-5 w-5 mr-2" /> Thanh toán gộp tất cả
                   </Button>
-                  <Button size="lg" className="bg-white/10 hover:bg-white/20 text-white border border-white/20 backdrop-blur-md transition-all hover:-translate-y-1 rounded-xl">
-                    <Receipt className="h-5 w-5 mr-2" /> Lịch sử thanh toán
+                  <Button size="lg" className="bg-white/10 hover:bg-white/20 text-white border border-white/20 backdrop-blur-md hover:-translate-y-1 transition-all rounded-xl">
+                    <Receipt className="h-5 w-5 mr-2" /> Xem chính sách
                   </Button>
                 </div>
               </CardContent>
             </Card>
 
-            {/* Pending Invoices List */}
+            {/* Pending invoices */}
             <div className="space-y-4 animate-fade-in delay-100">
-              <h3 className="text-lg font-bold flex items-center gap-2 text-foreground">
+              <h3 className="text-base font-semibold flex items-center gap-2">
                 <AlertCircle className="h-5 w-5 text-amber-500" /> Cần thanh toán
               </h3>
-              
               {pendingInvoices.length > 0 ? (
-                <div className="space-y-4">
-                  {pendingInvoices.map((invoice) => (
-                    <Card key={invoice.id} className="border-l-4 border-l-amber-500 hover:shadow-md transition-shadow border-t-0 border-r-0 border-b-0 group">
-                      <CardContent className="p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-gradient-to-r from-card to-card hover:from-amber-50/50 dark:hover:from-amber-950/20">
+                <div className="space-y-3">
+                  {pendingInvoices.map(inv => (
+                    <Card key={inv.id} className="border-l-4 border-l-amber-500 hover:shadow-md transition-shadow group">
+                      <CardContent className="p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:from-amber-50/50 dark:hover:from-amber-950/20">
                         <div className="flex-1">
-                          <div className="flex items-center gap-3 mb-2">
-                            <span className="text-xs font-bold text-muted-foreground bg-muted px-2 py-0.5 rounded-md">{invoice.id}</span>
+                          <div className="flex items-center gap-2 mb-2 flex-wrap">
+                            <span className="text-xs font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-md">{inv.id}</span>
                             <Badge variant="warning" className="text-[10px] uppercase font-bold">Chưa thanh toán</Badge>
                             <span className="flex items-center gap-1 text-[11px] font-bold text-primary bg-primary/10 px-2 py-0.5 rounded-md">
-                              <Users className="h-3 w-3" /> {getChildName(invoice.child_id)}
+                              <Users className="h-3 w-3" /> {getChildName(inv.child_id)}
                             </span>
                           </div>
-                          <h4 className="font-bold text-foreground text-base group-hover:text-primary transition-colors">{invoice.title}</h4>
+                          <h4 className="font-bold text-foreground group-hover:text-primary transition-colors">{inv.title}</h4>
                           <p className="text-sm text-amber-600 dark:text-amber-500 mt-1.5 flex items-center gap-1.5 font-medium">
-                            <Clock className="h-4 w-4" /> Hạn chót: {new Date(invoice.due_date).toLocaleDateString('vi-VN')}
+                            <Clock className="h-4 w-4" /> Hạn chót: {new Date(inv.due_date).toLocaleDateString("vi-VN")}
                           </p>
                         </div>
                         <div className="flex flex-row sm:flex-col items-center sm:items-end justify-between gap-3 shrink-0 border-t border-border sm:border-0 pt-4 sm:pt-0">
-                          <span className="text-xl font-black text-foreground">{formatVND(invoice.amount)}</span>
-                          <Button size="sm" variant="gradient" className="w-full sm:w-auto font-bold rounded-lg shadow-sm" onClick={() => setSelectedInvoice(invoice)}>
+                          <span className="text-xl font-black">{formatVND(inv.amount)}</span>
+                          <Button size="sm" variant="gradient" className="w-full sm:w-auto font-bold" onClick={() => openModal(inv)}>
                             Thanh toán <ArrowRight className="h-3.5 w-3.5 ml-1.5" />
                           </Button>
                         </div>
@@ -141,43 +175,51 @@ export default function ParentPaymentsPage() {
               )}
             </div>
 
-            {/* Paid Invoices (History preview) */}
-            {paidInvoices.length > 0 && (
-              <div className="space-y-4 pt-4 animate-fade-in delay-200">
-                <h3 className="text-lg font-bold flex items-center gap-2 text-foreground">
+            {/* History */}
+            {otherInvoices.length > 0 && (
+              <div className="space-y-4 animate-fade-in delay-200">
+                <h3 className="text-base font-semibold flex items-center gap-2">
                   <CheckCircle2 className="h-5 w-5 text-emerald-500" /> Giao dịch gần đây
                 </h3>
                 <Card className="border border-border/50 shadow-sm overflow-hidden">
                   <div className="divide-y divide-border/50">
-                    {paidInvoices.map(invoice => (
-                      <div key={invoice.id} className="p-4 flex items-center justify-between hover:bg-muted/30 transition-colors">
-                        <div>
-                          <p className="font-semibold text-sm text-foreground mb-1">{invoice.title}</p>
-                          <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
-                            <span>Mã: {invoice.id}</span>
-                            <span className="font-medium text-emerald-600 dark:text-emerald-400">
-                              Học viên: {getChildName(invoice.child_id)}
-                            </span>
+                    {otherInvoices.map(inv => {
+                      const isPending = inv.status === "pending_verification";
+                      const byStudent = inv.submitted_by === "student";
+                      return (
+                        <div key={inv.id} className="p-4 flex items-center gap-3 hover:bg-muted/30 transition-colors">
+                          <div className={`h-10 w-10 rounded-full flex items-center justify-center shrink-0 ${isPending ? "bg-amber-100 dark:bg-amber-900/30" : "bg-emerald-100 dark:bg-emerald-900/30"}`}>
+                            {isPending
+                              ? <Clock className="h-5 w-5 text-amber-600 dark:text-amber-400" />
+                              : <CheckCircle2 className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="font-semibold text-sm text-foreground truncate">{inv.title}</p>
+                            <div className="flex items-center gap-2 text-[11px] text-muted-foreground mt-0.5 flex-wrap">
+                              <span>Mã: {inv.id}</span>
+                              <span className="font-medium text-primary">{getChildName(inv.child_id)}</span>
+                              {isPending && byStudent && (
+                                <span className="text-emerald-600 font-semibold">· Học viên đã nộp biên lai</span>
+                              )}
+                            </div>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <p className="font-bold text-sm">{formatVND(inv.amount)}</p>
+                            {isPending
+                              ? <p className="text-[10px] text-amber-600 font-medium mt-0.5">Chờ xác nhận</p>
+                              : <Badge variant="outline" className="mt-1 text-[9px] bg-emerald-50 text-emerald-600 border-emerald-200 dark:bg-emerald-900/20 dark:border-emerald-800">Đã thanh toán</Badge>
+                            }
                           </div>
                         </div>
-                        <div className="text-right">
-                          <p className="font-bold text-sm text-foreground">{formatVND(invoice.amount)}</p>
-                          <Badge variant="outline" className="mt-1 text-[9px] bg-emerald-50 text-emerald-600 border-emerald-200 dark:bg-emerald-900/20 dark:border-emerald-800">
-                            Đã thanh toán
-                          </Badge>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="p-3 bg-muted/20 border-t border-border/50 text-center">
-                    <Button variant="link" className="text-xs text-primary h-auto p-0 font-medium">Xem tất cả lịch sử</Button>
+                      );
+                    })}
                   </div>
                 </Card>
               </div>
             )}
           </div>
 
-          {/* Right Sidebar Info */}
+          {/* Right sidebar */}
           <div className="space-y-6 animate-fade-in delay-300">
             <Card className="border-0 shadow-md">
               <CardHeader className="pb-3 border-b border-border/50 bg-muted/20">
@@ -185,28 +227,25 @@ export default function ParentPaymentsPage() {
                   <CreditCard className="h-4 w-4 text-primary" /> Phương thức hỗ trợ
                 </CardTitle>
               </CardHeader>
-              <CardContent className="p-5 space-y-4">
-                <div className="flex items-center gap-3 p-3 rounded-xl border border-border bg-card hover:border-primary/30 transition-colors cursor-pointer">
-                  <div className="h-10 w-14 bg-[#005BAA] rounded-lg flex items-center justify-center text-white font-black text-xs shadow-inner">VNPay</div>
-                  <span className="text-sm font-semibold">Cổng thanh toán VNPay</span>
+              <CardContent className="p-5 space-y-3">
+                <div className="flex items-center gap-3 p-3 rounded-xl border border-primary/30 bg-primary/5 hover:border-primary/50 transition-colors">
+                  <div className="h-10 w-14 rounded-lg flex items-center justify-center text-xs font-black shadow-inner shrink-0 bg-slate-800 text-white">
+                    BANK
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold">Chuyển khoản Ngân hàng</p>
+                    <p className="text-[11px] text-muted-foreground">TPBank · VietQR</p>
+                  </div>
                 </div>
-                <div className="flex items-center gap-3 p-3 rounded-xl border border-border bg-card hover:border-primary/30 transition-colors cursor-pointer">
-                  <div className="h-10 w-14 bg-[#A50064] rounded-lg flex items-center justify-center text-white font-black text-xs shadow-inner">MoMo</div>
-                  <span className="text-sm font-semibold">Ví điện tử MoMo</span>
-                </div>
-                <div className="flex items-center gap-3 p-3 rounded-xl border border-border bg-card hover:border-primary/30 transition-colors cursor-pointer">
-                  <div className="h-10 w-14 bg-slate-800 rounded-lg flex items-center justify-center text-white font-black text-xs shadow-inner">BANK</div>
-                  <span className="text-sm font-semibold">Chuyển khoản VietQR</span>
-                </div>
-                <div className="bg-blue-50 dark:bg-blue-950/30 p-3 rounded-xl mt-4 border border-blue-100 dark:border-blue-900/50">
+                <div className="bg-blue-50 dark:bg-blue-950/30 p-3 rounded-xl mt-2 border border-blue-100 dark:border-blue-900/50">
                   <p className="text-xs text-blue-700 dark:text-blue-400 font-medium text-center leading-relaxed">
-                    Tất cả giao dịch được mã hóa 256-bit và bảo mật an toàn tuyệt đối.
+                    Hiện tại chỉ hỗ trợ chuyển khoản ngân hàng. Quét mã QR hoặc chuyển thủ công.
                   </p>
                 </div>
               </CardContent>
             </Card>
 
-            <Card className="border-0 shadow-md bg-gradient-to-br from-amber-50 to-orange-50 dark:from-amber-950/20 dark:to-orange-950/20 border-amber-100 dark:border-amber-900/30">
+            <Card className="border-0 shadow-md bg-gradient-to-br from-amber-50 to-orange-50 dark:from-amber-950/20 dark:to-orange-950/20">
               <CardHeader className="pb-3">
                 <CardTitle className="text-base flex items-center gap-2 text-amber-700 dark:text-amber-500 font-bold">
                   <AlertCircle className="h-4 w-4" /> Chính sách thanh toán
@@ -214,18 +253,10 @@ export default function ParentPaymentsPage() {
               </CardHeader>
               <CardContent className="p-5 pt-0">
                 <ul className="text-sm text-foreground/80 space-y-3 font-medium">
-                  <li className="flex gap-2">
-                    <span className="text-amber-500 mt-0.5">•</span>
-                    <span>Học phí cần được hoàn tất thanh toán trước ngày 15 hàng tháng.</span>
-                  </li>
-                  <li className="flex gap-2">
-                    <span className="text-amber-500 mt-0.5">•</span>
-                    <span>Gia đình có từ 2 bé theo học sẽ được tự động giảm 15% vào tổng hóa đơn.</span>
-                  </li>
-                  <li className="flex gap-2">
-                    <span className="text-amber-500 mt-0.5">•</span>
-                    <span>Nếu cần xuất hóa đơn VAT, vui lòng liên hệ Ban Giáo vụ sau khi thanh toán.</span>
-                  </li>
+                  <li className="flex gap-2"><span className="text-amber-500 mt-0.5">•</span><span>Học phí cần hoàn tất trước ngày 15 hàng tháng.</span></li>
+                  <li className="flex gap-2"><span className="text-amber-500 mt-0.5">•</span><span>Gia đình có từ 2 bé theo học được giảm 15% tổng hóa đơn.</span></li>
+                  <li className="flex gap-2"><span className="text-amber-500 mt-0.5">•</span><span>Chỉ cần <strong>một trong hai</strong> — phụ huynh hoặc học viên — nộp biên lai là đủ.</span></li>
+                  <li className="flex gap-2"><span className="text-amber-500 mt-0.5">•</span><span>Cần xuất hóa đơn VAT, vui lòng liên hệ Ban Giáo vụ sau khi thanh toán.</span></li>
                 </ul>
               </CardContent>
             </Card>
@@ -233,104 +264,113 @@ export default function ParentPaymentsPage() {
         </div>
       </div>
 
-      {/* Payment Modal */}
-      {selectedInvoice && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
-          <Card className="w-full max-w-2xl shadow-2xl border-0 overflow-hidden">
-            <div className="bg-gradient-to-r from-indigo-600 to-purple-600 p-6 text-white flex justify-between items-start">
-              <div>
-                <h3 className="text-xl font-bold mb-1">Thanh toán hóa đơn</h3>
-                <p className="text-indigo-100 text-sm font-medium">{selectedInvoice.title}</p>
-              </div>
-              <Button size="icon" variant="ghost" className="text-white hover:bg-white/20 rounded-full h-8 w-8" onClick={handleCloseModal}>
-                <X className="h-5 w-5" />
+      {/* QR Payment Modal */}
+      {modalInvoice && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-fade-in p-4">
+          <div className="bg-card w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden border border-border flex flex-col max-h-[90vh]">
+
+            <div className="flex items-center justify-between p-4 border-b border-border/50 shrink-0">
+              <h3 className="font-bold text-lg flex items-center gap-2">
+                <QrCode className="h-5 w-5 text-primary" /> Thanh toán học phí
+              </h3>
+              <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full" onClick={closeModal}>
+                <X className="h-4 w-4" />
               </Button>
             </div>
-            
-            <CardContent className="p-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                {/* QR Code Section */}
-                <div className="flex flex-col items-center justify-center space-y-4">
-                  <div className="text-center w-full bg-muted/30 p-4 rounded-xl border border-border">
-                    <p className="text-sm text-muted-foreground font-medium mb-1">Số tiền thanh toán</p>
-                    <p className="text-3xl font-black text-primary">{formatVND(selectedInvoice.amount)}</p>
-                  </div>
-                  
-                  <div className="bg-white p-3 rounded-2xl shadow-sm border border-border inline-block">
-                    {/* Using the updated account number here just like in the student portal */}
-                    <img 
-                      src={`https://img.vietqr.io/image/MB-12604051999-print.png?amount=${selectedInvoice.amount}&addInfo=${encodeURIComponent(`PHU HUYNH THANH TOAN ${selectedInvoice.id}`)}`} 
-                      alt="VietQR" 
-                      className="w-48 h-48 object-contain"
-                    />
-                  </div>
-                  <div className="text-center space-y-1">
-                    <p className="text-sm font-bold flex items-center justify-center gap-1.5 text-foreground"><QrCode className="h-4 w-4" /> Quét mã để thanh toán</p>
-                    <p className="text-xs text-muted-foreground font-medium">Hỗ trợ mọi ứng dụng ngân hàng và ví điện tử</p>
-                  </div>
+
+            <div className="p-6 space-y-5 overflow-y-auto">
+              {/* Amount */}
+              <div className="w-full text-center bg-primary/5 p-4 rounded-xl border border-primary/20 space-y-1">
+                <p className="text-sm text-muted-foreground">Số tiền cần thanh toán:</p>
+                <p className="text-3xl font-black text-primary">{formatVND(modalInvoice.amount)}</p>
+                <p className="text-xs font-medium text-foreground px-4 line-clamp-2">{modalInvoice.title}</p>
+                {modalInvoice.child_id !== "ALL" && (
+                  <p className="text-xs text-primary font-semibold flex items-center justify-center gap-1">
+                    <Users className="h-3 w-3" /> {getChildName(modalInvoice.child_id)}
+                  </p>
+                )}
+              </div>
+
+              {/* QR + bank info */}
+              <div className="flex flex-col sm:flex-row gap-4 w-full items-center sm:items-start">
+                <div className="p-3 bg-white rounded-2xl shadow-sm border border-border shrink-0">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={`https://img.vietqr.io/image/970423-12604051999-compact.png?amount=${modalInvoice.amount}&addInfo=${encodeURIComponent(transferNote)}&accountName=LE%20HUY%20HOANG`}
+                    alt="VietQR"
+                    className="w-40 h-40 object-contain"
+                  />
                 </div>
-
-                {/* Bank Details & Upload Section */}
-                <div className="space-y-6 flex flex-col justify-center">
-                  <div className="bg-card p-4 rounded-xl border border-border shadow-sm">
-                    <h4 className="text-sm font-bold mb-3 border-b border-border pb-2">Chuyển khoản thủ công</h4>
-                    <div className="space-y-2.5 text-sm">
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Ngân hàng:</span>
-                        <span className="font-bold">MB Bank</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Số tài khoản:</span>
-                        <span className="font-bold text-primary text-base">12604051999</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Tên tài khoản:</span>
-                        <span className="font-bold">TUTORHUB CENTER</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Nội dung:</span>
-                        <span className="font-mono text-xs bg-muted px-2 py-1 rounded font-bold">PH THANH TOAN {selectedInvoice.id}</span>
-                      </div>
+                <div className="flex-1 w-full bg-muted/30 p-3 rounded-xl border border-border/50 space-y-2">
+                  <p className="text-[11px] text-muted-foreground uppercase font-bold tracking-wider">Thông tin người nhận</p>
+                  {[
+                    { label: "Ngân hàng",     value: "TPBank" },
+                    { label: "Số tài khoản",  value: "12604051999" },
+                    { label: "Chủ tài khoản", value: "LE HUY HOANG" },
+                  ].map(row => (
+                    <div key={row.label} className="flex justify-between items-center border-b border-border/50 pb-1.5 last:border-0 last:pb-0">
+                      <span className="text-xs text-muted-foreground">{row.label}:</span>
+                      <span className="text-sm font-semibold">{row.value}</span>
                     </div>
+                  ))}
+                  <div className="flex flex-col gap-1 pt-1">
+                    <span className="text-xs text-muted-foreground">Nội dung (Bắt buộc):</span>
+                    <span className="text-sm font-bold text-primary bg-primary/10 px-2 py-1 rounded select-all font-mono text-center">
+                      {transferNote}
+                    </span>
                   </div>
-
-                  <div className="space-y-3">
-                    <h4 className="text-sm font-bold flex items-center gap-2">
-                      <UploadCloud className="h-4 w-4" /> Tải lên biên lai
-                    </h4>
-                    <label className={`flex flex-col items-center justify-center w-full h-28 border-2 border-dashed rounded-xl cursor-pointer transition-colors ${receiptFile ? 'border-primary bg-primary/5' : 'border-border hover:bg-muted/50'}`}>
-                      <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                        {receiptFile ? (
-                          <>
-                            <CheckCircle2 className="w-8 h-8 text-primary mb-2" />
-                            <p className="text-sm font-bold text-primary">{receiptFile.name}</p>
-                          </>
-                        ) : (
-                          <>
-                            <UploadCloud className="w-8 h-8 text-muted-foreground mb-2" />
-                            <p className="text-sm text-muted-foreground font-medium"><span className="font-semibold text-primary">Nhấn để chọn</span> hoặc kéo thả ảnh</p>
-                            <p className="text-xs text-muted-foreground mt-1">PNG, JPG (Tối đa 5MB)</p>
-                          </>
-                        )}
-                      </div>
-                      <input type="file" className="hidden" accept="image/*" onChange={(e) => {
-                        if (e.target.files && e.target.files[0]) setReceiptFile(e.target.files[0]);
-                      }} />
-                    </label>
-                  </div>
-
-                  <Button 
-                    className="w-full h-12 text-base font-bold shadow-md hover:shadow-lg transition-all" 
-                    variant="gradient"
-                    disabled={!receiptFile}
-                    onClick={handleConfirmTransfer}
-                  >
-                    Xác nhận đã chuyển khoản
-                  </Button>
                 </div>
               </div>
-            </CardContent>
-          </Card>
+
+              {/* Upload receipt */}
+              <div className="space-y-2 border-t border-border/50 pt-4">
+                <p className="text-sm font-semibold flex items-center gap-2">
+                  <UploadCloud className="h-4 w-4 text-primary" />
+                  Tải lên biên lai giao dịch <span className="text-red-500">*</span>
+                </p>
+                <label className={`flex flex-col items-center justify-center w-full h-24 border-2 border-dashed rounded-xl cursor-pointer transition-colors relative ${receiptFile ? "border-primary bg-primary/5" : "border-border hover:bg-muted/50"}`}>
+                  <input
+                    type="file"
+                    accept="image/*,.pdf"
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                    onChange={e => setReceiptFile(e.target.files?.[0] ?? null)}
+                  />
+                  {receiptFile ? (
+                    <div className="flex items-center gap-2 text-emerald-600">
+                      <CheckCircle2 className="h-5 w-5" />
+                      <span className="text-sm font-medium">{receiptFile.name}</span>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center gap-1 text-muted-foreground">
+                      <UploadCloud className="h-7 w-7 mb-1 opacity-50" />
+                      <span className="text-sm font-medium"><span className="text-primary font-semibold">Bấm để chọn</span> hoặc kéo thả ảnh</span>
+                      <span className="text-xs">JPG, PNG, PDF (tối đa 5MB)</span>
+                    </div>
+                  )}
+                </label>
+              </div>
+
+              <div className="flex gap-3 text-xs text-amber-700 bg-amber-50 p-3 rounded-xl border border-amber-200/50 dark:bg-amber-950/20 dark:border-amber-900/50 dark:text-amber-400">
+                <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                <p className="leading-relaxed">
+                  <strong>Lưu ý:</strong> Nếu học viên đã thanh toán rồi, bạn không cần nộp lại. Admin sẽ đối soát trong vòng 1–4 giờ.
+                </p>
+              </div>
+            </div>
+
+            <div className="p-4 border-t border-border/50 bg-muted/10 flex gap-3 shrink-0">
+              <Button variant="outline" className="flex-1" onClick={closeModal}>Hủy bỏ</Button>
+              <Button
+                className="flex-1" variant="gradient"
+                disabled={!receiptFile || submitting}
+                onClick={handleConfirm}
+              >
+                {submitting ? (
+                  <><span className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full inline-block mr-2" />Đang gửi...</>
+                ) : "Tôi đã chuyển khoản"}
+              </Button>
+            </div>
+          </div>
         </div>
       )}
     </PortalLayout>

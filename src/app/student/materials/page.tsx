@@ -7,12 +7,13 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { getGrantedPackages } from "@/lib/storage";
+import { getGrantedPackages, getStudentPackages } from "@/lib/storage";
+import type { StudentPackage } from "@/lib/storage";
 import {
   PlayCircle, FileText, Pencil, Download, CheckCircle2,
   ChevronDown, ChevronRight, BookOpen, Clock, StickyNote,
   MessageSquare, Check, ArrowLeft, Search, ShoppingCart,
-  Lock, Star, Layers, Zap, Crown, X, Eye, Tag,
+  Lock, Star, Layers, Zap, Crown, X, Eye, Tag, Wifi, School,
 } from "lucide-react";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -243,6 +244,27 @@ const PAID_PACKAGES: PaidPackage[] = [
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
+
+const CURRENT_STUDENT_ID = "s1";
+
+interface TeacherCourse { id: string; classId?: string; packages: StudentPackage[] }
+function loadTeacherCourses(): TeacherCourse[] {
+  try {
+    const raw = typeof window !== "undefined" ? localStorage.getItem("tutorhub_teacher_materials") : null;
+    if (raw) return JSON.parse(raw) as TeacherCourse[];
+  } catch {}
+  // Default: tc1 belongs to c1, packages open to all
+  return [
+    { id: "tc1", classId: "c1", packages: ["online", "advanced", "offline"] },
+    { id: "tc2", packages: ["advanced", "offline"] },
+  ];
+}
+
+const PKG_META: Record<StudentPackage, { label: string; icon: React.ElementType; color: string }> = {
+  online:   { label: "Online",   icon: Wifi,   color: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300" },
+  advanced: { label: "Nâng cao", icon: Star,   color: "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300" },
+  offline:  { label: "Offline",  icon: School, color: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300" },
+};
 
 function fmt(n: number) { return n.toLocaleString("vi-VN") + "đ"; }
 
@@ -505,14 +527,27 @@ function PackageModal({
 // Browse view
 // ─────────────────────────────────────────────────────────────────────────────
 
-function BrowseView({ onSelectCourse }: { onSelectCourse: (c: OwnedCourse) => void }) {
+function BrowseView({ onSelectCourse }: { onSelectCourse: (c: OwnedCourse, isLocked: boolean) => void }) {
   const router = useRouter();
   const [search, setSearch] = useState("");
   const [selectedPkg, setSelectedPkg] = useState<PaidPackage | null>(null);
   const [previewLesson, setPreviewLesson] = useState<{ lesson: PaidLesson; pkg: PaidPackage } | null>(null);
   const [grantedPkgIds, setGrantedPkgIds] = useState<string[]>([]);
+  const [studentPkgs, setStudentPkgs] = useState<Record<string, StudentPackage | null>>({});
+  const [teacherCourses, setTeacherCourses] = useState<TeacherCourse[]>([]);
 
-  useEffect(() => { setGrantedPkgIds(getGrantedPackages()); }, []);
+  useEffect(() => {
+    setGrantedPkgIds(getGrantedPackages());
+    const tc = loadTeacherCourses();
+    setTeacherCourses(tc);
+    // Load student package for each owned course's class
+    const map: Record<string, StudentPackage | null> = {};
+    OWNED_COURSES.forEach(oc => {
+      const pkgs = getStudentPackages(oc.classId);
+      map[oc.id] = pkgs[CURRENT_STUDENT_ID] ?? null;
+    });
+    setStudentPkgs(map);
+  }, []);
 
   const filteredPkg = search.trim()
     ? PAID_PACKAGES.filter(p =>
@@ -537,24 +572,46 @@ function BrowseView({ onSelectCourse }: { onSelectCourse: (c: OwnedCourse) => vo
             const pct = Math.round((done / allLessons.length) * 100);
             const videoCount = allLessons.filter(l => l.type === "video").length;
             const pdfCount = allLessons.filter(l => l.type === "pdf").length;
+            const myPkg = studentPkgs[course.id];
+            const tc = teacherCourses.find(t => t.classId === course.classId);
+            const isPackageLocked = !!(myPkg && tc && tc.packages.length > 0 && !tc.packages.includes(myPkg));
 
             return (
               <Card
                 key={course.id}
-                className="group cursor-pointer hover:shadow-lg hover:border-primary/40 transition-all overflow-hidden"
-                onClick={() => onSelectCourse(course)}
+                className={`group cursor-pointer hover:shadow-lg hover:border-primary/40 transition-all overflow-hidden ${isPackageLocked ? "opacity-80" : ""}`}
+                onClick={() => onSelectCourse(course, isPackageLocked)}
               >
                 <div className="h-1.5 w-full" style={{ background: course.color }} />
                 <CardContent className="p-5">
                   <div className="flex items-start justify-between gap-3 mb-4">
                     <div className="h-11 w-11 rounded-xl flex items-center justify-center shrink-0"
                       style={{ background: course.color + "22" }}>
-                      <BookOpen className="h-5 w-5" style={{ color: course.color }} />
+                      {isPackageLocked
+                        ? <Lock className="h-5 w-5 text-muted-foreground" />
+                        : <BookOpen className="h-5 w-5" style={{ color: course.color }} />}
                     </div>
-                    <Badge className="text-[10px] shrink-0 bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 border-0">
-                      Đã sở hữu
-                    </Badge>
+                    <div className="flex flex-col items-end gap-1">
+                      <Badge className="text-[10px] shrink-0 bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 border-0">
+                        Đã sở hữu
+                      </Badge>
+                      {myPkg && (() => {
+                        const meta = PKG_META[myPkg];
+                        const Icon = meta.icon;
+                        return (
+                          <span className={`inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${meta.color}`}>
+                            <Icon className="h-2.5 w-2.5" />{meta.label}
+                          </span>
+                        );
+                      })()}
+                    </div>
                   </div>
+                  {isPackageLocked && (
+                    <div className="mb-3 px-2.5 py-2 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 text-[11px] text-amber-700 dark:text-amber-400 flex items-center gap-1.5">
+                      <Lock className="h-3 w-3 shrink-0" />
+                      Gói {myPkg && PKG_META[myPkg].label} chưa có quyền xem tài liệu này
+                    </div>
+                  )}
                   <h3 className="font-semibold text-sm text-foreground leading-snug mb-1 group-hover:text-primary transition-colors">
                     {course.title}
                   </h3>
@@ -714,23 +771,28 @@ function BrowseView({ onSelectCourse }: { onSelectCourse: (c: OwnedCourse) => vo
 // Player view (owned courses)
 // ─────────────────────────────────────────────────────────────────────────────
 
-function PlayerView({ course, onBack }: { course: OwnedCourse; onBack: () => void }) {
+function PlayerView({ course, isPackageLocked, onBack }: { course: OwnedCourse; isPackageLocked: boolean; onBack: () => void }) {
   const allLessons = course.chapters.flatMap(ch => ch.lessons);
   const doneCount = allLessons.filter(l => l.status === "done").length;
   const progress = Math.round((doneCount / allLessons.length) * 100);
 
-  const firstAccessible = allLessons.find(l => l.status !== "locked") ?? allLessons[0];
+  // If package-locked, only preview lessons are accessible
+  const effectiveLessons = allLessons.map(l =>
+    isPackageLocked && l.status !== "locked" && !l.isPreview ? { ...l, status: "locked" as const } : l
+  );
+
+  const firstAccessible = effectiveLessons.find(l => l.status !== "locked") ?? effectiveLessons[0];
   const [selectedId, setSelectedId] = useState(firstAccessible.id);
   const [openChapters, setOpenChapters] = useState<string[]>([course.chapters[0].id]);
   const [activeTab, setActiveTab] = useState<"files" | "notes" | "discuss">("files");
   const [completedIds, setCompletedIds] = useState<string[]>(
-    allLessons.filter(l => l.status === "done").map(l => l.id)
+    effectiveLessons.filter(l => l.status === "done").map(l => l.id)
   );
 
-  const selected = allLessons.find(l => l.id === selectedId)!;
-  const selectedIdx = allLessons.findIndex(l => l.id === selectedId);
-  const prevLesson = allLessons[selectedIdx - 1];
-  const nextLesson = allLessons[selectedIdx + 1];
+  const selected = effectiveLessons.find(l => l.id === selectedId)!;
+  const selectedIdx = effectiveLessons.findIndex(l => l.id === selectedId);
+  const prevLesson = effectiveLessons[selectedIdx - 1];
+  const nextLesson = effectiveLessons[selectedIdx + 1];
 
   const toggleChapter = (id: string) =>
     setOpenChapters(prev => prev.includes(id) ? prev.filter(c => c !== id) : [...prev, id]);
@@ -767,8 +829,9 @@ function PlayerView({ course, onBack }: { course: OwnedCourse; onBack: () => voi
         {/* Sidebar */}
         <div className="w-72 shrink-0 border-r border-border flex flex-col bg-muted/20 overflow-y-auto">
           {course.chapters.map((chapter, ci) => {
+            const effectiveChapterLessons = effectiveLessons.filter(l => chapter.lessons.some(cl => cl.id === l.id));
             const isOpen = openChapters.includes(chapter.id);
-            const chDone = chapter.lessons.filter(l => isDone(l.id)).length;
+            const chDone = effectiveChapterLessons.filter(l => isDone(l.id)).length;
             return (
               <div key={chapter.id}>
                 <button onClick={() => toggleChapter(chapter.id)}
@@ -780,7 +843,7 @@ function PlayerView({ course, onBack }: { course: OwnedCourse; onBack: () => voi
                 </button>
                 {isOpen && (
                   <div className="py-1">
-                    {chapter.lessons.map(lesson => {
+                    {effectiveChapterLessons.map(lesson => {
                       const done = isDone(lesson.id);
                       const isSelected = selectedId === lesson.id;
                       const accessible = lesson.status !== "locked" || done;
@@ -809,6 +872,15 @@ function PlayerView({ course, onBack }: { course: OwnedCourse; onBack: () => voi
 
         {/* Content */}
         <div className="flex-1 flex flex-col min-w-0">
+          {isPackageLocked && (
+            <div className="mx-4 mt-4 px-4 py-3 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 flex items-start gap-3">
+              <Lock className="h-5 w-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-semibold text-amber-800 dark:text-amber-300">Gói đăng ký chưa có quyền truy cập</p>
+                <p className="text-xs text-amber-700 dark:text-amber-400 mt-0.5">Chỉ các bài Preview mới xem được. Nâng cấp gói để mở khoá toàn bộ nội dung.</p>
+              </div>
+            </div>
+          )}
           {selected.type === "video" ? (
             <div className="bg-black flex items-center justify-center relative" style={{ height: 280 }}>
               <div className="flex flex-col items-center gap-3">
@@ -932,12 +1004,13 @@ function PlayerView({ course, onBack }: { course: OwnedCourse; onBack: () => voi
 
 export default function StudentMaterialsPage() {
   const [selectedCourse, setSelectedCourse] = useState<OwnedCourse | null>(null);
+  const [courseLocked, setCourseLocked] = useState(false);
   return (
     <PortalLayout role="student" userName="" pageTitle="Tài liệu">
       <div className="max-w-7xl mx-auto">
         {selectedCourse
-          ? <PlayerView course={selectedCourse} onBack={() => setSelectedCourse(null)} />
-          : <BrowseView onSelectCourse={setSelectedCourse} />}
+          ? <PlayerView course={selectedCourse} isPackageLocked={courseLocked} onBack={() => setSelectedCourse(null)} />
+          : <BrowseView onSelectCourse={(c, locked) => { setSelectedCourse(c); setCourseLocked(locked); }} />}
       </div>
     </PortalLayout>
   );

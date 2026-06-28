@@ -1,17 +1,19 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import {
-  Plus, Trash2, Edit3, ChevronDown, ChevronRight, Upload, X,
+  Plus, Trash2, Edit3, ChevronDown, ChevronRight, Upload,
   PlayCircle, FileText, Pencil, Eye, EyeOff, GripVertical,
-  Save, CheckCircle2, AlertCircle, Loader2, BookOpen, Layers,
-  Tag, Zap, Crown, DollarSign, Package, Settings,
+  Save, CheckCircle2, Loader2, BookOpen, Layers,
+  Zap, DollarSign, Package, Wifi, Star, School,
 } from "lucide-react";
+import type { StudentPackage } from "@/lib/storage";
+import { MOCK_CLASSES } from "@/lib/mock-data";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -43,10 +45,12 @@ interface Course {
   subject: string;
   grade: number;
   type: CourseType;
+  classId?: string; // for "class" type — which class this material belongs to
   price?: number;
   description: string;
   chapters: Chapter[];
   published: boolean;
+  packages: StudentPackage[]; // which subscription tiers have access
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -56,9 +60,9 @@ interface Course {
 const SEED_COURSES: Course[] = [
   {
     id: "tc1", title: "Toán 12 — Giải tích & Hình học",
-    subject: "Toán học", grade: 12, type: "class",
+    subject: "Toán học", grade: 12, type: "class", classId: "c1",
     description: "Tài liệu lớp Toán 12 — dành cho học viên đã đăng ký lớp.",
-    published: true,
+    published: true, packages: ["online", "advanced", "offline"],
     chapters: [
       {
         id: "ch1", title: "Hàm số & đồ thị",
@@ -84,7 +88,7 @@ const SEED_COURSES: Course[] = [
     subject: "Toán học", grade: 12, type: "paid_package",
     price: 299000,
     description: "Bộ tài liệu toàn diện nhất cho kỳ thi THPT.",
-    published: true,
+    published: true, packages: ["advanced", "offline"],
     chapters: [
       {
         id: "ch1", title: "Hàm số & đồ thị (Preview)",
@@ -108,6 +112,19 @@ const SEED_COURSES: Course[] = [
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
+const LS_KEY = "tutorhub_teacher_materials";
+function loadCourses(): Course[] {
+  if (typeof window === "undefined") return SEED_COURSES;
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (raw) return JSON.parse(raw) as Course[];
+  } catch {}
+  return SEED_COURSES;
+}
+function saveCourses(courses: Course[]) {
+  try { localStorage.setItem(LS_KEY, JSON.stringify(courses)); } catch {}
+}
+
 function uid() { return Math.random().toString(36).slice(2, 9); }
 function fmt(n: number) { return n.toLocaleString("vi-VN") + "đ"; }
 
@@ -125,6 +142,12 @@ const LESSON_LABEL: Record<LessonType, string> = {
 
 const GRADE_OPTIONS = [9, 10, 11, 12];
 const SUBJECT_OPTIONS = ["Toán học", "Vật lý", "Hóa học", "Tiếng Anh", "Ngữ văn", "Sinh học", "Lịch sử", "Địa lý"];
+
+const PKG_META: Record<StudentPackage, { label: string; icon: React.ElementType; color: string; ring: string }> = {
+  online:   { label: "Online",   icon: Wifi,   color: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300",     ring: "border-blue-400" },
+  advanced: { label: "Nâng cao", icon: Star,   color: "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300", ring: "border-purple-400" },
+  offline:  { label: "Offline",  icon: School, color: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300",   ring: "border-amber-400" },
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Lesson row editor
@@ -409,6 +432,21 @@ function CourseEditor({
                 ))}
               </div>
             </div>
+            {draft.type === "class" && (
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-muted-foreground uppercase">Lớp học liên kết</label>
+                <select
+                  value={draft.classId ?? ""}
+                  onChange={e => patch({ classId: e.target.value || undefined })}
+                  className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-primary"
+                >
+                  <option value="">— Chọn lớp —</option>
+                  {MOCK_CLASSES.map(c => (
+                    <option key={c.id} value={c.id}>{c.class_name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
             {draft.type === "paid_package" && (
               <div className="space-y-1.5">
                 <label className="text-xs font-semibold text-muted-foreground uppercase">Giá (VND)</label>
@@ -424,6 +462,37 @@ function CourseEditor({
                 </div>
               </div>
             )}
+            <div className="sm:col-span-2 space-y-1.5">
+              <label className="text-xs font-semibold text-muted-foreground uppercase">Gói đăng ký có quyền truy cập</label>
+              <div className="flex gap-2 flex-wrap">
+                {(["online", "advanced", "offline"] as StudentPackage[]).map(pkg => {
+                  const meta = PKG_META[pkg];
+                  const selected = draft.packages.includes(pkg);
+                  const Icon = meta.icon;
+                  return (
+                    <button
+                      key={pkg}
+                      type="button"
+                      onClick={() => patch({
+                        packages: selected
+                          ? draft.packages.filter(p => p !== pkg)
+                          : [...draft.packages, pkg],
+                      })}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all ${
+                        selected
+                          ? `${meta.color} ${meta.ring} border-2`
+                          : "border-border text-muted-foreground hover:border-primary/40"
+                      }`}
+                    >
+                      <Icon className="h-3.5 w-3.5" />
+                      {meta.label}
+                      {selected && <CheckCircle2 className="h-3 w-3 ml-0.5" />}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="text-[11px] text-muted-foreground">Chọn gói nào được xem tài liệu này. Học viên không thuộc gói sẽ thấy khoá.</p>
+            </div>
             <div className="sm:col-span-2 space-y-1.5">
               <label className="text-xs font-semibold text-muted-foreground uppercase">Mô tả</label>
               <textarea
@@ -532,7 +601,7 @@ function CourseCard({
         </h3>
         <p className="text-xs text-muted-foreground mb-4 line-clamp-2">{course.description}</p>
 
-        <div className="flex items-center gap-4 text-xs text-muted-foreground">
+        <div className="flex items-center gap-4 text-xs text-muted-foreground mb-3">
           <span className="flex items-center gap-1"><Layers className="h-3 w-3" />{course.chapters.length} chương</span>
           <span className="flex items-center gap-1"><PlayCircle className="h-3 w-3" />{videoCount} video</span>
           <span className="flex items-center gap-1"><FileText className="h-3 w-3" />{totalLessons} bài</span>
@@ -542,6 +611,19 @@ function CourseCard({
             </span>
           )}
         </div>
+        {course.packages.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {course.packages.map(pkg => {
+              const meta = PKG_META[pkg];
+              const Icon = meta.icon;
+              return (
+                <span key={pkg} className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full ${meta.color}`}>
+                  <Icon className="h-2.5 w-2.5" />{meta.label}
+                </span>
+              );
+            })}
+          </div>
+        )}
       </CardContent>
     </Card>
   );
@@ -555,20 +637,23 @@ export default function TeacherMaterialsPage() {
   const [courses, setCourses] = useState<Course[]>(SEED_COURSES);
   const [editing, setEditing] = useState<Course | null>(null);
 
+  useEffect(() => { setCourses(loadCourses()); }, []);
+
   const createCourse = () => {
     const c: Course = {
       id: uid(), title: "", subject: "Toán học", grade: 12,
       type: "class", description: "", chapters: [], published: false,
+      packages: ["online", "advanced", "offline"],
     };
-    setCourses(prev => [c, ...prev]);
+    setCourses(prev => { const next = [c, ...prev]; saveCourses(next); return next; });
     setEditing(c);
   };
 
   const updateCourse = (updated: Course) =>
-    setCourses(prev => prev.map(c => c.id === updated.id ? updated : c));
+    setCourses(prev => { const next = prev.map(c => c.id === updated.id ? updated : c); saveCourses(next); return next; });
 
   const deleteCourse = (id: string) => {
-    setCourses(prev => prev.filter(c => c.id !== id));
+    setCourses(prev => { const next = prev.filter(c => c.id !== id); saveCourses(next); return next; });
     if (editing?.id === id) setEditing(null);
   };
 
@@ -598,10 +683,9 @@ export default function TeacherMaterialsPage() {
 
             {/* Legend */}
             <div className="flex flex-wrap items-center gap-4 p-4 bg-muted/30 rounded-xl text-xs text-muted-foreground border border-border/50">
-              <span className="flex items-center gap-1.5"><Eye className="h-3.5 w-3.5 text-violet-500" /> Bài <strong>Preview</strong>: học viên xem miễn phí dù chưa mua</span>
-              <span className="flex items-center gap-1.5"><EyeOff className="h-3.5 w-3.5" /> Bài <strong>Khoá</strong>: chỉ học viên đã mua / đăng ký lớp mới xem được</span>
-              <span className="flex items-center gap-1.5"><BookOpen className="h-3.5 w-3.5 text-emerald-500" /> <strong>Lớp học</strong>: gắn với lớp cụ thể</span>
-              <span className="flex items-center gap-1.5"><Zap className="h-3.5 w-3.5 text-violet-500" /> <strong>Trả phí</strong>: học viên mua riêng</span>
+              <span className="flex items-center gap-1.5"><Eye className="h-3.5 w-3.5 text-violet-500" /> Bài <strong>Preview</strong>: học viên xem miễn phí dù chưa đăng ký</span>
+              <span className="flex items-center gap-1.5"><EyeOff className="h-3.5 w-3.5" /> Bài <strong>Khoá</strong>: chỉ đúng gói mới xem được</span>
+              <span className="flex items-center gap-1.5"><Wifi className="h-3.5 w-3.5 text-blue-500" /> <strong>Online</strong> · <Star className="h-3.5 w-3.5 text-purple-500 ml-0.5" /> <strong>Nâng cao</strong> · <School className="h-3.5 w-3.5 text-amber-500 ml-0.5" /> <strong>Offline</strong>: gói truy cập</span>
             </div>
 
             {/* Course list */}

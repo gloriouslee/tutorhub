@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
@@ -11,69 +12,138 @@ import {
 } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { UserRole } from "@/types";
+import { MOCK_CLASSES, MOCK_HOMEWORK, MOCK_NOTIFICATIONS } from "@/lib/mock-data";
 
+// ── Nav config (no static badges) ────────────────────────────────────────────
 interface NavItem {
   label: string;
   href: string;
   icon: React.ElementType;
-  badge?: number;
 }
 
 const navConfig: Record<UserRole, NavItem[]> = {
   student: [
-    { label: "Tổng quan", href: "/student", icon: LayoutDashboard },
-    { label: "Lớp của tôi", href: "/student/classes", icon: BookOpen },
-    { label: "Lịch học", href: "/student/schedule", icon: Calendar },
-    { label: "Bài tập", href: "/student/homework", icon: ClipboardList, badge: 2 },
-    { label: "Chuyên cần", href: "/student/attendance", icon: CheckSquare },
-    { label: "Điểm thi", href: "/student/scores", icon: GraduationCap },
-    { label: "Tài liệu", href: "/student/materials", icon: BookMarked },
-    { label: "Thanh toán", href: "/student/payments", icon: DollarSign },
-    { label: "Thông báo", href: "/student/notifications", icon: Bell, badge: 3 },
-    { label: "Hồ sơ", href: "/student/profile", icon: User },
+    { label: "Tổng quan",  href: "/student",               icon: LayoutDashboard },
+    { label: "Lớp của tôi",href: "/student/classes",        icon: BookOpen },
+    { label: "Lịch học",   href: "/student/schedule",       icon: Calendar },
+    { label: "Bài tập",    href: "/student/homework",       icon: ClipboardList },
+    { label: "Tài liệu",   href: "/student/materials",      icon: BookMarked },
+    { label: "Điểm thi",   href: "/student/scores",         icon: GraduationCap },
+    { label: "Thanh toán", href: "/student/payments",       icon: DollarSign },
+    { label: "Thông báo",  href: "/student/notifications",  icon: Bell },
+    { label: "Hồ sơ",      href: "/student/profile",        icon: User },
   ],
   parent: [
-    { label: "Tổng quan", href: "/parent", icon: LayoutDashboard },
-    { label: "Con của tôi", href: "/parent/children", icon: Users },
-    { label: "Lịch học", href: "/parent/schedule", icon: Calendar },
-    { label: "Chuyên cần", href: "/parent/attendance", icon: CheckSquare },
-    { label: "Thanh toán", href: "/parent/payments", icon: DollarSign },
-    { label: "Tiến độ", href: "/parent/progress", icon: BarChart3 },
-    { label: "Thông báo", href: "/parent/notifications", icon: Bell, badge: 2 },
+    { label: "Tổng quan",  href: "/parent",                 icon: LayoutDashboard },
+    { label: "Con của tôi",href: "/parent/children",        icon: Users },
+    { label: "Lịch học",   href: "/parent/schedule",        icon: Calendar },
+    { label: "Tiến độ",    href: "/parent/progress",        icon: BarChart3 },
+    { label: "Chuyên cần", href: "/parent/attendance",      icon: CheckSquare },
+    { label: "Thanh toán", href: "/parent/payments",        icon: DollarSign },
+    { label: "Thông báo",  href: "/parent/notifications",   icon: Bell },
   ],
   teacher: [
-    { label: "Tổng quan", href: "/teacher", icon: LayoutDashboard },
-    { label: "Lớp của tôi", href: "/teacher/classes", icon: BookOpen },
-    { label: "Chuyên cần", href: "/teacher/attendance", icon: CheckSquare },
-    { label: "Bài tập", href: "/teacher/homework", icon: ClipboardList },
-    { label: "Bài nộp", href: "/teacher/submissions", icon: FileText },
-    { label: "Tài liệu", href: "/teacher/materials", icon: BookMarked },
-    { label: "Học viên", href: "/teacher/students", icon: Users },
-    { label: "Tin tức", href: "/teacher/announcements", icon: MessageSquare },
-    { label: "Thông báo", href: "/teacher/notifications", icon: Bell, badge: 1 },
+    { label: "Tổng quan",  href: "/teacher",                icon: LayoutDashboard },
+    { label: "Lớp của tôi",href: "/teacher/classes",        icon: BookOpen },
+
+
+    { label: "Bài nộp",    href: "/teacher/submissions",    icon: FileText },
+    { label: "Tài liệu",   href: "/teacher/materials",      icon: BookMarked },
+    { label: "Học viên",   href: "/teacher/students",       icon: Users },
+    { label: "Tin tức",    href: "/teacher/announcements",  icon: MessageSquare },
+    { label: "Thông báo",  href: "/teacher/notifications",  icon: Bell },
   ],
   admin: [
-    { label: "Tổng quan", href: "/admin", icon: LayoutDashboard },
-    { label: "Học viên", href: "/admin/students", icon: GraduationCap },
-    { label: "Giáo viên", href: "/admin/teachers", icon: Users },
-    { label: "Lớp học", href: "/admin/classes", icon: BookOpen },
-    { label: "Tài liệu", href: "/admin/materials", icon: BookMarked },
-    { label: "Đăng ký HV", href: "/admin/enrollments", icon: GraduationCap },
-    { label: "Giao dịch", href: "/admin/transactions", icon: CheckSquare },
-    { label: "Thanh toán", href: "/admin/payments", icon: DollarSign },
-    { label: "Báo cáo", href: "/admin/reports", icon: BarChart3 },
-    { label: "Thông báo", href: "/admin/notifications", icon: Bell },
-    { label: "Cài đặt", href: "/admin/settings", icon: Settings },
+    { label: "Tổng quan",  href: "/admin",                  icon: LayoutDashboard },
+    { label: "Học viên",   href: "/admin/students",         icon: GraduationCap },
+    { label: "Giáo viên",  href: "/admin/teachers",         icon: Users },
+    { label: "Lớp học",    href: "/admin/classes",          icon: BookOpen },
+    { label: "Tài liệu",   href: "/admin/materials",        icon: BookMarked },
+    { label: "Đăng ký HV", href: "/admin/enrollments",      icon: GraduationCap },
+    { label: "Giao dịch",  href: "/admin/transactions",     icon: CheckSquare },
+    { label: "Thanh toán", href: "/admin/payments",         icon: DollarSign },
+    { label: "Báo cáo",    href: "/admin/reports",          icon: BarChart3 },
+    { label: "Thông báo",  href: "/admin/notifications",    icon: Bell },
+    { label: "Cài đặt",    href: "/admin/settings",         icon: Settings },
   ],
 };
 
 const roleConfig: Record<UserRole, { label: string; color: string; gradient: string }> = {
-  student: { label: "Cổng Học Viên", color: "text-indigo-600 dark:text-indigo-400", gradient: "from-indigo-500 to-purple-600" },
-  parent: { label: "Cổng Phụ Huynh", color: "text-teal-600 dark:text-teal-400", gradient: "from-teal-500 to-emerald-600" },
-  teacher: { label: "Cổng Giáo Viên", color: "text-amber-600 dark:text-amber-400", gradient: "from-amber-500 to-orange-600" },
-  admin: { label: "Cổng Quản Trị", color: "text-rose-600 dark:text-rose-400", gradient: "from-rose-500 to-pink-600" },
+  student: { label: "Cổng Học Viên",  color: "text-indigo-600 dark:text-indigo-400", gradient: "from-indigo-500 to-purple-600" },
+  parent:  { label: "Cổng Phụ Huynh", color: "text-teal-600  dark:text-teal-400",   gradient: "from-teal-500  to-emerald-600" },
+  teacher: { label: "Cổng Giáo Viên", color: "text-amber-600 dark:text-amber-400",  gradient: "from-amber-500 to-orange-600" },
+  admin:   { label: "Cổng Quản Trị",  color: "text-rose-600  dark:text-rose-400",   gradient: "from-rose-500  to-pink-600" },
 };
 
+// ── Badge computation ─────────────────────────────────────────────────────────
+function ls(key: string): string | null {
+  try { return localStorage.getItem(key); } catch { return null; }
+}
+function parseSet(key: string): Set<string> {
+  try { return new Set(JSON.parse(ls(key) ?? "[]")); } catch { return new Set(); }
+}
+
+function computeBadges(role: UserRole): Record<string, number> {
+  const result: Record<string, number> = {};
+
+  if (role === "student") {
+    // Bài tập: homework for enrolled classes that hasn't been submitted
+    const myClassIds = MOCK_CLASSES
+      .filter(c => (c.student_ids ?? []).includes("s1"))
+      .map(c => c.id);
+    const myHw = MOCK_HOMEWORK.filter(h => myClassIds.includes(h.class_id));
+    const subs: { homework_id: string; student_id: string }[] =
+      JSON.parse(ls("tutorhub_submissions") ?? "[]");
+    const submittedIds = new Set(
+      subs.filter(s => s.student_id === "s1").map(s => s.homework_id)
+    );
+    const pending = myHw.filter(h => !submittedIds.has(h.id)).length;
+    if (pending > 0) result["/student/homework"] = pending;
+
+    // Thông báo: unread MOCK_NOTIFICATIONS + unread schedule notifications
+    const readIds    = parseSet("tutorhub_notif_read");
+    const deletedIds = parseSet("tutorhub_notif_deleted");
+    const mockUnread = MOCK_NOTIFICATIONS
+      .filter(n => (n.target_role === "student" || (n as any).target_role === "all")
+        && !n.is_read
+        && !readIds.has(n.id)
+        && !deletedIds.has(n.id))
+      .length;
+    const scheduleNotifs: { is_read: boolean }[] =
+      JSON.parse(ls("tutorhub_schedule_notifications") ?? "[]");
+    const schedUnread = scheduleNotifs.filter(n => !n.is_read).length;
+    const totalUnread = mockUnread + schedUnread;
+    if (totalUnread > 0) result["/student/notifications"] = totalUnread;
+  }
+
+  if (role === "parent") {
+    const readIds    = parseSet("tutorhub_parent_notif_read");
+    const deletedIds = parseSet("tutorhub_parent_notif_deleted");
+    const unread = MOCK_NOTIFICATIONS
+      .filter(n => (n.target_role === "parent" || (n as any).target_role === "all")
+        && !n.is_read
+        && !readIds.has(n.id)
+        && !deletedIds.has(n.id))
+      .length;
+    if (unread > 0) result["/parent/notifications"] = unread;
+  }
+
+  if (role === "teacher") {
+    const readIds    = parseSet("tutorhub_teacher_notif_read");
+    const deletedIds = parseSet("tutorhub_teacher_notif_deleted");
+    const unread = MOCK_NOTIFICATIONS
+      .filter(n => (n.target_role === "teacher" || (n as any).target_role === "all")
+        && !n.is_read
+        && !readIds.has(n.id)
+        && !deletedIds.has(n.id))
+      .length;
+    if (unread > 0) result["/teacher/notifications"] = unread;
+  }
+
+  return result;
+}
+
+// ── Component ─────────────────────────────────────────────────────────────────
 interface SidebarProps {
   role: UserRole;
   userName: string;
@@ -83,9 +153,16 @@ interface SidebarProps {
 
 export default function Sidebar({ role, userName, isOpen = true, onClose }: SidebarProps) {
   const pathname = usePathname();
-  const router = useRouter();
-  const items = navConfig[role];
-  const config = roleConfig[role];
+  const router   = useRouter();
+  const items    = navConfig[role];
+  const config   = roleConfig[role];
+
+  const [badges, setBadges] = useState<Record<string, number>>({});
+
+  // Recompute on every navigation so badge clears when user visits the page
+  useEffect(() => {
+    setBadges(computeBadges(role));
+  }, [role, pathname]);
 
   const handleLogout = () => {
     document.cookie = "demo_role=; path=/; max-age=0";
@@ -133,8 +210,10 @@ export default function Sidebar({ role, userName, isOpen = true, onClose }: Side
 
         {/* Nav */}
         <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-0.5">
-          {items.map((item) => {
-            const isActive = pathname === item.href || (item.href !== `/${role}` && pathname.startsWith(item.href));
+          {items.map(item => {
+            const isActive = pathname === item.href
+              || (item.href !== `/${role}` && pathname.startsWith(item.href));
+            const badge = badges[item.href];
             return (
               <Link
                 key={item.href}
@@ -144,14 +223,14 @@ export default function Sidebar({ role, userName, isOpen = true, onClose }: Side
               >
                 <item.icon className="h-4 w-4 shrink-0" />
                 <span className="flex-1 truncate">{item.label}</span>
-                {item.badge && (
+                {badge != null && badge > 0 && (
                   <span className={cn(
                     "ml-auto text-[10px] font-bold min-w-[18px] h-[18px] flex items-center justify-center rounded-full px-1",
                     isActive
                       ? "bg-primary/20 text-primary"
-                      : "bg-muted text-muted-foreground group-hover:bg-accent-foreground/10"
+                      : "bg-primary text-primary-foreground"
                   )}>
-                    {item.badge}
+                    {badge}
                   </span>
                 )}
               </Link>
@@ -159,9 +238,9 @@ export default function Sidebar({ role, userName, isOpen = true, onClose }: Side
           })}
         </nav>
 
-        {/* User section */}
+        {/* User */}
         <div className="border-t border-border p-3 shrink-0">
-          <div 
+          <div
             onClick={handleLogout}
             className="flex items-center gap-3 px-2 py-2 rounded-xl hover:bg-accent transition-colors cursor-pointer group"
           >

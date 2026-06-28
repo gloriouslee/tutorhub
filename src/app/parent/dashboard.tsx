@@ -11,6 +11,11 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 
+const DAY_VI: Record<string, string> = {
+  Monday: "Thứ Hai", Tuesday: "Thứ Ba", Wednesday: "Thứ Tư",
+  Thursday: "Thứ Năm", Friday: "Thứ Sáu", Saturday: "Thứ Bảy", Sunday: "Chủ Nhật",
+};
+
 const myChildren = MOCK_STUDENTS.filter((s) => s.parent_id === "p1");
 
 export default function ParentDashboard() {
@@ -27,11 +32,13 @@ export default function ParentDashboard() {
         style={{ background: "linear-gradient(135deg, #14b8a6 0%, #059669 100%)" }}>
         <div className="absolute -right-8 -top-8 h-40 w-40 rounded-full bg-white/10 blur-2xl" />
         <div className="relative">
-          <p className="text-white/70 text-sm font-medium">Hello 👋</p>
+          <p className="text-white/70 text-sm font-medium">Xin chào 👋</p>
           <h2 className="text-2xl font-bold mt-1">Robert Thompson</h2>
-          <p className="text-white/60 text-sm mt-1">Tracking {myChildren.length} {myChildren.length === 1 ? "child" : "children"} · Next payment due June 1</p>
+          <p className="text-white/60 text-sm mt-1">
+            Đang theo dõi {myChildren.length} {myChildren.length === 1 ? "con" : "con"} · Học phí tháng tới hạn ngày 1/6
+          </p>
           <Button size="sm" className="bg-white/20 hover:bg-white/30 text-white border-0 mt-4">
-            View Payments <ArrowRight className="h-3.5 w-3.5" />
+            Xem học phí <ArrowRight className="h-3.5 w-3.5" />
           </Button>
         </div>
       </div>
@@ -39,7 +46,7 @@ export default function ParentDashboard() {
       {/* Child selector */}
       {myChildren.length > 1 && (
         <div className="flex items-center gap-3 flex-wrap">
-          <span className="text-sm text-muted-foreground font-medium">Viewing:</span>
+          <span className="text-sm text-muted-foreground font-medium">Đang xem:</span>
           <div className="flex items-center gap-2 flex-wrap">
             {myChildren.map((child) => (
               <button
@@ -61,23 +68,23 @@ export default function ParentDashboard() {
 
       {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard title="Children" value={myChildren.length} icon={Users} iconBg="bg-teal-100 dark:bg-teal-900/30" iconColor="text-teal-600" delay={0} />
-        <StatCard title="Attendance Rate" value="87%" icon={CheckSquare} iconBg="bg-emerald-100 dark:bg-emerald-900/30" iconColor="text-emerald-600" delay={100} trend={{ value: 3, label: "vs last month" }} />
-        <StatCard title="Avg Score" value="89%" icon={TrendingUp} iconBg="bg-blue-100 dark:bg-blue-900/30" iconColor="text-blue-600" delay={200} />
-        <StatCard title="Pending Bills" value={formatCurrency(400)} icon={DollarSign} iconBg="bg-amber-100 dark:bg-amber-900/30" iconColor="text-amber-600" delay={300} />
+        <StatCard title="Số con" value={myChildren.length} icon={Users} iconBg="bg-teal-100 dark:bg-teal-900/30" iconColor="text-teal-600" delay={0} />
+        <StatCard title="Tỉ lệ chuyên cần" value="87%" icon={CheckSquare} iconBg="bg-emerald-100 dark:bg-emerald-900/30" iconColor="text-emerald-600" delay={100} trend={{ value: 3, label: "so tháng trước" }} />
+        <StatCard title="Điểm trung bình" value="89%" icon={TrendingUp} iconBg="bg-blue-100 dark:bg-blue-900/30" iconColor="text-blue-600" delay={200} />
+        <StatCard title="Học phí chờ đóng" value={formatCurrency(400)} icon={DollarSign} iconBg="bg-amber-100 dark:bg-amber-900/30" iconColor="text-amber-600" delay={300} />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Progress & Payments */}
         <div className="lg:col-span-2 space-y-4 animate-fade-in delay-100">
           <SectionHeader
-            title={`${activeChild?.full_name ?? "Child"}'s Progress`}
+            title={`Tiến độ của ${activeChild?.full_name ?? "con"}`}
             subtitle={`${activeChild?.grade} · ${activeChild?.school}`}
           />
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <Card>
-              <CardHeader className="pb-3"><CardTitle className="text-sm">Scores by Subject</CardTitle></CardHeader>
+              <CardHeader className="pb-3"><CardTitle className="text-sm">Điểm theo môn học</CardTitle></CardHeader>
               <CardContent className="space-y-4">
                 {STUDENT_SCORE_DATA.map((s) => (
                   <ProgressBar
@@ -91,15 +98,15 @@ export default function ParentDashboard() {
             </Card>
 
             <Card>
-              <CardHeader className="pb-3"><CardTitle className="text-sm">Attendance History</CardTitle></CardHeader>
+              <CardHeader className="pb-3"><CardTitle className="text-sm">Lịch sử điểm danh</CardTitle></CardHeader>
               <CardContent>
                 <ResponsiveContainer width="100%" height={160}>
                   <BarChart data={ATTENDANCE_CHART_DATA} barSize={8}>
                     <XAxis dataKey="month" tick={{ fontSize: 10, fill: "rgb(var(--muted-foreground))" }} axisLine={false} tickLine={false} />
                     <YAxis hide />
                     <Tooltip contentStyle={{ background: "rgb(var(--card))", border: "1px solid rgb(var(--border))", borderRadius: 12, fontSize: 11 }} cursor={{ fill: "rgb(var(--muted))" }} />
-                    <Bar dataKey="present" fill="#10b981" radius={[3, 3, 0, 0]} name="Present" />
-                    <Bar dataKey="absent" fill="#ef4444" radius={[3, 3, 0, 0]} name="Absent" />
+                    <Bar dataKey="present" fill="#10b981" radius={[3, 3, 0, 0]} name="Có mặt" />
+                    <Bar dataKey="absent" fill="#ef4444" radius={[3, 3, 0, 0]} name="Vắng mặt" />
                   </BarChart>
                 </ResponsiveContainer>
               </CardContent>
@@ -110,8 +117,8 @@ export default function ParentDashboard() {
           <Card>
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
-                <CardTitle className="text-sm">Payment History</CardTitle>
-                <Button size="sm" variant="outline">Pay Now</Button>
+                <CardTitle className="text-sm">Lịch sử Học phí</CardTitle>
+                <Button size="sm" variant="outline">Thanh toán</Button>
               </div>
             </CardHeader>
             <CardContent>
@@ -129,7 +136,7 @@ export default function ParentDashboard() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-foreground">{pay.description}</p>
-                      <p className="text-xs text-muted-foreground">Due {formatDate(pay.due_date)}</p>
+                      <p className="text-xs text-muted-foreground">Hạn {formatDate(pay.due_date)}</p>
                     </div>
                     <div className="text-right">
                       <p className="text-sm font-semibold text-foreground">{formatCurrency(pay.amount)}</p>
@@ -137,7 +144,7 @@ export default function ParentDashboard() {
                     </div>
                   </div>
                 )) : (
-                  <p className="text-sm text-muted-foreground text-center py-4">No payment records found.</p>
+                  <p className="text-sm text-muted-foreground text-center py-4">Chưa có giao dịch nào.</p>
                 )}
               </div>
             </CardContent>
@@ -149,7 +156,7 @@ export default function ParentDashboard() {
           <Card>
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
-                <CardTitle className="text-sm">Notifications</CardTitle>
+                <CardTitle className="text-sm">Thông báo</CardTitle>
                 <Bell className="h-4 w-4 text-muted-foreground" />
               </div>
             </CardHeader>
@@ -183,7 +190,7 @@ export default function ParentDashboard() {
           </Card>
 
           <Card>
-            <CardHeader className="pb-3"><CardTitle className="text-sm">Upcoming Classes</CardTitle></CardHeader>
+            <CardHeader className="pb-3"><CardTitle className="text-sm">Lớp học sắp tới</CardTitle></CardHeader>
             <CardContent className="space-y-2">
               {MOCK_CLASSES.slice(0, 4).map((cls) => (
                 <div key={cls.id} className="flex items-center gap-3 py-1.5">
@@ -191,7 +198,7 @@ export default function ParentDashboard() {
                   <div className="flex-1 min-w-0">
                     <p className="text-xs font-medium text-foreground truncate">{cls.class_name}</p>
                     <p className="text-[11px] text-muted-foreground">
-                      {cls.schedule[0]?.day} · {cls.schedule[0]?.start_time}–{cls.schedule[0]?.end_time}
+                      {DAY_VI[cls.schedule[0]?.day] ?? cls.schedule[0]?.day} · {cls.schedule[0]?.start_time}–{cls.schedule[0]?.end_time}
                     </p>
                   </div>
                 </div>

@@ -47,10 +47,10 @@ interface AttendanceBadgeProps {
 
 export function AttendanceBadge({ status }: AttendanceBadgeProps) {
   const map = {
-    present: { label: "Present", cls: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" },
-    absent: { label: "Absent", cls: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" },
-    late: { label: "Late", cls: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400" },
-    excused: { label: "Excused", cls: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" },
+    present: { label: "Có mặt",   cls: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" },
+    absent:  { label: "Vắng mặt", cls: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" },
+    late:    { label: "Đi trễ",   cls: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400" },
+    excused: { label: "Có phép",  cls: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" },
   };
   const { label, cls } = map[status];
   return (
@@ -66,9 +66,9 @@ interface PaymentBadgeProps {
 
 export function PaymentBadge({ status }: PaymentBadgeProps) {
   const map = {
-    paid: { label: "Paid", cls: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" },
-    pending: { label: "Pending", cls: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400" },
-    overdue: { label: "Overdue", cls: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" },
+    paid: { label: "Đã thu", cls: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" },
+    pending: { label: "Chờ thu", cls: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400" },
+    overdue: { label: "Quá hạn", cls: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" },
   };
   const { label, cls } = map[status];
   return (
@@ -84,9 +84,9 @@ interface LearningModeBadgeProps {
 
 export function LearningModeBadge({ mode }: LearningModeBadgeProps) {
   const map = {
-    online: { label: "Online", cls: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" },
-    offline: { label: "Offline", cls: "bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400" },
-    hybrid: { label: "Hybrid", cls: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400" },
+    online: { label: "Trực tuyến", cls: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" },
+    offline: { label: "Tại lớp", cls: "bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400" },
+    hybrid: { label: "Kết hợp", cls: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400" },
   };
   const { label, cls } = map[mode] || map.online;
   return (

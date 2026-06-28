@@ -6,9 +6,9 @@ export const MOCK_STUDENTS = [
     user_id: "u1",
     full_name: "Nguyễn Anh Tuấn",
     email: "tuan.nva@gmail.com",
-    dob: "2010-03-15",
-    school: "Riverside Middle School",
-    grade: "Lớp 8",
+    dob: "2008-03-15",
+    school: "THPT Nguyễn Thị Minh Khai",
+    grade: "Lớp 12",
     learning_type: "hybrid" as const,
     parent_id: "p1",
     avatar_url: null,
@@ -439,14 +439,58 @@ export const MOCK_CLASS_NOTES = [
 ];
 
 export const MOCK_ATTENDANCE = [
-  { id: "a1", class_id: "c1", student_id: "s1", attendance_date: "2025-05-05", status: "present" as const },
-  { id: "a2", class_id: "c1", student_id: "s2", attendance_date: "2025-05-05", status: "late" as const },
-  { id: "a3", class_id: "c1", student_id: "s3", attendance_date: "2025-05-05", status: "absent" as const },
-  { id: "a4", class_id: "c1", student_id: "s4", attendance_date: "2025-05-05", status: "present" as const },
-  { id: "a5", class_id: "c2", student_id: "s1", attendance_date: "2025-05-06", status: "present" as const },
-  { id: "a6", class_id: "c2", student_id: "s5", attendance_date: "2025-05-06", status: "present" as const },
-  { id: "a7", class_id: "c3", student_id: "s2", attendance_date: "2025-05-07", status: "present" as const },
-  { id: "a8", class_id: "c3", student_id: "s3", attendance_date: "2025-05-07", status: "present" as const },
+  // s2 (Trần Mai Phương) — class c1 (Thứ Hai & Thứ Tư)
+  { id: "a2",  class_id: "c1", student_id: "s2", attendance_date: "2026-06-01", status: "present" as const },
+  { id: "a2b", class_id: "c1", student_id: "s2", attendance_date: "2026-06-03", status: "late"    as const },
+  { id: "a2c", class_id: "c1", student_id: "s2", attendance_date: "2026-06-08", status: "present" as const },
+  { id: "a2d", class_id: "c1", student_id: "s2", attendance_date: "2026-06-10", status: "absent"  as const },
+  { id: "a2e", class_id: "c1", student_id: "s2", attendance_date: "2026-06-15", status: "present" as const },
+  { id: "a2f", class_id: "c1", student_id: "s2", attendance_date: "2026-06-17", status: "present" as const },
+  { id: "a2g", class_id: "c1", student_id: "s2", attendance_date: "2026-06-22", status: "late"    as const },
+  { id: "a2h", class_id: "c1", student_id: "s2", attendance_date: "2026-06-24", status: "present" as const },
+  // s2 — class c3 (Thứ Tư & Thứ Sáu)
+  { id: "a7",  class_id: "c3", student_id: "s2", attendance_date: "2026-06-03", status: "present" as const },
+  { id: "a7b", class_id: "c3", student_id: "s2", attendance_date: "2026-06-05", status: "present" as const },
+  { id: "a7c", class_id: "c3", student_id: "s2", attendance_date: "2026-06-10", status: "late"    as const },
+  { id: "a7d", class_id: "c3", student_id: "s2", attendance_date: "2026-06-12", status: "present" as const },
+  { id: "a7e", class_id: "c3", student_id: "s2", attendance_date: "2026-06-17", status: "present" as const },
+  { id: "a7f", class_id: "c3", student_id: "s2", attendance_date: "2026-06-19", status: "excused" as const },
+  { id: "a7g", class_id: "c3", student_id: "s2", attendance_date: "2026-06-24", status: "present" as const },
+  { id: "a7h", class_id: "c3", student_id: "s2", attendance_date: "2026-06-26", status: "present" as const },
+  // s3 (Lê Hoàng Đức) — class c3 (Thứ Tư & Thứ Sáu)
+  { id: "a8",  class_id: "c3", student_id: "s3", attendance_date: "2026-06-03", status: "present" as const },
+  { id: "a8b", class_id: "c3", student_id: "s3", attendance_date: "2026-06-05", status: "absent"  as const },
+  { id: "a8c", class_id: "c3", student_id: "s3", attendance_date: "2026-06-10", status: "present" as const },
+  { id: "a8d", class_id: "c3", student_id: "s3", attendance_date: "2026-06-12", status: "present" as const },
+  { id: "a8e", class_id: "c3", student_id: "s3", attendance_date: "2026-06-17", status: "late"    as const },
+  { id: "a8f", class_id: "c3", student_id: "s3", attendance_date: "2026-06-19", status: "present" as const },
+  { id: "a8g", class_id: "c3", student_id: "s3", attendance_date: "2026-06-24", status: "present" as const },
+  { id: "a8h", class_id: "c3", student_id: "s3", attendance_date: "2026-06-26", status: "absent"  as const },
+  // s4 (Phạm Thảo My) — class c1 (Thứ Hai & Thứ Tư)
+  { id: "a4",  class_id: "c1", student_id: "s4", attendance_date: "2026-06-01", status: "present" as const },
+  { id: "a4b", class_id: "c1", student_id: "s4", attendance_date: "2026-06-03", status: "present" as const },
+  { id: "a4c", class_id: "c1", student_id: "s4", attendance_date: "2026-06-08", status: "present" as const },
+  { id: "a4d", class_id: "c1", student_id: "s4", attendance_date: "2026-06-10", status: "late"    as const },
+  { id: "a4e", class_id: "c1", student_id: "s4", attendance_date: "2026-06-15", status: "absent"  as const },
+  { id: "a4f", class_id: "c1", student_id: "s4", attendance_date: "2026-06-17", status: "present" as const },
+  { id: "a4g", class_id: "c1", student_id: "s4", attendance_date: "2026-06-22", status: "present" as const },
+  { id: "a4h", class_id: "c1", student_id: "s4", attendance_date: "2026-06-24", status: "present" as const },
+  // s1 — class c1 (Thứ Hai & Thứ Tư each week)
+  { id: "a10", class_id: "c1", student_id: "s1", attendance_date: "2026-06-01", status: "present" as const },
+  { id: "a11", class_id: "c1", student_id: "s1", attendance_date: "2026-06-03", status: "present" as const },
+  { id: "a12", class_id: "c1", student_id: "s1", attendance_date: "2026-06-08", status: "late"    as const },
+  { id: "a13", class_id: "c1", student_id: "s1", attendance_date: "2026-06-10", status: "present" as const },
+  { id: "a14", class_id: "c1", student_id: "s1", attendance_date: "2026-06-15", status: "present" as const },
+  { id: "a15", class_id: "c1", student_id: "s1", attendance_date: "2026-06-17", status: "absent"  as const },
+  { id: "a16", class_id: "c1", student_id: "s1", attendance_date: "2026-06-22", status: "present" as const },
+  { id: "a17", class_id: "c1", student_id: "s1", attendance_date: "2026-06-24", status: "present" as const },
+  // s1 — class c2 (Thứ Ba each week)
+  { id: "a20", class_id: "c2", student_id: "s1", attendance_date: "2026-06-02", status: "present" as const },
+  { id: "a21", class_id: "c2", student_id: "s1", attendance_date: "2026-06-09", status: "present" as const },
+  { id: "a22", class_id: "c2", student_id: "s1", attendance_date: "2026-06-16", status: "late"    as const },
+  { id: "a23", class_id: "c2", student_id: "s1", attendance_date: "2026-06-23", status: "present" as const },
+  // Other students — class c2
+  { id: "a6",  class_id: "c2", student_id: "s5", attendance_date: "2026-06-02", status: "present" as const },
 ];
 
 export const MOCK_HOMEWORK = [
@@ -455,32 +499,32 @@ export const MOCK_HOMEWORK = [
     class_id: "c1",
     title: "Chương 2: Đạo hàm và Tích phân",
     description: "Hoàn thành các bài tập từ 2.1 đến 2.15 SGK. Chú ý trình bày rõ ràng các bước giải.",
-    due_date: "2025-05-10",
-    created_at: "2025-05-03",
+    due_date: "2026-07-15",
+    created_at: "2026-07-01",
   },
   {
     id: "h2",
     class_id: "c2",
     title: "Khoảng cách trong không gian",
     description: "Giải 5 bài tập về tính khoảng cách từ điểm đến mặt phẳng đính kèm trong file PDF.",
-    due_date: "2025-05-12",
-    created_at: "2025-05-04",
+    due_date: "2026-07-10",
+    created_at: "2026-07-01",
   },
   {
     id: "h3",
     class_id: "c4",
     title: "Đề luyện Bất Đẳng Thức Cauchy",
     description: "Nộp lời giải chi tiết cho 10 bài Bất đẳng thức đề cương số 4.",
-    due_date: "2025-05-09",
-    created_at: "2025-05-02",
+    due_date: "2026-07-20",
+    created_at: "2026-07-02",
   },
   {
     id: "h4",
     class_id: "c1",
     title: "Trắc nghiệm: Hàm số",
     description: "Hoàn thành 50 câu trắc nghiệm cực trị và đồ thị hàm số.",
-    due_date: "2025-05-15",
-    created_at: "2025-05-05",
+    due_date: "2026-07-05",
+    created_at: "2026-06-28",
   },
 ];
 
@@ -515,6 +559,38 @@ export const MOCK_SUBMISSIONS = [
     submitted_at: null,
     status: "submitted" as const,
   },
+  // s2 — nộp h1 (c1), chưa nộp h4 (c1)
+  {
+    id: "sub4",
+    homework_id: "h1",
+    student_id: "s2",
+    file_url: "/uploads/phuong_calculus.pdf",
+    score: 7.5,
+    feedback: "Em trình bày được các ý chính, tuy nhiên bài 2.9 và 2.12 còn thiếu bước trung gian. Cần rèn luyện thêm phần lập luận.",
+    submitted_at: "2026-06-20",
+    status: "graded" as const,
+  },
+  // s4 — nộp h1 và h4 (c1), đều được chấm
+  {
+    id: "sub5",
+    homework_id: "h1",
+    student_id: "s4",
+    file_url: "/uploads/thao_my_calculus.pdf",
+    score: 9.5,
+    feedback: "Xuất sắc! Trình bày rõ ràng, logic chặt chẽ. Bài 2.14 em xử lý rất khéo, đúng cách.",
+    submitted_at: "2026-06-18",
+    status: "graded" as const,
+  },
+  {
+    id: "sub6",
+    homework_id: "h4",
+    student_id: "s4",
+    file_url: "/uploads/thao_my_trac_nghiem.pdf",
+    score: 9.0,
+    feedback: "Đạt 45/50 câu. Chú ý các câu về cực trị hàm hợp, em còn nhầm dấu ở một vài chỗ.",
+    submitted_at: "2026-07-03",
+    status: "graded" as const,
+  },
 ];
 
 export const MOCK_PAYMENTS = [
@@ -535,11 +611,31 @@ export const MOCK_NOTIFICATIONS: Notification[] = [
 ];
 
 export const MOCK_EXAM_SCORES = [
-  { id: "e1", student_id: "s1", class_id: "c1", exam_name: "Thi Giữa Kỳ", score: 8.7, max_score: 10, exam_date: "2025-04-15" },
-  { id: "e2", student_id: "s1", class_id: "c2", exam_name: "Kiểm tra Hình Học 45'", score: 9.1, max_score: 10, exam_date: "2025-04-20" },
-  { id: "e3", student_id: "s2", class_id: "c1", exam_name: "Thi Giữa Kỳ", score: 7.9, max_score: 10, exam_date: "2025-04-15" },
-  { id: "e4", student_id: "s3", class_id: "c3", exam_name: "Kiểm tra Đại Số", score: 8.5, max_score: 10, exam_date: "2025-04-18" },
-  { id: "e5", student_id: "s4", class_id: "c1", exam_name: "Thi Giữa Kỳ", score: 9.4, max_score: 10, exam_date: "2025-04-15" },
+  // s1 — class c1 (Toán THPT Nâng Cao)
+  { id: "e1",  student_id: "s1", class_id: "c1", exam_name: "Kiểm tra 15' – Hàm số",      score: 8.0, max_score: 10, exam_date: "2026-05-10" },
+  { id: "e6",  student_id: "s1", class_id: "c1", exam_name: "Kiểm tra 1 tiết – Đạo hàm", score: 8.7, max_score: 10, exam_date: "2026-05-26" },
+  { id: "e9",  student_id: "s1", class_id: "c1", exam_name: "Thi Giữa Kỳ",               score: 8.5, max_score: 10, exam_date: "2026-06-09" },
+  { id: "e10", student_id: "s1", class_id: "c1", exam_name: "Kiểm tra 15' – Tích phân",   score: 9.0, max_score: 10, exam_date: "2026-06-23" },
+  // s1 — class c2 (Hình Học Không Gian)
+  { id: "e2",  student_id: "s1", class_id: "c2", exam_name: "Kiểm tra 15' – Vectơ",       score: 9.5, max_score: 10, exam_date: "2026-05-13" },
+  { id: "e7",  student_id: "s1", class_id: "c2", exam_name: "Kiểm tra 1 tiết – Mặt phẳng",score: 9.1, max_score: 10, exam_date: "2026-06-03" },
+  { id: "e8",  student_id: "s1", class_id: "c2", exam_name: "Thi Giữa Kỳ",               score: 8.8, max_score: 10, exam_date: "2026-06-17" },
+  // s2 (Trần Mai Phương) — c1
+  { id: "e3",  student_id: "s2", class_id: "c1", exam_name: "Kiểm tra 15' – Hàm số",      score: 7.5, max_score: 10, exam_date: "2026-05-10" },
+  { id: "e11", student_id: "s2", class_id: "c1", exam_name: "Kiểm tra 1 tiết – Đạo hàm", score: 8.0, max_score: 10, exam_date: "2026-05-26" },
+  { id: "e12", student_id: "s2", class_id: "c1", exam_name: "Thi Giữa Kỳ",               score: 7.9, max_score: 10, exam_date: "2026-06-09" },
+  // s2 — c3
+  { id: "e13", student_id: "s2", class_id: "c3", exam_name: "Kiểm tra 15' – Phương trình",score: 8.2, max_score: 10, exam_date: "2026-05-14" },
+  { id: "e14", student_id: "s2", class_id: "c3", exam_name: "Kiểm tra 1 tiết – Đại số",  score: 7.8, max_score: 10, exam_date: "2026-06-04" },
+  // s3 (Lê Hoàng Đức) — c3
+  { id: "e4",  student_id: "s3", class_id: "c3", exam_name: "Kiểm tra 15' – Phương trình",score: 7.0, max_score: 10, exam_date: "2026-05-14" },
+  { id: "e15", student_id: "s3", class_id: "c3", exam_name: "Kiểm tra 1 tiết – Đại số",  score: 7.5, max_score: 10, exam_date: "2026-06-04" },
+  { id: "e16", student_id: "s3", class_id: "c3", exam_name: "Thi Giữa Kỳ",               score: 8.1, max_score: 10, exam_date: "2026-06-18" },
+  // s4 (Phạm Thảo My) — c1
+  { id: "e5",  student_id: "s4", class_id: "c1", exam_name: "Kiểm tra 15' – Hàm số",      score: 9.0, max_score: 10, exam_date: "2026-05-10" },
+  { id: "e17", student_id: "s4", class_id: "c1", exam_name: "Kiểm tra 1 tiết – Đạo hàm", score: 9.2, max_score: 10, exam_date: "2026-05-26" },
+  { id: "e18", student_id: "s4", class_id: "c1", exam_name: "Thi Giữa Kỳ",               score: 9.4, max_score: 10, exam_date: "2026-06-09" },
+  { id: "e19", student_id: "s4", class_id: "c1", exam_name: "Kiểm tra 15' – Tích phân",   score: 9.1, max_score: 10, exam_date: "2026-06-23" },
 ];
 
 export const ATTENDANCE_CHART_DATA = [

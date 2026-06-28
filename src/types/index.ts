@@ -116,6 +116,8 @@ export interface Payment {
   created_at: string;
 }
 
+export type NotificationCategory = "general" | "assignment" | "graded" | "system" | "schedule";
+
 export interface Notification {
   id: string;
   title: string;
@@ -124,6 +126,10 @@ export interface Notification {
   target_id?: string;
   is_read: boolean;
   created_at: string;
+  category?: NotificationCategory;
+  sent_by?: string;
+  target_class_id?: string;
+  target_class_name?: string;
 }
 
 export interface Material {

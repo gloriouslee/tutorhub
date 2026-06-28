@@ -43,11 +43,11 @@ export default function AdminPaymentsPage() {
   const totalOverdue = payments.filter(p => p.payment_status === "overdue").reduce((s, p) => s + p.amount, 0);
 
   const monthlyData = [
-    { month: "Jan", collected: 3200000 },
-    { month: "Feb", collected: 4400000 },
-    { month: "Mar", collected: 3600000 },
-    { month: "Apr", collected: 4200000 },
-    { month: "May", collected: totalCollected },
+    { month: "Th.1", collected: 3200000 },
+    { month: "Th.2", collected: 4400000 },
+    { month: "Th.3", collected: 3600000 },
+    { month: "Th.4", collected: 4200000 },
+    { month: "Th.5", collected: totalCollected },
   ];
 
   const handleMarkPaid = async (id: string) => {
@@ -92,14 +92,14 @@ export default function AdminPaymentsPage() {
   };
 
   return (
-    <PortalLayout role="admin" userName="Admin User" pageTitle="Payment Management">
+    <PortalLayout role="admin" userName="Admin User" pageTitle="Quản lý Học phí">
       <div className="space-y-6">
         <SectionHeader
-          title="Tuition & Payments"
-          subtitle="Track and manage all student payments"
+          title="Học phí & Thanh toán"
+          subtitle="Theo dõi và quản lý học phí của tất cả học viên"
           action={
             <Button variant="gradient" onClick={handleOpenAddModal}>
-              <Plus className="h-4 w-4 mr-1" /> Record Payment
+              <Plus className="h-4 w-4 mr-1" /> Ghi nhận học phí
             </Button>
           }
         />
@@ -107,9 +107,9 @@ export default function AdminPaymentsPage() {
         {/* Summary */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {[
-            { label: "Collected", value: formatCurrency(totalCollected), icon: CheckCircle2, color: "text-emerald-600", bg: "bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800" },
-            { label: "Pending", value: formatCurrency(totalPending), icon: AlertCircle, color: "text-amber-600", bg: "bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800" },
-            { label: "Overdue", value: formatCurrency(totalOverdue), icon: AlertCircle, color: "text-red-600", bg: "bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800" },
+            { label: "Đã thu", value: formatCurrency(totalCollected), icon: CheckCircle2, color: "text-emerald-600", bg: "bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800" },
+            { label: "Chờ thanh toán", value: formatCurrency(totalPending), icon: AlertCircle, color: "text-amber-600", bg: "bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800" },
+            { label: "Quá hạn", value: formatCurrency(totalOverdue), icon: AlertCircle, color: "text-red-600", bg: "bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800" },
           ].map(({ label, value, icon: Icon, color, bg }) => (
             <div key={label} className={`rounded-2xl p-5 ${bg} animate-fade-in`}>
               <div className="flex items-center gap-3">
@@ -125,14 +125,14 @@ export default function AdminPaymentsPage() {
 
         {/* Chart */}
         <Card>
-          <CardHeader><CardTitle className="text-sm">Monthly Revenue</CardTitle></CardHeader>
+          <CardHeader><CardTitle className="text-sm">Doanh thu theo tháng</CardTitle></CardHeader>
           <CardContent>
             <ResponsiveContainer width="100%" height={200}>
               <BarChart data={monthlyData} barSize={36}>
                 <XAxis dataKey="month" tick={{ fontSize: 11, fill: "rgb(var(--muted-foreground))" }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fontSize: 11, fill: "rgb(var(--muted-foreground))" }} axisLine={false} tickLine={false} tickFormatter={v => `$${v / 1000}k`} />
-                <Tooltip contentStyle={{ background: "rgb(var(--card))", border: "1px solid rgb(var(--border))", borderRadius: 12, fontSize: 12 }} formatter={(v: any) => formatCurrency(v)} cursor={{ fill: "rgb(var(--muted))" }} />
-                <Bar dataKey="collected" fill="#e11d48" radius={[6, 6, 0, 0]} name="Collected" />
+                <YAxis tick={{ fontSize: 11, fill: "rgb(var(--muted-foreground))" }} axisLine={false} tickLine={false} tickFormatter={v => `${(v / 1000000).toFixed(0)}tr`} />
+                <Tooltip contentStyle={{ background: "rgb(var(--card))", border: "1px solid rgb(var(--border))", borderRadius: 12, fontSize: 12 }} formatter={(v: any) => [formatCurrency(v), "Đã thu"]} cursor={{ fill: "rgb(var(--muted))" }} />
+                <Bar dataKey="collected" fill="#e11d48" radius={[6, 6, 0, 0]} name="Đã thu" />
               </BarChart>
             </ResponsiveContainer>
           </CardContent>
@@ -141,14 +141,14 @@ export default function AdminPaymentsPage() {
         {/* Payments table */}
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm">All Payment Records</CardTitle>
+            <CardTitle className="text-sm">Tất cả giao dịch học phí</CardTitle>
           </CardHeader>
           <CardContent className="p-0">
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-border bg-muted/20">
-                    {["Student", "Description", "Amount", "Due Date", "Paid Date", "Status", "Actions"].map(h => (
+                    {["Học viên", "Mô tả", "Số tiền", "Hạn nộp", "Ngày nộp", "Trạng thái", "Thao tác"].map(h => (
                       <th key={h} className="text-left p-4 text-xs font-semibold text-muted-foreground">{h}</th>
                     ))}
                   </tr>
@@ -157,7 +157,7 @@ export default function AdminPaymentsPage() {
                   {payments.length === 0 ? (
                     <tr>
                       <td colSpan={7} className="p-8 text-center text-muted-foreground text-sm">
-                        No payment records found.
+                        Chưa có giao dịch nào.
                       </td>
                     </tr>
                   ) : (
@@ -168,7 +168,7 @@ export default function AdminPaymentsPage() {
                           <td className="p-4">
                             <div className="flex items-center gap-2">
                               <Avatar size="sm"><AvatarFallback name={student?.full_name ?? "?"} /></Avatar>
-                              <span className="text-sm font-semibold text-foreground">{student?.full_name ?? "Unknown Student"}</span>
+                              <span className="text-sm font-semibold text-foreground">{student?.full_name ?? "Không xác định"}</span>
                             </div>
                           </td>
                           <td className="p-4 text-sm text-muted-foreground">{pay.description}</td>
@@ -180,11 +180,11 @@ export default function AdminPaymentsPage() {
                             <div className="flex items-center gap-2">
                               {pay.payment_status !== "paid" ? (
                                 <Button size="sm" variant="gradient" onClick={() => handleMarkPaid(pay.id)}>
-                                  Mark Paid
+                                  Xác nhận đã thu
                                 </Button>
                               ) : (
                                 <span className="text-xs text-emerald-600 font-semibold flex items-center gap-1">
-                                  <CheckCircle2 className="h-3.5 w-3.5" /> Complete
+                                  <CheckCircle2 className="h-3.5 w-3.5" /> Đã thu
                                 </span>
                               )}
                             </div>

@@ -69,7 +69,7 @@ export default function AdminStudentsPage() {
   };
 
   const handleDeleteStudent = async (id: string) => {
-    if (confirm("Are you sure you want to delete this student?")) {
+    if (confirm("Xác nhận xóa học viên này?")) {
       const updated = students.filter(s => s.id !== id);
       setStudents(updated);
       await saveStudents(updated);
@@ -118,14 +118,14 @@ export default function AdminStudentsPage() {
   });
 
   return (
-    <PortalLayout role="admin" userName="Admin User" pageTitle="Student Management">
+    <PortalLayout role="admin" userName="Admin User" pageTitle="Quản lý Học viên">
       <div className="space-y-6">
         <SectionHeader
-          title="All Students"
-          subtitle={`${students.length} total students enrolled`}
+          title="Danh sách Học viên"
+          subtitle={`Tổng cộng ${students.length} học viên đã đăng ký`}
           action={
             <Button variant="gradient" onClick={handleOpenAddModal}>
-              <Plus className="h-4 w-4 mr-1" /> Add Student
+              <Plus className="h-4 w-4 mr-1" /> Thêm học viên
             </Button>
           }
         />
@@ -133,7 +133,7 @@ export default function AdminStudentsPage() {
         {/* Filters */}
         <div className="flex items-center gap-3 flex-wrap">
           <Input
-            placeholder="Search students..."
+            placeholder="Tìm học viên..."
             value={search}
             onChange={e => setSearch(e.target.value)}
             leftIcon={<Search className="h-4 w-4" />}
@@ -150,7 +150,7 @@ export default function AdminStudentsPage() {
                     : "bg-muted text-muted-foreground hover:bg-accent"
                 }`}
               >
-                {f}
+                {{ All: "Tất cả", Online: "Trực tuyến", Offline: "Tại lớp", Hybrid: "Kết hợp" }[f]}
               </button>
             ))}
           </div>
@@ -163,7 +163,7 @@ export default function AdminStudentsPage() {
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-border bg-muted/20">
-                    {["Student", "Grade & School", "Mode", "Attendance", "Payment", "Actions"].map(h => (
+                    {["Học viên", "Lớp & Trường", "Hình thức", "Chuyên cần", "Học phí", "Thao tác"].map(h => (
                       <th key={h} className="text-left p-4 text-xs font-semibold text-muted-foreground">{h}</th>
                     ))}
                   </tr>
@@ -172,7 +172,7 @@ export default function AdminStudentsPage() {
                   {filtered.length === 0 ? (
                     <tr>
                       <td colSpan={6} className="p-8 text-center text-muted-foreground text-sm">
-                        No students found.
+                        Không tìm thấy học viên nào.
                       </td>
                     </tr>
                   ) : (
@@ -208,17 +208,17 @@ export default function AdminStudentsPage() {
                                 payment.payment_status === "overdue" ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" :
                                 "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
                               }`}>
-                                {payment.payment_status}
+                                {{ paid: "Đã thu", pending: "Chờ thu", overdue: "Quá hạn" }[payment.payment_status] ?? payment.payment_status}
                               </span>
                             ) : <span className="text-xs text-muted-foreground">—</span>}
                           </td>
                           <td className="p-4">
                             <div className="flex items-center gap-2">
                               <Button size="sm" variant="outline" onClick={() => handleOpenEditModal(student)}>
-                                <Edit className="h-3 w-3 mr-1" /> Edit
+                                <Edit className="h-3 w-3 mr-1" /> Sửa
                               </Button>
                               <Button size="sm" variant="ghost" className="text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/10" onClick={() => handleDeleteStudent(student.id)}>
-                                <Trash2 className="h-3 w-3 mr-1" /> Delete
+                                <Trash2 className="h-3 w-3 mr-1" /> Xóa
                               </Button>
                             </div>
                           </td>
@@ -290,9 +290,9 @@ export default function AdminStudentsPage() {
                   value={formData.learning_type}
                   onChange={e => setFormData({ ...formData, learning_type: e.target.value as any })}
                 >
-                  <option value="online">Online</option>
-                  <option value="offline">Offline</option>
-                  <option value="hybrid">Hybrid</option>
+                  <option value="online">Trực tuyến</option>
+                  <option value="offline">Tại lớp</option>
+                  <option value="hybrid">Kết hợp</option>
                 </select>
               </div>
               <div className="flex justify-end gap-3 pt-4 border-t border-border mt-6">

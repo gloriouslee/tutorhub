@@ -59,7 +59,7 @@ export default function AdminTeachersPage() {
   };
 
   const handleDeleteTeacher = async (id: string) => {
-    if (confirm("Are you sure you want to delete this teacher?")) {
+    if (confirm("Xác nhận xóa giáo viên này?")) {
       const updated = teachers.filter(t => t.id !== id);
       setTeachers(updated);
       await saveTeachers(updated);
@@ -111,11 +111,11 @@ export default function AdminTeachersPage() {
     <PortalLayout role="admin" userName="Admin User" pageTitle="Giáo viên">
       <div className="space-y-6">
         <SectionHeader
-          title="All Teachers"
-          subtitle={`${teachers.length} professional tutors active`}
+          title="Danh sách Giáo viên"
+          subtitle={`Tổng cộng ${teachers.length} giáo viên đang hoạt động`}
           action={
             <Button variant="gradient" onClick={handleOpenAddModal}>
-              <Plus className="h-4 w-4 mr-1" /> Add Teacher
+              <Plus className="h-4 w-4 mr-1" /> Thêm giáo viên
             </Button>
           }
         />
@@ -123,7 +123,7 @@ export default function AdminTeachersPage() {
         {/* Filters */}
         <div className="flex items-center gap-3 flex-wrap">
           <Input
-            placeholder="Search teachers..."
+            placeholder="Tìm giáo viên..."
             value={search}
             onChange={e => setSearch(e.target.value)}
             leftIcon={<Search className="h-4 w-4" />}
@@ -138,7 +138,7 @@ export default function AdminTeachersPage() {
                   : "bg-muted text-muted-foreground hover:bg-accent"
               }`}
             >
-              All
+              Tất cả
             </button>
             {uniqueSpecs.map(spec => (
               <button
@@ -160,7 +160,7 @@ export default function AdminTeachersPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filtered.length === 0 ? (
             <div className="col-span-full py-12 text-center text-muted-foreground text-sm">
-              No teachers found.
+              Không tìm thấy giáo viên nào.
             </div>
           ) : (
             filtered.map((t, i) => {
@@ -183,21 +183,21 @@ export default function AdminTeachersPage() {
                       </div>
 
                       <p className="text-xs text-muted-foreground line-clamp-3 min-h-[48px]">
-                        {t.bio || "No biography provided yet."}
+                        {t.bio || "Chưa có thông tin giới thiệu."}
                       </p>
                     </div>
 
                     <div className="border-t border-border pt-3.5 flex items-center justify-between">
                       <span className="text-xs text-muted-foreground flex items-center gap-1 font-semibold">
                         <BookOpen className="h-3.5 w-3.5 text-rose-400" />
-                        {teacherClasses.length} classes
+                        {teacherClasses.length} lớp
                       </span>
                       <div className="flex gap-1.5">
                         <Button size="sm" variant="outline" className="h-8 py-0" onClick={() => handleOpenEditModal(t)}>
-                          <Edit className="h-3 w-3 mr-1" /> Edit
+                          <Edit className="h-3 w-3 mr-1" /> Sửa
                         </Button>
                         <Button size="sm" variant="ghost" className="h-8 py-0 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/10" onClick={() => handleDeleteTeacher(t.id)}>
-                          <Trash2 className="h-3 w-3 mr-1" /> Delete
+                          <Trash2 className="h-3 w-3 mr-1" /> Xóa
                         </Button>
                       </div>
                     </div>

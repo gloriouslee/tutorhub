@@ -87,7 +87,7 @@ export default function AdminClassesPage() {
   };
 
   const handleDeleteClass = async (id: string) => {
-    if (confirm("Are you sure you want to delete this class?")) {
+    if (confirm("Xác nhận xóa lớp học này?")) {
       const updated = classes.filter(c => c.id !== id);
       setClasses(updated);
       await saveClasses(updated);
@@ -163,11 +163,11 @@ export default function AdminClassesPage() {
     <PortalLayout role="admin" userName="Admin User" pageTitle="Lớp học">
       <div className="space-y-6">
         <SectionHeader
-          title="All Classes"
-          subtitle={`${classes.length} active classes scheduled`}
+          title="Danh sách Lớp học"
+          subtitle={`Tổng cộng ${classes.length} lớp đang hoạt động`}
           action={
             <Button variant="gradient" onClick={handleOpenAddModal}>
-              <Plus className="h-4 w-4 mr-1" /> Create Class
+              <Plus className="h-4 w-4 mr-1" /> Tạo lớp mới
             </Button>
           }
         />
@@ -175,7 +175,7 @@ export default function AdminClassesPage() {
         {/* Filters */}
         <div className="flex items-center gap-3 flex-wrap">
           <Input
-            placeholder="Search classes or subjects..."
+            placeholder="Tìm lớp học hoặc môn học..."
             value={search}
             onChange={e => setSearch(e.target.value)}
             leftIcon={<Search className="h-4 w-4" />}
@@ -186,13 +186,13 @@ export default function AdminClassesPage() {
               <button
                 key={f}
                 onClick={() => setFilterMode(f)}
-                className={`px-3.5 py-1.5 text-xs font-semibold rounded-xl transition-all capitalize ${
+                className={`px-3.5 py-1.5 text-xs font-semibold rounded-xl transition-all ${
                   filterMode === f
                     ? "bg-rose-500 text-white shadow-sm"
                     : "bg-muted text-muted-foreground hover:bg-accent"
                 }`}
               >
-                {f}
+                {{ All: "Tất cả", online: "Trực tuyến", offline: "Tại lớp", hybrid: "Kết hợp" }[f]}
               </button>
             ))}
           </div>
@@ -202,7 +202,7 @@ export default function AdminClassesPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filtered.length === 0 ? (
             <div className="col-span-full py-12 text-center text-muted-foreground text-sm">
-              No classes found.
+              Không tìm thấy lớp học nào.
             </div>
           ) : (
             filtered.map((cls, i) => {
@@ -225,7 +225,7 @@ export default function AdminClassesPage() {
                       </div>
 
                       <p className="text-xs text-muted-foreground line-clamp-2 min-h-[32px]">
-                        {cls.description || "No description provided."}
+                        {cls.description || "Chưa có mô tả."}
                       </p>
 
                       <div className="space-y-2 text-xs text-muted-foreground border-t border-border pt-3">
@@ -265,10 +265,10 @@ export default function AdminClassesPage() {
                       </span>
                       <div className="flex gap-1.5">
                         <Button size="sm" variant="outline" className="h-8 py-0" onClick={() => handleOpenEditModal(cls)}>
-                          <Edit className="h-3 w-3 mr-1" /> Edit
+                          <Edit className="h-3 w-3 mr-1" /> Sửa
                         </Button>
                         <Button size="sm" variant="ghost" className="h-8 py-0 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/10" onClick={() => handleDeleteClass(cls.id)}>
-                          <Trash2 className="h-3 w-3 mr-1" /> Delete
+                          <Trash2 className="h-3 w-3 mr-1" /> Xóa
                         </Button>
                       </div>
                     </div>
@@ -320,9 +320,9 @@ export default function AdminClassesPage() {
                     value={formData.learning_mode}
                     onChange={e => setFormData({ ...formData, learning_mode: e.target.value as any })}
                   >
-                    <option value="online">Online</option>
-                    <option value="offline">Offline</option>
-                    <option value="hybrid">Hybrid</option>
+                    <option value="online">Trực tuyến</option>
+                    <option value="offline">Tại lớp</option>
+                    <option value="hybrid">Kết hợp</option>
                   </select>
                 </div>
               </div>
@@ -374,8 +374,16 @@ export default function AdminClassesPage() {
                       value={formData.schedule_day}
                       onChange={e => setFormData({ ...formData, schedule_day: e.target.value })}
                     >
-                      {["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"].map(d => (
-                        <option key={d} value={d}>{d}</option>
+                      {[
+                        { val: "Monday",    label: "Thứ Hai" },
+                        { val: "Tuesday",   label: "Thứ Ba" },
+                        { val: "Wednesday", label: "Thứ Tư" },
+                        { val: "Thursday",  label: "Thứ Năm" },
+                        { val: "Friday",    label: "Thứ Sáu" },
+                        { val: "Saturday",  label: "Thứ Bảy" },
+                        { val: "Sunday",    label: "Chủ Nhật" },
+                      ].map(d => (
+                        <option key={d.val} value={d.val}>{d.label}</option>
                       ))}
                     </select>
                   </div>

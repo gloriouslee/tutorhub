@@ -1,134 +1,304 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import PortalLayout from "@/components/layout/PortalLayout";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SectionHeader } from "@/components/shared";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { MessageSquare, Plus, Image as ImageIcon, Paperclip, Send } from "lucide-react";
+import {
+  Send, BookOpen, CheckCircle2, AlertTriangle, Info, Calendar,
+  Users, School, Trash2, Bell,
+} from "lucide-react";
+import { getNotifications, saveNotifications } from "@/lib/storage";
+import { Notification, NotificationCategory } from "@/types";
+import { formatDate } from "@/lib/utils";
+import { MOCK_CLASSES } from "@/lib/mock-data";
+
+const TEACHER_ID   = "t1";
+const TEACHER_NAME = "Tiến sĩ Sarah Mitchell";
+const TEACHER_INITIALS = "SM";
+
+// Classes this teacher teaches
+const MY_CLASSES = MOCK_CLASSES.filter(c => c.tutor_id === TEACHER_ID);
+
+const CATEGORY_OPTIONS: { value: NotificationCategory; label: string; Icon: React.ElementType; color: string }[] = [
+  { value: "general",    label: "Thông tin chung",   Icon: Info,          color: "text-blue-500" },
+  { value: "assignment", label: "Bài tập mới",       Icon: BookOpen,      color: "text-purple-500" },
+  { value: "graded",     label: "Kết quả / Điểm số", Icon: CheckCircle2,  color: "text-emerald-500" },
+  { value: "system",     label: "Nhắc nhở lịch học", Icon: Calendar,      color: "text-indigo-500" },
+];
+
+const TARGET_OPTIONS = [
+  { value: "all-students", label: "Tất cả học viên của tôi", Icon: Users },
+  ...MY_CLASSES.map(c => ({ value: c.id, label: c.class_name, Icon: School })),
+];
 
 export default function TeacherAnnouncementsPage() {
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [filterClass, setFilterClass] = useState<string>("all");
+  const [title,    setTitle]    = useState("");
+  const [content,  setContent]  = useState("");
+  const [category, setCategory] = useState<NotificationCategory>("general");
+  const [target,   setTarget]   = useState("all-students");
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => { load(); }, []);
+
+  async function load() {
+    const all = await getNotifications();
+    setNotifications(
+      all.filter(n => n.sent_by === TEACHER_NAME)
+         .sort((a, b) => b.created_at.localeCompare(a.created_at))
+    );
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!title.trim() || !content.trim()) return;
+    setSubmitting(true);
+
+    const targetClass = MY_CLASSES.find(c => c.id === target);
+    const all = await getNotifications();
+    const newNotif: Notification = {
+      id: `notif-${Date.now()}`,
+      title:   title.trim(),
+      content: content.trim(),
+      target_role: "student",
+      category,
+      sent_by: TEACHER_NAME,
+      target_class_id:   targetClass?.id,
+      target_class_name: targetClass?.class_name,
+      is_read:    false,
+      created_at: new Date().toISOString(),
+    };
+    await saveNotifications([newNotif, ...all]);
+    setTitle(""); setContent(""); setCategory("general"); setTarget("all-students");
+    setSubmitting(false);
+    await load();
+  }
+
+  async function handleDelete(id: string) {
+    const all = await getNotifications();
+    await saveNotifications(all.filter(n => n.id !== id));
+    await load();
+  }
+
+  const displayed = notifications.filter(n =>
+    filterClass === "all" ? true : n.target_class_id === filterClass || (!n.target_class_id && filterClass === "all")
+  );
+
+  const catMap = Object.fromEntries(CATEGORY_OPTIONS.map(o => [o.value, o]));
+
   return (
-    <PortalLayout role="teacher" userName="Tiến sĩ Sarah Mitchell" pageTitle="Tin tức & Thông báo">
-      <div className="space-y-6 max-w-4xl mx-auto">
-        <SectionHeader 
-          title="Thông báo chung" 
-          subtitle="Gửi thông báo và tài liệu quan trọng cho học viên của bạn"
+    <PortalLayout role="teacher" userName={TEACHER_NAME} pageTitle="Thông báo lớp học">
+      <div className="space-y-6">
+        <SectionHeader
+          title="Thông báo lớp học"
+          subtitle="Gửi cập nhật và thông tin quan trọng đến học viên"
         />
 
-        {/* Composer */}
-        <Card className="border-primary/20 shadow-sm animate-fade-in">
-          <CardContent className="p-4 sm:p-6">
-            <div className="flex gap-4">
-              <Avatar className="h-10 w-10 shrink-0 border border-border hidden sm:flex">
-                <AvatarFallback className="bg-primary/10 text-primary font-bold">SM</AvatarFallback>
-              </Avatar>
-              <div className="flex-1 space-y-3">
-                <Input placeholder="Tiêu đề thông báo..." className="font-medium bg-muted/50 border-transparent focus-visible:bg-background" />
-                <textarea 
-                  className="w-full min-h-[120px] p-3 text-sm rounded-xl border border-transparent bg-muted/50 focus:bg-background focus:border-primary/30 outline-none resize-y transition-colors"
-                  placeholder="Nội dung thông báo (hỗ trợ Markdown)..."
-                />
-                <div className="flex items-center justify-between pt-2">
-                  <div className="flex items-center gap-1">
-                    <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground hover:text-primary">
-                      <ImageIcon className="h-4 w-4" />
-                    </Button>
-                    <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground hover:text-primary">
-                      <Paperclip className="h-4 w-4" />
-                    </Button>
-                  </div>
-                  <Button size="sm" variant="gradient" className="px-4">
-                    <Send className="h-3.5 w-3.5 mr-2" /> Đăng thông báo
-                  </Button>
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
 
-        {/* Feed */}
-        <div className="space-y-4">
-          {[1, 2, 3].map((_, i) => (
-            <Card key={i} className="animate-fade-in" style={{ animationDelay: `${(i + 1) * 150}ms` }}>
-              <CardContent className="p-5">
-                <div className="flex justify-between items-start mb-4">
-                  <div className="flex items-center gap-3">
-                    <Avatar className="h-10 w-10 border border-border">
-                      <AvatarFallback className="bg-primary/10 text-primary font-bold">SM</AvatarFallback>
-                    </Avatar>
-                    <div>
-                      <p className="text-sm font-semibold text-foreground">Tiến sĩ Sarah Mitchell</p>
-                      <p className="text-xs text-muted-foreground">Toán cao cấp · {i === 0 ? "Hôm nay, 09:41" : i === 1 ? "Hôm qua, 14:20" : "12 tháng 4, 08:00"}</p>
-                    </div>
-                  </div>
-                  <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground">
-                    <MoreHorizontalIcon className="h-4 w-4" />
-                  </Button>
-                </div>
-                
-                <div className="pl-13 space-y-3">
-                  <h4 className="font-semibold text-foreground">
-                    {i === 0 ? "Thay đổi lịch học tuần tới" : i === 1 ? "Tài liệu ôn tập giữa kỳ" : "Kết quả bài kiểm tra số 1"}
-                  </h4>
-                  <p className="text-sm text-muted-foreground leading-relaxed">
-                    {i === 0 
-                      ? "Chào các em, tuần sau cô có lịch công tác nên buổi học thứ 3 sẽ được chuyển sang sáng thứ 5 nhé. Các em nhớ cập nhật lịch và chuẩn bị bài trước khi đến lớp." 
-                      : i === 1 
-                      ? "Cô đã tải lên tài liệu ôn tập cho bài kiểm tra giữa kỳ. Các em tải về và làm các bài tập trong file đính kèm. Hạn chót nộp bài là Chủ nhật tuần này."
-                      : "Điểm bài kiểm tra số 1 đã có trên hệ thống. Đa số các em làm bài khá tốt, tuy nhiên vẫn còn một số lỗi sai cơ bản. Cô sẽ chữa bài trong buổi học tới."}
-                  </p>
-                  
-                  {i === 1 && (
-                    <div className="flex items-center gap-3 p-3 mt-3 rounded-xl border border-border bg-muted/30 w-fit cursor-pointer hover:bg-muted/60 transition-colors">
-                      <div className="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-lg text-blue-600 dark:text-blue-400">
-                        <FileTextIcon className="h-4 w-4" />
-                      </div>
-                      <div>
-                        <p className="text-xs font-medium text-foreground">Tai-lieu-on-tap-giua-ky.pdf</p>
-                        <p className="text-[10px] text-muted-foreground">PDF · 2.4 MB</p>
-                      </div>
-                    </div>
-                  )}
-                  
-                  <div className="flex items-center gap-4 pt-3 mt-2 border-t border-border/50 text-xs font-medium text-muted-foreground">
-                    <button className="flex items-center gap-1.5 hover:text-primary transition-colors">
-                      <MessageSquare className="h-3.5 w-3.5" /> 
-                      {i === 0 ? "12" : i === 1 ? "4" : "28"} Bình luận
-                    </button>
-                    <span>·</span>
-                    <span>Đã xem: {150 - i * 20}</span>
+          {/* ── Composer ────────────────────────────────────── */}
+          <Card className="lg:col-span-1 border border-border">
+            <CardHeader className="border-b border-border bg-muted/10 px-5 py-4">
+              <CardTitle className="text-sm font-bold flex items-center gap-2">
+                <Send className="h-4 w-4 text-primary" /> Soạn thông báo
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-5">
+              <form onSubmit={handleSubmit} className="space-y-4">
+
+                {/* Gửi đến */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                    Gửi đến *
+                  </label>
+                  <div className="space-y-1.5">
+                    {TARGET_OPTIONS.map(opt => {
+                      const Icon = opt.Icon;
+                      const selected = target === opt.value;
+                      return (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          onClick={() => setTarget(opt.value)}
+                          className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl border text-sm font-medium transition-all text-left ${
+                            selected
+                              ? "border-primary bg-primary/5 text-primary"
+                              : "border-border text-muted-foreground hover:border-primary/40 hover:bg-muted/40"
+                          }`}
+                        >
+                          <Icon className={`h-4 w-4 shrink-0 ${selected ? "text-primary" : "text-muted-foreground"}`} />
+                          <span className="truncate">{opt.label}</span>
+                          {selected && <div className="ml-auto h-2 w-2 rounded-full bg-primary shrink-0" />}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
-              </CardContent>
-            </Card>
-          ))}
+
+                {/* Loại thông báo */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                    Loại thông báo *
+                  </label>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {CATEGORY_OPTIONS.map(opt => {
+                      const selected = category === opt.value;
+                      return (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          onClick={() => setCategory(opt.value)}
+                          className={`flex items-center gap-1.5 px-2.5 py-2 rounded-lg border text-xs font-semibold transition-all ${
+                            selected
+                              ? "border-primary bg-primary/5 text-primary"
+                              : "border-border text-muted-foreground hover:border-primary/40 hover:bg-muted/40"
+                          }`}
+                        >
+                          <opt.Icon className={`h-3.5 w-3.5 ${selected ? "text-primary" : opt.color}`} />
+                          {opt.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Tiêu đề */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Tiêu đề *</label>
+                  <Input
+                    required
+                    value={title}
+                    onChange={e => setTitle(e.target.value)}
+                    placeholder="VD: Bài tập tuần này đã có rồi nhé!"
+                  />
+                </div>
+
+                {/* Nội dung */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Nội dung *</label>
+                  <textarea
+                    required
+                    value={content}
+                    onChange={e => setContent(e.target.value)}
+                    className="flex min-h-[110px] w-full rounded-xl border border-input bg-card px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring placeholder:text-muted-foreground resize-none"
+                    placeholder="Viết nội dung thông báo gửi đến học viên..."
+                  />
+                </div>
+
+                <Button type="submit" variant="gradient" className="w-full font-bold" disabled={submitting}>
+                  <Send className="h-4 w-4 mr-2" />
+                  {submitting ? "Đang gửi..." : "Gửi thông báo"}
+                </Button>
+              </form>
+            </CardContent>
+          </Card>
+
+          {/* ── Feed ─────────────────────────────────────────── */}
+          <Card className="lg:col-span-2 border border-border">
+            <CardHeader className="border-b border-border bg-muted/10 px-5 py-4 flex flex-row items-center justify-between flex-wrap gap-3">
+              <CardTitle className="text-sm font-bold">Thông báo đã gửi</CardTitle>
+              {/* Filter by class */}
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <button
+                  onClick={() => setFilterClass("all")}
+                  className={`px-2.5 py-1 text-[11px] font-semibold rounded-lg transition-all ${
+                    filterClass === "all" ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:bg-accent"
+                  }`}
+                >
+                  Tất cả
+                </button>
+                {MY_CLASSES.map(c => (
+                  <button
+                    key={c.id}
+                    onClick={() => setFilterClass(c.id)}
+                    className={`px-2.5 py-1 text-[11px] font-semibold rounded-lg transition-all ${
+                      filterClass === c.id ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:bg-accent"
+                    }`}
+                  >
+                    {c.class_name}
+                  </button>
+                ))}
+              </div>
+            </CardHeader>
+
+            <CardContent className="p-0">
+              {displayed.length === 0 ? (
+                <div className="py-16 flex flex-col items-center text-center text-muted-foreground">
+                  <div className="h-14 w-14 rounded-full bg-muted flex items-center justify-center mb-4">
+                    <Bell className="h-6 w-6 opacity-30" />
+                  </div>
+                  <p className="font-medium text-sm">Chưa có thông báo nào.</p>
+                  <p className="text-xs mt-1">Soạn thông báo bên trái để gửi đến học viên.</p>
+                </div>
+              ) : (
+                <div className="divide-y divide-border">
+                  {displayed.map((n, i) => {
+                    const cat = catMap[n.category ?? "general"] ?? catMap.general;
+                    return (
+                      <div
+                        key={n.id}
+                        className="p-4 sm:p-5 flex gap-3 hover:bg-muted/10 transition-colors animate-fade-in"
+                        style={{ animationDelay: `${i * 30}ms` }}
+                      >
+                        {/* Avatar */}
+                        <Avatar className="h-9 w-9 border border-border shrink-0">
+                          <AvatarFallback className="bg-primary/10 text-primary text-xs font-bold">
+                            {TEACHER_INITIALS}
+                          </AvatarFallback>
+                        </Avatar>
+
+                        {/* Content */}
+                        <div className="flex-1 min-w-0 space-y-1">
+                          {/* Row 1: name + target badge + time */}
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-xs font-bold text-foreground">{TEACHER_NAME}</span>
+                            <span className={`inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${
+                              n.target_class_id
+                                ? "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300"
+                                : "bg-muted text-muted-foreground"
+                            }`}>
+                              {n.target_class_id ? <School className="h-2.5 w-2.5" /> : <Users className="h-2.5 w-2.5" />}
+                              {n.target_class_name ?? "Tất cả học viên"}
+                            </span>
+                            <span className="text-[11px] text-muted-foreground ml-auto shrink-0">
+                              {formatDate(n.created_at)}
+                            </span>
+                          </div>
+
+                          {/* Row 2: category icon + title */}
+                          <div className="flex items-center gap-1.5">
+                            <cat.Icon className={`h-3.5 w-3.5 shrink-0 ${cat.color}`} />
+                            <h5 className="text-sm font-semibold text-foreground">{n.title}</h5>
+                          </div>
+
+                          {/* Row 3: content */}
+                          <p className="text-xs text-muted-foreground leading-relaxed whitespace-pre-wrap">
+                            {n.content}
+                          </p>
+                        </div>
+
+                        {/* Delete */}
+                        <button
+                          onClick={() => handleDelete(n.id)}
+                          title="Xóa thông báo"
+                          className="p-1.5 rounded-lg text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/10 transition-all self-start shrink-0"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </div>
       </div>
     </PortalLayout>
-  );
-}
-
-// Temporary inline components for icons not imported from lucide-react above
-function MoreHorizontalIcon(props: any) {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
-      <circle cx="12" cy="12" r="1" />
-      <circle cx="19" cy="12" r="1" />
-      <circle cx="5" cy="12" r="1" />
-    </svg>
-  );
-}
-
-function FileTextIcon(props: any) {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
-      <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
-      <path d="M14 2v4a2 2 0 0 0 2 2h4" />
-      <path d="M10 9H8" />
-      <path d="M16 13H8" />
-      <path d="M16 17H8" />
-    </svg>
   );
 }

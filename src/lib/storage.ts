@@ -7,14 +7,14 @@ import {
 
 const supabase = createClient();
 
-// Helper: attempt a Supabase query; on any error fall back to mock data silently.
+// Helper: attempt a Supabase query; on any error OR empty result fall back to mock data silently.
 async function queryOrFallback<T>(
   query: () => Promise<{ data: T[] | null; error: unknown }>,
   fallback: T[]
 ): Promise<T[]> {
   try {
     const { data, error } = await query();
-    if (error || !data) return fallback;
+    if (error || !data || data.length === 0) return fallback;
     return data;
   } catch {
     return fallback;
@@ -255,6 +255,126 @@ export function markScheduleNotificationsRead(): void {
     const existing = getScheduleNotifications().map(n => ({ ...n, is_read: true }));
     localStorage.setItem("tutorhub_schedule_notifications", JSON.stringify(existing));
   } catch { /* ignore */ }
+}
+
+// ── Curriculum (localStorage) ────────────────────────────────────────────────
+
+export interface CurriculumLesson {
+  id: string;
+  type: "lecture" | "material" | "homework" | "solution";
+  title: string;
+  video_url?: string;
+  file_url?: string;
+  description?: string;
+  due_date?: string;
+  is_published: boolean;
+}
+
+export interface CurriculumSession {
+  id: string;
+  title: string;
+  order: number;
+  date?: string;        // YYYY-MM-DD — linked scheduled session date
+  lessons: CurriculumLesson[];
+}
+
+export interface CurriculumChapter {
+  id: string;
+  title: string;
+  order: number;
+  sessions: CurriculumSession[];
+}
+
+export function getCurriculum(classId: string): CurriculumChapter[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(`tutorhub_curriculum_${classId}`);
+    return raw ? (JSON.parse(raw) as CurriculumChapter[]) : [];
+  } catch { return []; }
+}
+
+export function saveCurriculum(classId: string, curriculum: CurriculumChapter[]): void {
+  if (typeof window === "undefined") return;
+  try { localStorage.setItem(`tutorhub_curriculum_${classId}`, JSON.stringify(curriculum)); } catch { /* ignore */ }
+}
+
+// ── Student package per class (localStorage) ────────────────────────────────
+
+export type StudentPackage = "online" | "advanced" | "offline";
+
+export function getStudentPackages(classId: string): Record<string, StudentPackage> {
+  if (typeof window === "undefined") return {};
+  try { return JSON.parse(localStorage.getItem(`tutorhub_student_packages_${classId}`) ?? "{}"); } catch { return {}; }
+}
+
+export function saveStudentPackages(classId: string, packages: Record<string, StudentPackage>): void {
+  if (typeof window === "undefined") return;
+  try { localStorage.setItem(`tutorhub_student_packages_${classId}`, JSON.stringify(packages)); } catch { /* ignore */ }
+}
+
+// ── Online meeting link per class (localStorage) ─────────────────────────────
+
+export function getOnlineLink(classId: string): string | null {
+  if (typeof window === "undefined") return null;
+  try { return localStorage.getItem(`tutorhub_online_link_${classId}`); } catch { return null; }
+}
+
+export function saveOnlineLink(classId: string, link: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    if (link.trim()) {
+      localStorage.setItem(`tutorhub_online_link_${classId}`, link.trim());
+    } else {
+      localStorage.removeItem(`tutorhub_online_link_${classId}`);
+    }
+  } catch { /* ignore */ }
+}
+
+// ── Shared tuition invoices (localStorage) ───────────────────────────────────
+
+export type InvoiceStatus = "pending" | "pending_verification" | "paid";
+
+export interface TuitionInvoice {
+  id: string;
+  child_id: string;        // student id
+  title: string;
+  amount: number;
+  due_date: string;
+  status: InvoiceStatus;
+  paid_at?: string;
+  submitted_by?: "student" | "parent";  // who uploaded the receipt
+}
+
+const INVOICE_KEY = "tutorhub_invoices";
+
+const DEFAULT_INVOICES: TuitionInvoice[] = [
+  { id: "INV-2026-06-01", child_id: "s1", title: "Học phí Toán cao cấp - Tháng 6",  amount: 1500000, due_date: "2026-06-15", status: "pending" },
+  { id: "INV-2026-06-02", child_id: "s1", title: "Tài liệu Vật lý đại cương",         amount: 350000,  due_date: "2026-06-20", status: "pending" },
+  { id: "INV-2026-06-03", child_id: "s4", title: "Học phí Hóa học cơ bản - Tháng 6", amount: 1200000, due_date: "2026-06-15", status: "pending" },
+  { id: "INV-2026-05-01", child_id: "s1", title: "Học phí Toán cao cấp - Tháng 5",  amount: 1500000, due_date: "2026-05-15", status: "paid", paid_at: "2026-05-12" },
+  { id: "INV-2026-05-02", child_id: "s4", title: "Học phí Hóa học cơ bản - Tháng 5", amount: 1200000, due_date: "2026-05-15", status: "paid", paid_at: "2026-05-13" },
+];
+
+export function getInvoices(): TuitionInvoice[] {
+  if (typeof window === "undefined") return DEFAULT_INVOICES;
+  try {
+    const raw = localStorage.getItem(INVOICE_KEY);
+    return raw ? (JSON.parse(raw) as TuitionInvoice[]) : DEFAULT_INVOICES;
+  } catch { return DEFAULT_INVOICES; }
+}
+
+export function updateInvoiceStatus(
+  invoiceId: string,
+  status: InvoiceStatus,
+  submittedBy: "student" | "parent"
+): void {
+  if (typeof window === "undefined") return;
+  const invoices = getInvoices().map(inv =>
+    (invoiceId === "ALL" ? inv.status === "pending" : inv.id === invoiceId)
+      ? { ...inv, status, submitted_by: submittedBy }
+      : inv
+  );
+  localStorage.setItem(INVOICE_KEY, JSON.stringify(invoices));
 }
 
 // ── Enrollment requests (localStorage) ──────────────────────────────────────
