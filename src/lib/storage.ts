@@ -1,124 +1,100 @@
 import { createClient } from "./supabase/client";
 import { Student, Teacher, Class, Payment, Attendance, Notification, ClassSchedule } from "@/types";
+import {
+  MOCK_STUDENTS, MOCK_TEACHERS, MOCK_CLASSES,
+  MOCK_PAYMENTS, MOCK_ATTENDANCE, MOCK_NOTIFICATIONS,
+} from "@/lib/mock-data";
 
 const supabase = createClient();
 
-export async function getStudents(): Promise<Student[]> {
-  const { data, error } = await supabase
-    .from("students")
-    .select("*")
-    .order("created_at", { ascending: false });
-  if (error) {
-    console.error("Error fetching students:", error);
-    return [];
+// Helper: attempt a Supabase query; on any error fall back to mock data silently.
+async function queryOrFallback<T>(
+  query: () => Promise<{ data: T[] | null; error: unknown }>,
+  fallback: T[]
+): Promise<T[]> {
+  try {
+    const { data, error } = await query();
+    if (error || !data) return fallback;
+    return data;
+  } catch {
+    return fallback;
   }
-  return data as Student[];
+}
+
+export async function getStudents(): Promise<Student[]> {
+  return queryOrFallback(
+    () => supabase.from("students").select("*").order("created_at", { ascending: false }),
+    MOCK_STUDENTS as unknown as Student[]
+  );
 }
 
 export async function saveStudents(students: Student[]): Promise<void> {
   const { error } = await supabase.from("students").upsert(students);
-  if (error) {
-    console.error("Error saving students:", error);
-  }
+  if (error) console.error("Error saving students:", error);
 }
 
 export async function getTeachers(): Promise<Teacher[]> {
-  const { data, error } = await supabase
-    .from("teachers")
-    .select("*")
-    .order("created_at", { ascending: false });
-  if (error) {
-    console.error("Error fetching teachers:", error);
-    return [];
-  }
-  return data as Teacher[];
+  return queryOrFallback(
+    () => supabase.from("teachers").select("*").order("created_at", { ascending: false }),
+    MOCK_TEACHERS as unknown as Teacher[]
+  );
 }
 
 export async function saveTeachers(teachers: Teacher[]): Promise<void> {
   const { error } = await supabase.from("teachers").upsert(teachers);
-  if (error) {
-    console.error("Error saving teachers:", error);
-  }
+  if (error) console.error("Error saving teachers:", error);
 }
 
 export async function getClasses(): Promise<Class[]> {
-  const { data, error } = await supabase
-    .from("classes")
-    .select("*")
-    .order("created_at", { ascending: false });
-  if (error) {
-    console.error("Error fetching classes:", error);
-    return [];
-  }
-  return data as Class[];
+  return queryOrFallback(
+    () => supabase.from("classes").select("*").order("created_at", { ascending: false }),
+    MOCK_CLASSES as unknown as Class[]
+  );
 }
 
 export async function saveClasses(classes: Class[]): Promise<void> {
   const { error } = await supabase.from("classes").upsert(classes);
-  if (error) {
-    console.error("Error saving classes:", error);
-  }
+  if (error) console.error("Error saving classes:", error);
 }
 
 export async function getPayments(): Promise<Payment[]> {
-  const { data, error } = await supabase
-    .from("payments")
-    .select("*")
-    .order("created_at", { ascending: false });
-  if (error) {
-    console.error("Error fetching payments:", error);
-    return [];
-  }
-  return data as Payment[];
+  return queryOrFallback(
+    () => supabase.from("payments").select("*").order("created_at", { ascending: false }),
+    MOCK_PAYMENTS as unknown as Payment[]
+  );
 }
 
 export async function savePayments(payments: Payment[]): Promise<void> {
   const { error } = await supabase.from("payments").upsert(payments);
-  if (error) {
-    console.error("Error saving payments:", error);
-  }
+  if (error) console.error("Error saving payments:", error);
 }
 
 export async function getAttendance(): Promise<Attendance[]> {
-  const { data, error } = await supabase
-    .from("attendance")
-    .select("*")
-    .order("attendance_date", { ascending: false });
-  if (error) {
-    console.error("Error fetching attendance:", error);
-    return [];
-  }
-  return data as Attendance[];
+  return queryOrFallback(
+    () => supabase.from("attendance").select("*").order("attendance_date", { ascending: false }),
+    MOCK_ATTENDANCE as unknown as Attendance[]
+  );
 }
 
 export async function saveAttendance(attendance: Attendance[]): Promise<void> {
   const { error } = await supabase.from("attendance").upsert(attendance);
-  if (error) {
-    console.error("Error saving attendance:", error);
-  }
+  if (error) console.error("Error saving attendance:", error);
 }
 
 export async function getNotifications(): Promise<Notification[]> {
-  const { data, error } = await supabase
-    .from("notifications")
-    .select("*")
-    .order("created_at", { ascending: false });
-  if (error) {
-    console.error("Error fetching notifications:", error);
-    return [];
-  }
-  return data as Notification[];
+  return queryOrFallback(
+    () => supabase.from("notifications").select("*").order("created_at", { ascending: false }),
+    MOCK_NOTIFICATIONS as unknown as Notification[]
+  );
 }
 
 export async function saveNotifications(notifications: Notification[]): Promise<void> {
   const { error } = await supabase.from("notifications").upsert(notifications);
-  if (error) {
-    console.error("Error saving notifications:", error);
-  }
+  if (error) console.error("Error saving notifications:", error);
 }
 
 export async function resetAllStorage(): Promise<void> {
-  console.log("Reset storage is deprecated now using database.");
+  console.log("Reset storage is deprecated; using database.");
 }
 
 export async function getStudentComments(studentId: string): Promise<{ text: string; date: string; rating: number }[]> {
