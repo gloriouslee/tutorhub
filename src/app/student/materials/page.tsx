@@ -856,7 +856,7 @@ function PlayerView({ course, isPackageLocked, onBack }: { course: OwnedCourse; 
                           <div className={`w-2 h-2 rounded-full shrink-0 ${done ? "bg-green-500" : isSelected ? "bg-primary" : "border border-muted-foreground"}`} />
                           <span className="flex-1 text-xs leading-snug line-clamp-2">{lesson.title}</span>
                           {lesson.isPreview && !done && (
-                            <Eye className="h-3 w-3 text-violet-500 shrink-0" title="Xem trước miễn phí" />
+                            <Eye className="h-3 w-3 text-violet-500 shrink-0" />
                           )}
                           {!accessible && <Lock className="h-3 w-3 text-muted-foreground shrink-0" />}
                           {accessible && <TypeBadge type={lesson.type} />}

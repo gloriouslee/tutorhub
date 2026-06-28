@@ -188,7 +188,7 @@ function PaymentsContent() {
                   disabled={totalPending === 0}
                   onClick={() => setModalTarget({
                     kind: "invoice",
-                    invoice: { id: "ALL", title: "Thanh toán tất cả hóa đơn", amount: totalPending, due_date: "", status: "pending" },
+                    invoice: { id: "ALL", child_id: "s1", title: "Thanh toán tất cả hóa đơn", amount: totalPending, due_date: "", status: "pending" },
                   })}
                 >
                   <CreditCard className="h-5 w-5 mr-2" /> Thanh toán tất cả

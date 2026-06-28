@@ -208,7 +208,7 @@ export default function AdminStudentsPage() {
                                 payment.payment_status === "overdue" ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" :
                                 "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
                               }`}>
-                                {{ paid: "Đã thu", pending: "Chờ thu", overdue: "Quá hạn" }[payment.payment_status] ?? payment.payment_status}
+                                {{ paid: "Đã thu", pending: "Chờ thu", overdue: "Quá hạn" }[payment.payment_status as string] ?? payment.payment_status}
                               </span>
                             ) : <span className="text-xs text-muted-foreground">—</span>}
                           </td>

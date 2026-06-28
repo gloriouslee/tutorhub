@@ -147,7 +147,7 @@ export default function AdminReportsPage() {
                   <YAxis tick={{ fontSize: 11, fill: "rgb(var(--muted-foreground))" }} axisLine={false} tickLine={false} />
                   <Tooltip
                     contentStyle={{ background: "rgb(var(--card))", border: "1px solid rgb(var(--border))", borderRadius: 12, fontSize: 12 }}
-                    formatter={(v: any, name: string) => [`${v}%`, name]}
+                    formatter={(v: any, name: any) => [`${v}%`, name]}
                   />
                   <Line type="monotone" dataKey="coMat"   stroke="#10b981" strokeWidth={2.5} dot={{ r: 4 }} name="Có mặt %" />
                   <Line type="monotone" dataKey="treGio"  stroke="#f59e0b" strokeWidth={1.5} dot={{ r: 3 }} name="Trễ giờ %" />

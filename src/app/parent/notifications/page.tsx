@@ -59,10 +59,11 @@ const CATEGORY_META: Record<NotifCategory, { Icon: React.ElementType; iconColor:
 };
 
 function categorize(n: Notification): NotifCategory {
-  if (n.category === "assignment") return "assignment";
-  if (n.category === "graded")     return "graded";
-  if (n.category === "system")     return "system";
-  if (n.category === "payment")    return "payment";
+  const c = (n as any).category;
+  if (c === "assignment") return "assignment";
+  if (c === "graded")     return "graded";
+  if (c === "system")     return "system";
+  if (c === "payment")    return "payment";
   const text = `${n.title ?? ""} ${n.content ?? ""}`.toLowerCase();
   if (text.includes("học phí") || text.includes("thanh toán") || text.includes("nhắc nhở học phí")) return "payment";
   if (text.includes("điểm") || text.includes("chấm")) return "graded";

@@ -338,7 +338,7 @@ export default function StudentClassDetailPage() {
               >
                 <tab.icon className="h-4 w-4" />
                 {tab.label}
-                {tab.badge != null && tab.badge > 0 && (
+                {tab.badge != null && Number(tab.badge) > 0 && (
                   <span className="text-[10px] bg-muted px-1.5 py-0.5 rounded-full">{tab.badge}</span>
                 )}
                 {tab.key === "notes" && notes.some(n => n.is_pinned) && (

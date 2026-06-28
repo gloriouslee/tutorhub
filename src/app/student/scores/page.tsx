@@ -336,7 +336,7 @@ export default function StudentScoresPage() {
                         <Tooltip
                           contentStyle={{ backgroundColor: "hsl(var(--card))", borderRadius: "8px", border: "1px solid hsl(var(--border))" }}
                           itemStyle={{ color: "hsl(var(--primary))", fontWeight: "bold" }}
-                          formatter={(v: number) => [`${v}/10`, "Điểm TB"]}
+                          formatter={(v: any) => [`${v}/10`, "Điểm TB"]}
                         />
                         <Radar name="Điểm TB" dataKey="score" stroke="hsl(var(--primary))" fill="hsl(var(--primary))" fillOpacity={0.3} />
                       </RadarChart>

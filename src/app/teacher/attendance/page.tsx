@@ -18,7 +18,7 @@ const TEACHER_ID   = "t1";
 const TEACHER_NAME = "Thầy Hùng Toán";
 const LS_KEY       = "tutorhub_teacher_attendance";
 
-type Status = "present" | "absent" | "late";
+type Status = "present" | "absent" | "late" | "excused";
 
 // ── Persistence ───────────────────────────────────────────────────────────────
 interface SavedRecord {
