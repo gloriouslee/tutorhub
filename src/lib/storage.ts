@@ -23,7 +23,7 @@ async function queryOrFallback<T>(
 
 export async function getStudents(): Promise<Student[]> {
   return queryOrFallback(
-    () => supabase.from("students").select("*").order("created_at", { ascending: false }),
+    () => supabase.from("students").select("*").order("created_at", { ascending: false }) as any,
     MOCK_STUDENTS as unknown as Student[]
   );
 }
@@ -35,7 +35,7 @@ export async function saveStudents(students: Student[]): Promise<void> {
 
 export async function getTeachers(): Promise<Teacher[]> {
   return queryOrFallback(
-    () => supabase.from("teachers").select("*").order("created_at", { ascending: false }),
+    () => supabase.from("teachers").select("*").order("created_at", { ascending: false }) as any,
     MOCK_TEACHERS as unknown as Teacher[]
   );
 }
@@ -47,7 +47,7 @@ export async function saveTeachers(teachers: Teacher[]): Promise<void> {
 
 export async function getClasses(): Promise<Class[]> {
   return queryOrFallback(
-    () => supabase.from("classes").select("*").order("created_at", { ascending: false }),
+    () => supabase.from("classes").select("*").order("created_at", { ascending: false }) as any,
     MOCK_CLASSES as unknown as Class[]
   );
 }
@@ -59,7 +59,7 @@ export async function saveClasses(classes: Class[]): Promise<void> {
 
 export async function getPayments(): Promise<Payment[]> {
   return queryOrFallback(
-    () => supabase.from("payments").select("*").order("created_at", { ascending: false }),
+    () => supabase.from("payments").select("*").order("created_at", { ascending: false }) as any,
     MOCK_PAYMENTS as unknown as Payment[]
   );
 }
@@ -71,7 +71,7 @@ export async function savePayments(payments: Payment[]): Promise<void> {
 
 export async function getAttendance(): Promise<Attendance[]> {
   return queryOrFallback(
-    () => supabase.from("attendance").select("*").order("attendance_date", { ascending: false }),
+    () => supabase.from("attendance").select("*").order("attendance_date", { ascending: false }) as any,
     MOCK_ATTENDANCE as unknown as Attendance[]
   );
 }
@@ -83,7 +83,7 @@ export async function saveAttendance(attendance: Attendance[]): Promise<void> {
 
 export async function getNotifications(): Promise<Notification[]> {
   return queryOrFallback(
-    () => supabase.from("notifications").select("*").order("created_at", { ascending: false }),
+    () => supabase.from("notifications").select("*").order("created_at", { ascending: false }) as any,
     MOCK_NOTIFICATIONS as unknown as Notification[]
   );
 }
