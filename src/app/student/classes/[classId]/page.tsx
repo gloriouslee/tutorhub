@@ -147,7 +147,7 @@ function loadLocalSubs(): SubmissionRecord[] {
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function StudentClassDetailPage() {
-  const { studentId, studentName } = useStudentContext();
+  const { studentId, studentName, assignedClassId } = useStudentContext();
   const CURRENT_STUDENT_ID = studentId;
   const params  = useParams();
   const classId = params.classId as string;
@@ -201,7 +201,7 @@ export default function StudentClassDetailPage() {
   }
 
   // ── Enrollment check ──────────────────────────────────────────────────────
-  if (!(cls.student_ids ?? []).includes(CURRENT_STUDENT_ID)) {
+  if (!(cls.student_ids ?? []).includes(CURRENT_STUDENT_ID) && assignedClassId !== classId) {
     return (
       <PortalLayout role="student" userName={studentName} pageTitle="Lớp học">
         <div className="flex flex-col items-center justify-center py-20 text-center">
