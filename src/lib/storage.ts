@@ -305,7 +305,7 @@ export interface PurchaseTransaction {
 const TX_KEY = "tutorhub_transactions";
 const ACCESS_KEY = "tutorhub_pkg_access";
 
-export function getTransactions(): PurchaseTransaction[] {
+function readTxLocal(): PurchaseTransaction[] {
   if (typeof window === "undefined") return [];
   try {
     const raw = localStorage.getItem(TX_KEY);
@@ -313,39 +313,66 @@ export function getTransactions(): PurchaseTransaction[] {
   } catch { return []; }
 }
 
-export function createTransaction(tx: Omit<PurchaseTransaction, "id" | "created_at" | "status">): PurchaseTransaction {
+function writeTxLocal(txs: PurchaseTransaction[]): void {
+  if (typeof window === "undefined") return;
+  try { localStorage.setItem(TX_KEY, JSON.stringify(txs)); } catch { /* ignore */ }
+}
+
+// Supabase-first: học viên tạo giao dịch trên máy của họ, admin duyệt trên
+// máy khác — cả hai thấy cùng dữ liệu. localStorage chỉ là cache offline.
+export async function getTransactions(): Promise<PurchaseTransaction[]> {
+  try {
+    const { data, error } = await supabase
+      .from("purchase_transactions")
+      .select("*")
+      .order("created_at", { ascending: false });
+    if (!error && data) {
+      writeTxLocal(data as PurchaseTransaction[]);
+      return data as PurchaseTransaction[];
+    }
+  } catch { /* offline — dùng cache */ }
+  return readTxLocal();
+}
+
+export async function createTransaction(
+  tx: Omit<PurchaseTransaction, "id" | "created_at" | "status">
+): Promise<PurchaseTransaction> {
   const full: PurchaseTransaction = { ...tx, id: crypto.randomUUID(), created_at: new Date().toISOString(), status: "pending" };
-  const existing = getTransactions();
-  localStorage.setItem(TX_KEY, JSON.stringify([full, ...existing]));
+  try {
+    const { error } = await supabase.from("purchase_transactions").insert(full);
+    if (error) console.error("Error creating transaction:", error);
+  } catch { /* offline */ }
+  writeTxLocal([full, ...readTxLocal()]);
   return full;
 }
 
-export function updateTransactionStatus(txId: string, status: "approved" | "rejected"): void {
-  if (typeof window === "undefined") return;
-  const txs = getTransactions().map(t =>
-    t.id === txId ? { ...t, status, reviewed_at: new Date().toISOString() } : t
-  );
-  localStorage.setItem(TX_KEY, JSON.stringify(txs));
-  if (status === "approved") {
-    const tx = txs.find(t => t.id === txId);
-    if (tx) grantPackageAccess(tx.pkg_id);
-  }
+export async function updateTransactionStatus(txId: string, status: "approved" | "rejected"): Promise<void> {
+  const patch = { status, reviewed_at: new Date().toISOString() };
+  try {
+    const { error } = await supabase.from("purchase_transactions").update(patch).eq("id", txId);
+    if (error) console.error("Error updating transaction:", error);
+  } catch { /* offline */ }
+  const txs = readTxLocal().map(t => (t.id === txId ? { ...t, ...patch } : t));
+  writeTxLocal(txs);
+  // Quyền truy cập suy ra từ giao dịch approved (getGrantedPackages) —
+  // học viên tự thấy tài liệu mở khóa ở lần tải trang kế tiếp.
 }
 
-export function grantPackageAccess(pkgId: string): void {
-  if (typeof window === "undefined") return;
-  const existing = getGrantedPackages();
-  if (!existing.includes(pkgId)) {
-    localStorage.setItem(ACCESS_KEY, JSON.stringify([...existing, pkgId]));
-  }
-}
-
-export function getGrantedPackages(): string[] {
-  if (typeof window === "undefined") return [];
+// Gói được mở khóa = có giao dịch approved của học viên đó (Supabase),
+// hợp nhất với danh sách cấp thủ công cũ trong localStorage (legacy).
+export async function getGrantedPackages(studentId?: string): Promise<string[]> {
+  let granted: string[] = [];
+  try {
+    let query = supabase.from("purchase_transactions").select("pkg_id").eq("status", "approved");
+    if (studentId) query = query.eq("student_id", studentId);
+    const { data, error } = await query;
+    if (!error && data) granted = data.map((r: { pkg_id: string }) => r.pkg_id);
+  } catch { /* offline */ }
   try {
     const raw = localStorage.getItem(ACCESS_KEY);
-    return raw ? (JSON.parse(raw) as string[]) : [];
-  } catch { return []; }
+    if (raw) granted = [...new Set([...granted, ...(JSON.parse(raw) as string[])])];
+  } catch { /* ignore */ }
+  return granted;
 }
 
 export function markScheduleNotificationsRead(): void {

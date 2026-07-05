@@ -53,8 +53,7 @@ export default function BrowseView({ onSelectCourse }: { onSelectCourse: (c: Own
   };
 
   useEffect(() => {
-    const granted = getGrantedPackages();
-    setGrantedPkgIds(granted);
+    getGrantedPackages(CURRENT_STUDENT_ID).then(setGrantedPkgIds);
     const tc = loadTeacherCourses();
     setTeacherCourses(tc);
     const map: Record<string, StudentPackage | null> = {};

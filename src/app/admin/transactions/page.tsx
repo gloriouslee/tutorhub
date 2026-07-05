@@ -39,14 +39,13 @@ export default function AdminTransactionsPage() {
   const [search, setSearch] = useState("");
   const [processing, setProcessing] = useState<string | null>(null);
 
-  const reload = () => setTransactions(getTransactions());
+  const reload = () => { getTransactions().then(setTransactions); };
 
   useEffect(() => { reload(); }, []);
 
   const handleAction = async (txId: string, action: "approved" | "rejected") => {
     setProcessing(txId);
-    await new Promise(r => setTimeout(r, 500));
-    updateTransactionStatus(txId, action);
+    await updateTransactionStatus(txId, action);
     reload();
     setProcessing(null);
   };

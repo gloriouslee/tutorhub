@@ -65,7 +65,7 @@ function PaymentsContent() {
   useEffect(() => {
     setInvoices(getInvoices().filter(inv => inv.child_id === STUDENT.id));
     // Filter by this student only
-    setPkgTransactions(getTransactions().filter(t => t.student_id === STUDENT.id));
+    getTransactions().then(txs => setPkgTransactions(txs.filter(t => t.student_id === STUDENT.id)));
     if (pkgParam && PACKAGES[pkgParam]) {
       const pkg = PACKAGES[pkgParam];
       setModalTarget({ kind: "package", pkgId: pkg.id, title: pkg.title, amount: pkg.price });
@@ -73,7 +73,7 @@ function PaymentsContent() {
   }, [pkgParam, studentId]);
 
   const reload = () =>
-    setPkgTransactions(getTransactions().filter(t => t.student_id === STUDENT.id));
+    getTransactions().then(txs => setPkgTransactions(txs.filter(t => t.student_id === STUDENT.id)));
 
   const closeModal = () => { setModalTarget(null); setReceiptFile(null); };
 
@@ -87,7 +87,7 @@ function PaymentsContent() {
       updateInvoiceStatus(modalTarget.invoice.id, "pending_verification", "student");
       setInvoices(getInvoices().filter(inv => inv.child_id === STUDENT.id));
     } else {
-      createTransaction({
+      await createTransaction({
         pkg_id:        modalTarget.pkgId,
         pkg_title:     modalTarget.title,
         amount:        modalTarget.amount,
