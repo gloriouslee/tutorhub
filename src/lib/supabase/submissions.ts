@@ -14,6 +14,8 @@ export interface SubmissionRecord {
   score?: number;
   feedback?: string;
   graded_at?: string;
+  teacher_file_url?: string;
+  teacher_file_name?: string;
 }
 
 const BUCKET = "homework-submissions";
@@ -86,7 +88,9 @@ export async function getSubmissionsByHomeworks(
 export async function updateGrade(
   submissionId: string,
   score: number,
-  feedback: string
+  feedback: string,
+  teacherFileUrl?: string,
+  teacherFileName?: string,
 ): Promise<boolean> {
   const supabase = createClient();
   const { error } = await supabase
@@ -96,6 +100,8 @@ export async function updateGrade(
       feedback: feedback.trim() || null,
       status: "graded",
       graded_at: new Date().toISOString(),
+      teacher_file_url: teacherFileUrl ?? null,
+      teacher_file_name: teacherFileName ?? null,
     })
     .eq("id", submissionId);
   if (error) console.error("Update grade error:", error.message);

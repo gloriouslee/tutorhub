@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   Plus, Trash2, Edit3, ChevronDown, ChevronRight, Upload,
   PlayCircle, FileText, Pencil, Eye, EyeOff, GripVertical,
-  Save, CheckCircle2, Loader2, BookOpen, Layers,
+  Save, CheckCircle2, Loader2, BookOpen, Layers, Tag, Crown,
   Zap, DollarSign, Package, Wifi, Star, School,
 } from "lucide-react";
 import type { StudentPackage } from "@/lib/storage";
@@ -39,18 +39,25 @@ interface Chapter {
   lessons: Lesson[];
 }
 
+type CourseTier = "basic" | "pro" | "elite";
+
 interface Course {
   id: string;
   title: string;
   subject: string;
   grade: number;
   type: CourseType;
-  classId?: string; // for "class" type — which class this material belongs to
+  classId?: string;
   price?: number;
+  originalPrice?: number;   // strike-through price (before discount)
+  tier?: CourseTier;        // badge shown on student marketplace
+  includes: string[];       // "BAO GỒM" bullet list
+  rating?: number;
+  reviewCount?: number;
   description: string;
   chapters: Chapter[];
   published: boolean;
-  packages: StudentPackage[]; // which subscription tiers have access
+  packages: StudentPackage[];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -63,6 +70,7 @@ const SEED_COURSES: Course[] = [
     subject: "Toán học", grade: 12, type: "class", classId: "c1",
     description: "Tài liệu lớp Toán 12 — dành cho học viên đã đăng ký lớp.",
     published: true, packages: ["online", "advanced", "offline"],
+    includes: [],
     chapters: [
       {
         id: "ch1", title: "Hàm số & đồ thị",
@@ -86,8 +94,10 @@ const SEED_COURSES: Course[] = [
   {
     id: "tc2", title: "Toán 12 — Siêu Ôn Luyện THPT Quốc Gia",
     subject: "Toán học", grade: 12, type: "paid_package",
-    price: 299000,
-    description: "Bộ tài liệu toàn diện nhất cho kỳ thi THPT.",
+    price: 299000, originalPrice: 499000, tier: "pro",
+    rating: 4.9, reviewCount: 218,
+    includes: ["32 video bài giảng HD", "500 bài tập có đáp án", "10 đề thi thử THPT", "Tóm tắt lý thuyết mỗi chương"],
+    description: "Bộ tài liệu toàn diện nhất cho kỳ thi THPT, bao gồm video bài giảng, bộ đề và đáp án chi tiết.",
     published: true, packages: ["advanced", "offline"],
     chapters: [
       {
@@ -319,6 +329,51 @@ function ChapterBlock({
 // Course editor panel
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ── Includes editor ──────────────────────────────────────────────────────────
+
+function IncludesEditor({ items, onChange }: { items: string[]; onChange: (items: string[]) => void }) {
+  const [input, setInput] = useState("");
+
+  function add() {
+    const v = input.trim();
+    if (!v || items.includes(v)) return;
+    onChange([...items, v]);
+    setInput("");
+  }
+
+  return (
+    <div className="space-y-1.5">
+      <label className="text-xs font-semibold text-muted-foreground uppercase">Bao gồm (BAO GỒM)</label>
+      <div className="space-y-1.5">
+        {items.map((item, i) => (
+          <div key={i} className="flex items-center gap-2 p-2 rounded-lg border border-border bg-background">
+            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+            <span className="text-sm flex-1 text-foreground">{item}</span>
+            <button
+              type="button"
+              onClick={() => onChange(items.filter((_, j) => j !== i))}
+              className="p-0.5 rounded text-muted-foreground hover:text-red-500 transition-colors"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        ))}
+        <div className="flex gap-2">
+          <Input
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            placeholder="VD: 32 video bài giảng HD"
+            onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); add(); } }}
+          />
+          <Button type="button" size="sm" variant="outline" onClick={add} className="shrink-0">
+            <Plus className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function CourseEditor({
   course,
   onUpdate,
@@ -447,9 +502,9 @@ function CourseEditor({
                 </select>
               </div>
             )}
-            {draft.type === "paid_package" && (
+            {draft.type === "paid_package" && (<>
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-muted-foreground uppercase">Giá (VND)</label>
+                <label className="text-xs font-semibold text-muted-foreground uppercase">Giá bán (VND)</label>
                 <div className="relative">
                   <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <Input
@@ -461,7 +516,53 @@ function CourseEditor({
                   />
                 </div>
               </div>
-            )}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold text-muted-foreground uppercase">Giá gốc (VND)</label>
+                  {draft.originalPrice && draft.price && draft.originalPrice > draft.price && (
+                    <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400">
+                      -{Math.round((1 - draft.price / draft.originalPrice) * 100)}%
+                    </span>
+                  )}
+                </div>
+                <div className="relative">
+                  <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    type="number"
+                    className="pl-9"
+                    value={draft.originalPrice ?? ""}
+                    onChange={e => patch({ originalPrice: e.target.value ? Number(e.target.value) : undefined })}
+                    placeholder="VD: 499000"
+                  />
+                </div>
+                {draft.originalPrice && draft.price && draft.originalPrice <= draft.price && (
+                  <p className="text-[11px] text-amber-600 dark:text-amber-400">Giá gốc phải lớn hơn giá bán để hiện discount.</p>
+                )}
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-muted-foreground uppercase">Cấp độ (Badge)</label>
+                <div className="flex gap-2">
+                  {([
+                    { value: "basic",  label: "Basic",  color: "border-slate-300 bg-slate-100 text-slate-700" },
+                    { value: "pro",    label: "Pro",    color: "border-violet-300 bg-violet-100 text-violet-700" },
+                    { value: "elite",  label: "Elite",  color: "border-amber-300 bg-amber-100 text-amber-700" },
+                  ] as const).map(({ value, label, color }) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => patch({ tier: value })}
+                      className={`flex-1 h-9 rounded-lg border text-xs font-semibold transition-all ${draft.tier === value ? `${color} ring-2 ring-offset-1 ring-primary/40` : "border-border text-muted-foreground hover:bg-muted"}`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="sm:col-span-2 flex items-start gap-2 p-3 rounded-lg bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800/50 text-xs text-amber-700 dark:text-amber-400">
+                <Star className="h-4 w-4 shrink-0 mt-0.5 fill-amber-400 text-amber-400" />
+                <span>Điểm đánh giá được tính tự động từ các review của học viên đã sở hữu khóa học.</span>
+              </div>
+            </>)}
             <div className="sm:col-span-2 space-y-1.5">
               <label className="text-xs font-semibold text-muted-foreground uppercase">Gói đăng ký có quyền truy cập</label>
               <div className="flex gap-2 flex-wrap">
@@ -505,12 +606,16 @@ function CourseEditor({
             </div>
           </div>
 
-          {draft.type === "paid_package" && (
+          {draft.type === "paid_package" && (<>
+            <IncludesEditor
+              items={draft.includes ?? []}
+              onChange={items => patch({ includes: items })}
+            />
             <div className="flex items-start gap-2 p-3 rounded-lg bg-violet-50 dark:bg-violet-900/10 border border-violet-200 dark:border-violet-800/50 text-xs text-violet-700 dark:text-violet-400">
               <Eye className="h-4 w-4 shrink-0 mt-0.5" />
               <span>Các bài học bật <strong>Preview</strong> sẽ hiển thị miễn phí cho học viên xem thử trước khi mua. Nên để ít nhất 1–2 bài preview mỗi chương.</span>
             </div>
-          )}
+          </>)}
         </CardContent>
       </Card>
 
@@ -643,7 +748,7 @@ export default function TeacherMaterialsPage() {
     const c: Course = {
       id: uid(), title: "", subject: "Toán học", grade: 12,
       type: "class", description: "", chapters: [], published: false,
-      packages: ["online", "advanced", "offline"],
+      packages: ["online", "advanced", "offline"], includes: [],
     };
     setCourses(prev => { const next = [c, ...prev]; saveCourses(next); return next; });
     setEditing(c);

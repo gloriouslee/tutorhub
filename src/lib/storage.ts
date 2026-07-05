@@ -129,6 +129,26 @@ export async function saveStudentComment(studentId: string, commentsList: { text
   }
 }
 
+// ── Teacher-class assignment overrides (localStorage) ────────────────────────
+// Allows admin to reassign classes to different teachers without touching mock data.
+
+const TEACHER_OVERRIDE_KEY = "tutorhub_class_teacher_overrides";
+
+export function getClassTeacherOverrides(): Record<string, string> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = localStorage.getItem(TEACHER_OVERRIDE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch { return {}; }
+}
+
+export function setClassTeacherOverride(classId: string, teacherId: string): void {
+  if (typeof window === "undefined") return;
+  const existing = getClassTeacherOverrides();
+  existing[classId] = teacherId;
+  localStorage.setItem(TEACHER_OVERRIDE_KEY, JSON.stringify(existing));
+}
+
 // ── Schedule overrides (localStorage) ───────────────────────────────────────
 
 export function getClassScheduleOverride(classId: string): ClassSchedule[] | null {
@@ -259,15 +279,39 @@ export function markScheduleNotificationsRead(): void {
 
 // ── Curriculum (localStorage) ────────────────────────────────────────────────
 
+export interface ExamQuestion {
+  id: string;
+  order: number;
+  type: "multiple_choice" | "essay" | "true_false" | "fill_blank";
+  content_html: string;      // TipTap HTML — đề bài
+  options?: string[];        // A/B/C/D text (multiple_choice)
+  correct_option?: number;   // 0-based index (multiple_choice)
+  correct_value?: string;    // "true"/"false" or exact text (true_false / fill_blank)
+  answer_html?: string;      // TipTap HTML — đáp án tự luận
+  explanation_html?: string; // TipTap HTML — giải thích
+  score: number;
+  difficulty?: "easy" | "medium" | "hard";
+  tags?: string[];
+}
+
+export interface ExamContent {
+  questions:  ExamQuestion[];
+  time_limit?: number; // phút
+}
+
 export interface CurriculumLesson {
   id: string;
-  type: "lecture" | "material" | "homework" | "solution";
+  type: "lecture" | "material" | "homework" | "solution" | "exam";
   title: string;
   video_url?: string;
   file_url?: string;
   description?: string;
   due_date?: string;
   is_published: boolean;
+  exam_content?: ExamContent;
+  // Exam scheduling / access control
+  exam_status?: "draft" | "open" | "closed"; // default: "draft"
+  exam_opens_at?: string;                     // ISO datetime for scheduled auto-open
 }
 
 export interface CurriculumSession {
@@ -296,6 +340,63 @@ export function getCurriculum(classId: string): CurriculumChapter[] {
 export function saveCurriculum(classId: string, curriculum: CurriculumChapter[]): void {
   if (typeof window === "undefined") return;
   try { localStorage.setItem(`tutorhub_curriculum_${classId}`, JSON.stringify(curriculum)); } catch { /* ignore */ }
+}
+
+// ── Exam results (per student, per exam) ─────────────────────────────────────
+
+export interface StoredExamResult {
+  student_id:   string;
+  student_name: string;
+  score:        number;
+  total:        number;
+  submitted_at: string;
+  answers:      Record<string, unknown>;
+}
+
+function examResultKey(classId: string, lessonId: string, studentId: string) {
+  return `tutorhub_exam_result_${classId}_${lessonId}_${studentId}`;
+}
+function examSubmissionsKey(classId: string, lessonId: string) {
+  return `tutorhub_exam_submissions_${classId}_${lessonId}`;
+}
+
+export function saveExamResult(
+  classId: string,
+  lessonId: string,
+  studentId: string,
+  studentName: string,
+  result: { score: number; total: number; submitted_at: string; answers: Record<string, unknown> }
+): void {
+  if (typeof window === "undefined") return;
+  const stored: StoredExamResult = { student_id: studentId, student_name: studentName, ...result };
+  localStorage.setItem(examResultKey(classId, lessonId, studentId), JSON.stringify(stored));
+  // Track submission registry so teacher can list all results
+  const subs: string[] = getExamSubmissionIds(classId, lessonId);
+  if (!subs.includes(studentId)) {
+    localStorage.setItem(examSubmissionsKey(classId, lessonId), JSON.stringify([...subs, studentId]));
+  }
+}
+
+export function getExamResult(classId: string, lessonId: string, studentId: string): StoredExamResult | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(examResultKey(classId, lessonId, studentId));
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+
+function getExamSubmissionIds(classId: string, lessonId: string): string[] {
+  try {
+    const raw = localStorage.getItem(examSubmissionsKey(classId, lessonId));
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+
+export function getAllExamResults(classId: string, lessonId: string): StoredExamResult[] {
+  if (typeof window === "undefined") return [];
+  return getExamSubmissionIds(classId, lessonId)
+    .map(sid => getExamResult(classId, lessonId, sid))
+    .filter(Boolean) as StoredExamResult[];
 }
 
 // ── Student package per class (localStorage) ────────────────────────────────
@@ -377,13 +478,12 @@ export function updateInvoiceStatus(
   localStorage.setItem(INVOICE_KEY, JSON.stringify(invoices));
 }
 
-// ── Enrollment requests (localStorage) ──────────────────────────────────────
+// ── Enrollment requests (Supabase) ───────────────────────────────────────────
 
 export type EnrollmentStatus = "pending" | "approved" | "rejected";
 
 export interface EnrollmentRequest {
   id: string;
-  // Student info from form
   full_name: string;
   email: string;
   dob: string;
@@ -391,19 +491,20 @@ export interface EnrollmentRequest {
   grade: string;
   requested_class_id: string;
   parent_phone: string;
+  student_phone?: string;
   note?: string;
-  // Admin fields (set on approval)
   status: EnrollmentStatus;
   assigned_class_id?: string;
   account_username?: string;
   account_password?: string;
   reject_reason?: string;
+  supabase_user_id?: string;
   created_at: string;
   reviewed_at?: string;
 }
 
 export interface StudentAccount {
-  student_id: string;          // e.g. "enr_<id>"
+  student_id: string;
   full_name: string;
   email: string;
   dob: string;
@@ -418,46 +519,41 @@ export interface StudentAccount {
 const ENROLL_KEY  = "tutorhub_enrollments";
 const ACCOUNT_KEY = "tutorhub_student_accounts";
 
-export function getEnrollments(): EnrollmentRequest[] {
-  if (typeof window === "undefined") return [];
+export function getEnrollments(): Promise<EnrollmentRequest[]> {
+  if (typeof window === "undefined") return Promise.resolve([]);
   try {
     const raw = localStorage.getItem(ENROLL_KEY);
-    return raw ? (JSON.parse(raw) as EnrollmentRequest[]) : [];
-  } catch { return []; }
+    return Promise.resolve(raw ? JSON.parse(raw) : []);
+  } catch { return Promise.resolve([]); }
 }
 
-export function createEnrollment(
+export async function createEnrollment(
   data: Omit<EnrollmentRequest, "id" | "status" | "created_at">
-): EnrollmentRequest {
+): Promise<EnrollmentRequest> {
   const request: EnrollmentRequest = {
     ...data,
     id: crypto.randomUUID(),
     status: "pending",
     created_at: new Date().toISOString(),
   };
-  const existing = getEnrollments();
+  const existing = await getEnrollments();
   localStorage.setItem(ENROLL_KEY, JSON.stringify([request, ...existing]));
   return request;
 }
 
-export function approveEnrollment(
+export async function approveEnrollment(
   id: string,
-  opts: {
-    assigned_class_id: string;
-    account_username: string;
-    account_password: string;
-  }
-): void {
-  if (typeof window === "undefined") return;
-  const enrollments = getEnrollments().map(e =>
+  opts: { assigned_class_id: string; account_username: string; account_password: string }
+): Promise<void> {
+  const all = await getEnrollments();
+  const updated = all.map(e =>
     e.id === id
       ? { ...e, status: "approved" as EnrollmentStatus, ...opts, reviewed_at: new Date().toISOString() }
       : e
   );
-  localStorage.setItem(ENROLL_KEY, JSON.stringify(enrollments));
+  localStorage.setItem(ENROLL_KEY, JSON.stringify(updated));
 
-  // Create student account record
-  const enr = enrollments.find(e => e.id === id)!;
+  const enr = updated.find(e => e.id === id)!;
   const account: StudentAccount = {
     student_id:        `enr_${id}`,
     full_name:         enr.full_name,
@@ -477,29 +573,328 @@ export function approveEnrollment(
   ]));
 }
 
-export function rejectEnrollment(id: string, reason?: string): void {
-  if (typeof window === "undefined") return;
-  const enrollments = getEnrollments().map(e =>
+export async function deleteEnrollment(id: string): Promise<void> {
+  const all = await getEnrollments();
+  localStorage.setItem(ENROLL_KEY, JSON.stringify(all.filter(e => e.id !== id)));
+  // Also remove student account if approved
+  const accounts = getStudentAccounts();
+  localStorage.setItem(ACCOUNT_KEY, JSON.stringify(accounts.filter(a => a.student_id !== `enr_${id}`)));
+}
+
+export async function rejectEnrollment(id: string, reason?: string): Promise<void> {
+  const all = await getEnrollments();
+  const updated = all.map(e =>
     e.id === id
       ? { ...e, status: "rejected" as EnrollmentStatus, reject_reason: reason, reviewed_at: new Date().toISOString() }
       : e
   );
-  localStorage.setItem(ENROLL_KEY, JSON.stringify(enrollments));
+  localStorage.setItem(ENROLL_KEY, JSON.stringify(updated));
 }
 
 export function getStudentAccounts(): StudentAccount[] {
   if (typeof window === "undefined") return [];
   try {
     const raw = localStorage.getItem(ACCOUNT_KEY);
-    return raw ? (JSON.parse(raw) as StudentAccount[]) : [];
+    return raw ? JSON.parse(raw) : [];
   } catch { return []; }
 }
 
-// Returns the account for the demo student (s1) if an approved enrollment exists,
-// otherwise null (caller falls back to MOCK_STUDENTS).
 export function getCurrentStudentAccount(): StudentAccount | null {
-  // In a real app this would use session/auth. Here we just return the most
-  // recently approved account as a demo stand-in.
   const accounts = getStudentAccounts();
   return accounts.length > 0 ? accounts[accounts.length - 1] : null;
+}
+
+// ── Exam scores (localStorage) ────────────────────────────────────────────────
+
+export interface StoredExamScore {
+  id:         string;
+  student_id: string;
+  class_id:   string;
+  exam_name:  string;
+  score:      number;
+  max_score:  number;
+  exam_date:  string;
+}
+
+const SCORES_KEY = "tutorhub_exam_scores";
+
+function getStoredExamScores(): StoredExamScore[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(SCORES_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+
+export async function saveExamScore(score: Omit<StoredExamScore, "id">): Promise<StoredExamScore> {
+  const record: StoredExamScore = { ...score, id: crypto.randomUUID() };
+  localStorage.setItem(SCORES_KEY, JSON.stringify([...getStoredExamScores(), record]));
+  return record;
+}
+
+export async function deleteExamScore(id: string): Promise<void> {
+  localStorage.setItem(SCORES_KEY, JSON.stringify(getStoredExamScores().filter(s => s.id !== id)));
+}
+
+export async function getExamScoresByStudent(studentId: string): Promise<StoredExamScore[]> {
+  return Promise.resolve(getStoredExamScores().filter(s => s.student_id === studentId));
+}
+
+// ── Class materials (localStorage) ────────────────────────────────────────────
+
+export interface StoredClassMaterial {
+  id: string;
+  class_id: string;
+  title: string;
+  description?: string;
+  file_url: string;
+  file_type: string;
+  file_size: string;
+  category: string;
+  uploaded_by: string;
+  created_at: string;
+  download_count: number;
+  packages?: StudentPackage[];  // empty/undefined = visible to all packages
+}
+
+const MATERIALS_KEY = "tutorhub_class_materials";
+
+function getStoredMaterials(): StoredClassMaterial[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(MATERIALS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+
+export function getClassMaterials(classId: string): StoredClassMaterial[] {
+  return getStoredMaterials().filter(m => m.class_id === classId);
+}
+
+export function saveClassMaterial(mat: Omit<StoredClassMaterial, "id" | "download_count">): StoredClassMaterial {
+  const record: StoredClassMaterial = { ...mat, id: `mat_${Date.now()}`, download_count: 0 };
+  localStorage.setItem(MATERIALS_KEY, JSON.stringify([...getStoredMaterials(), record]));
+  return record;
+}
+
+export function deleteClassMaterial(materialId: string): void {
+  if (typeof window === "undefined") return;
+  const updated = getStoredMaterials().filter(m => m.id !== materialId);
+  localStorage.setItem(MATERIALS_KEY, JSON.stringify(updated));
+}
+
+export function incrementMaterialDownload(materialId: string): void {
+  if (typeof window === "undefined") return;
+  const all = getStoredMaterials();
+  const idx = all.findIndex(m => m.id === materialId);
+  if (idx >= 0) {
+    all[idx] = { ...all[idx], download_count: all[idx].download_count + 1 };
+    localStorage.setItem(MATERIALS_KEY, JSON.stringify(all));
+  }
+}
+
+// ── Homework file attachments (localStorage) ──────────────────────────────────
+
+export interface HomeworkAttachment {
+  homework_id: string;
+  file_url: string;
+  file_name: string;
+  file_size: string;
+  file_type: string;
+}
+
+const HW_ATTACHMENTS_KEY = "tutorhub_homework_attachments";
+
+function getAllHomeworkAttachments(): HomeworkAttachment[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(HW_ATTACHMENTS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+
+export function getHomeworkAttachments(homeworkId: string): HomeworkAttachment[] {
+  return getAllHomeworkAttachments().filter(a => a.homework_id === homeworkId);
+}
+
+export function saveHomeworkAttachment(att: HomeworkAttachment): void {
+  localStorage.setItem(HW_ATTACHMENTS_KEY, JSON.stringify([...getAllHomeworkAttachments(), att]));
+}
+
+// ── Teacher tuition management per class (localStorage) ──────────────────────
+
+export interface TuitionPaymentRecord {
+  id: string;
+  amount: number;
+  period: string;     // "YYYY-MM"
+  paid_at: string;    // ISO datetime
+  method: "cash" | "transfer" | "other";
+  note?: string;
+}
+
+export interface StudentTuitionData {
+  custom_fee?: number;       // Monthly fee override; uses class default if absent
+  payments: TuitionPaymentRecord[];
+  notes?: string;
+  next_due_date?: string;    // YYYY-MM-DD
+}
+
+export interface ClassTuitionConfig {
+  package_fees: {
+    online: number;
+    advanced: number;
+    offline: number;
+  };
+  students: Record<string, StudentTuitionData>;
+}
+
+const DEFAULT_TUITION: ClassTuitionConfig = {
+  package_fees: { online: 0, advanced: 0, offline: 0 },
+  students: {},
+};
+
+function tuitionKey(classId: string) { return `tutorhub_tuition_${classId}`; }
+
+export function getClassTuition(classId: string): ClassTuitionConfig {
+  if (typeof window === "undefined") return DEFAULT_TUITION;
+  try {
+    const raw = localStorage.getItem(tuitionKey(classId));
+    if (!raw) return DEFAULT_TUITION;
+    const parsed = JSON.parse(raw);
+    // Migrate old default_fee format
+    if (typeof parsed.default_fee === "number" && !parsed.package_fees) {
+      return { package_fees: { online: parsed.default_fee, advanced: parsed.default_fee, offline: parsed.default_fee }, students: parsed.students ?? {} };
+    }
+    return parsed;
+  } catch { return DEFAULT_TUITION; }
+}
+
+export function saveClassTuition(classId: string, config: ClassTuitionConfig): void {
+  if (typeof window === "undefined") return;
+  try { localStorage.setItem(tuitionKey(classId), JSON.stringify(config)); } catch { /* ignore */ }
+}
+
+export function recordTuitionPayment(
+  classId: string,
+  studentId: string,
+  payment: Omit<TuitionPaymentRecord, "id">
+): void {
+  const config = getClassTuition(classId);
+  const student = config.students[studentId] ?? { payments: [] };
+  const newPayment: TuitionPaymentRecord = { ...payment, id: crypto.randomUUID() };
+  config.students[studentId] = { ...student, payments: [...student.payments, newPayment] };
+  saveClassTuition(classId, config);
+}
+
+export function deleteTuitionPayment(classId: string, studentId: string, paymentId: string): void {
+  const config = getClassTuition(classId);
+  const student = config.students[studentId];
+  if (!student) return;
+  config.students[studentId] = { ...student, payments: student.payments.filter(p => p.id !== paymentId) };
+  saveClassTuition(classId, config);
+}
+
+
+// ── Course reviews (localStorage) ─────────────────────────────────────────────
+
+export interface CourseReview {
+  id: string;
+  course_id: string;
+  student_id: string;
+  student_name: string;
+  rating: number; // 1–5
+  comment?: string;
+  created_at: string;
+}
+
+const REVIEWS_KEY = "tutorhub_course_reviews";
+
+function getStoredReviews(): CourseReview[] {
+  if (typeof window === "undefined") return [];
+  try { return JSON.parse(localStorage.getItem(REVIEWS_KEY) ?? "[]"); } catch { return []; }
+}
+
+export function getCourseReviews(courseId: string): CourseReview[] {
+  return getStoredReviews().filter(r => r.course_id === courseId);
+}
+
+export function submitCourseReview(review: Omit<CourseReview, "id">): CourseReview {
+  const all = getStoredReviews();
+  // One review per student per course — upsert
+  const existing = all.findIndex(r => r.course_id === review.course_id && r.student_id === review.student_id);
+  const record: CourseReview = { ...review, id: existing >= 0 ? all[existing].id : crypto.randomUUID() };
+  if (existing >= 0) all[existing] = record; else all.push(record);
+  localStorage.setItem(REVIEWS_KEY, JSON.stringify(all));
+  return record;
+}
+
+export function deleteReview(reviewId: string): void {
+  if (typeof window === "undefined") return;
+  const updated = getStoredReviews().filter(r => r.id !== reviewId);
+  localStorage.setItem(REVIEWS_KEY, JSON.stringify(updated));
+}
+
+export function getCourseRating(courseId: string): { rating: number; reviewCount: number } {
+  const reviews = getCourseReviews(courseId);
+  if (reviews.length === 0) return { rating: 0, reviewCount: 0 };
+  const avg = reviews.reduce((s, r) => s + r.rating, 0) / reviews.length;
+  return { rating: Math.round(avg * 10) / 10, reviewCount: reviews.length };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// User Management (admin)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type UserRole = "student" | "teacher" | "admin";
+
+export interface ManagedUser {
+  id: string;
+  type: UserRole;
+  full_name: string;
+  username: string;
+  email?: string;
+  password?: string;
+  disabled: boolean;
+  created_at: string;
+  // role-specific extras
+  grade?: string;
+  school?: string;
+  specialization?: string;
+}
+
+const MANAGED_USERS_KEY = "tutorhub_managed_users";
+
+function ls(key: string): string | null {
+  try { return typeof window !== "undefined" ? localStorage.getItem(key) : null; } catch { return null; }
+}
+
+export function getManagedUsers(): ManagedUser[] {
+  try {
+    const raw = ls(MANAGED_USERS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+
+export function saveManagedUser(user: ManagedUser): void {
+  const all = getManagedUsers();
+  const idx = all.findIndex(u => u.id === user.id);
+  if (idx >= 0) all[idx] = user; else all.push(user);
+  localStorage.setItem(MANAGED_USERS_KEY, JSON.stringify(all));
+}
+
+export function deleteManagedUser(id: string): void {
+  const all = getManagedUsers().filter(u => u.id !== id);
+  localStorage.setItem(MANAGED_USERS_KEY, JSON.stringify(all));
+}
+
+export function resetManagedUserPassword(id: string, newPassword: string): void {
+  const all = getManagedUsers();
+  const user = all.find(u => u.id === id);
+  if (user) { user.password = newPassword; localStorage.setItem(MANAGED_USERS_KEY, JSON.stringify(all)); }
+}
+
+export function toggleManagedUserDisabled(id: string): void {
+  const all = getManagedUsers();
+  const user = all.find(u => u.id === id);
+  if (user) { user.disabled = !user.disabled; localStorage.setItem(MANAGED_USERS_KEY, JSON.stringify(all)); }
 }

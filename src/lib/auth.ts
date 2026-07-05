@@ -3,6 +3,8 @@ import { cookies } from "next/headers";
 
 export async function getCurrentUserName(): Promise<string> {
   const cookieStore = await cookies();
+  const enrolledName = cookieStore.get("enrolled_student_name")?.value;
+  if (enrolledName) return decodeURIComponent(enrolledName);
   const demoRole = cookieStore.get("demo_role")?.value;
   if (demoRole) return "Demo User";
 

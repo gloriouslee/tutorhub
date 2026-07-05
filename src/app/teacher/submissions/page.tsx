@@ -9,7 +9,7 @@ import { MOCK_STUDENTS, MOCK_HOMEWORK, MOCK_CLASSES } from "@/lib/mock-data";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   Search, CheckCircle2, Clock, FileText, ChevronDown, ChevronUp,
-  Star, MessageSquare, BarChart2, Download, Image,
+  Star, MessageSquare, BarChart2, Download, Image, Upload, X, Paperclip,
 } from "lucide-react";
 import {
   getSubmissionsByHomeworks,
@@ -25,12 +25,12 @@ type Submission = SubmissionRecord & { student_name: string };
 const SUBMISSION_KEY = "tutorhub_submissions";
 
 const DEFAULT_SUBMISSIONS: Submission[] = [
-  { id: "sub1", homework_id: "h1", student_id: "s1", student_name: "Nguyễn Anh Tuấn", status: "graded",    submitted_at: "2026-07-08T14:30:00Z", score: 9.2, feedback: "Em làm bài rất tốt! Lời giải rõ ràng, lập luận chặt chẽ. Chú ý thêm ở bài 2.14 tính toán sai dấu ở dòng cuối.", graded_at: "2026-07-09T10:00:00Z" },
-  { id: "sub2", homework_id: "h1", student_id: "s2", student_name: "Trần Mai Phương",  status: "submitted", submitted_at: "2026-07-09T20:15:00Z" },
-  { id: "sub3", homework_id: "h1", student_id: "s4", student_name: "Phạm Thảo My",     status: "submitted", submitted_at: "2026-07-08T22:00:00Z" },
-  { id: "sub4", homework_id: "h4", student_id: "s1", student_name: "Nguyễn Anh Tuấn", status: "submitted", submitted_at: "2026-06-30T16:00:00Z" },
-  { id: "sub5", homework_id: "h4", student_id: "s2", student_name: "Trần Mai Phương",  status: "graded",    submitted_at: "2026-06-29T21:30:00Z", score: 7.5, feedback: "Bài làm đạt yêu cầu. Cần đọc kỹ đề hơn.", graded_at: "2026-06-30T09:00:00Z" },
-  { id: "sub6", homework_id: "h4", student_id: "s4", student_name: "Phạm Thảo My",     status: "submitted", submitted_at: "2026-06-30T09:00:00Z" },
+  { id: "sub1", homework_id: "h1", student_id: "s1", student_name: "Nguyễn Anh Tuấn", status: "graded",    submitted_at: "2026-07-08T14:30:00Z", file_name: "bai_dao_ham_nguyen_anh_tuan.pdf",  score: 9.2, feedback: "Em làm bài rất tốt! Lời giải rõ ràng, lập luận chặt chẽ. Chú ý thêm ở bài 2.14 tính toán sai dấu ở dòng cuối.", graded_at: "2026-07-09T10:00:00Z" },
+  { id: "sub2", homework_id: "h1", student_id: "s2", student_name: "Trần Mai Phương",  status: "submitted", submitted_at: "2026-07-09T20:15:00Z", file_name: "tran_mai_phuong_chuong2.pdf" },
+  { id: "sub3", homework_id: "h1", student_id: "s4", student_name: "Phạm Thảo My",     status: "submitted", submitted_at: "2026-07-08T22:00:00Z", file_name: "baitap_phamthaomy.docx" },
+  { id: "sub4", homework_id: "h4", student_id: "s1", student_name: "Nguyễn Anh Tuấn", status: "submitted", submitted_at: "2026-06-30T16:00:00Z", file_name: "tracnghiem_hamso_s1.pdf" },
+  { id: "sub5", homework_id: "h4", student_id: "s2", student_name: "Trần Mai Phương",  status: "graded",    submitted_at: "2026-06-29T21:30:00Z", file_name: "hamso_tran_mai_phuong.jpg",  score: 7.5, feedback: "Bài làm đạt yêu cầu. Cần đọc kỹ đề hơn.", graded_at: "2026-06-30T09:00:00Z" },
+  { id: "sub6", homework_id: "h4", student_id: "s4", student_name: "Phạm Thảo My",     status: "submitted", submitted_at: "2026-06-30T09:00:00Z", file_name: "phamthaomy_tracnghiem.pdf" },
 ];
 
 function loadSubmissions(): Submission[] {
@@ -72,9 +72,11 @@ export default function TeacherSubmissionsPage() {
   const [hwFilter,    setHwFilter]    = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<"all" | "graded" | "ungraded">("all");
   const [search,      setSearch]      = useState("");
-  const [grading,     setGrading]     = useState<string | null>(null); // submission id
-  const [scoreInput,  setScoreInput]  = useState("");
+  const [grading,       setGrading]       = useState<string | null>(null);
+  const [scoreInput,    setScoreInput]    = useState("");
   const [feedbackInput, setFeedbackInput] = useState("");
+  const [teacherFile,   setTeacherFile]   = useState<File | null>(null);
+  const [tfDragOver,    setTfDragOver]    = useState(false);
 
   useEffect(() => {
     // Try Supabase first, fall back to localStorage seed
@@ -119,6 +121,7 @@ export default function TeacherSubmissionsPage() {
     setGrading(sub.id);
     setScoreInput(sub.score != null ? String(sub.score) : "");
     setFeedbackInput(sub.feedback ?? "");
+    setTeacherFile(null);
   }
 
   async function handleSaveGrade(subId: string) {
@@ -126,25 +129,29 @@ export default function TeacherSubmissionsPage() {
     if (isNaN(score) || score < 0 || score > 10) return;
     const feedback = feedbackInput.trim();
 
-    // Optimistic UI update
+    // For demo: use object URL if file selected, else keep existing teacher_file
+    const existing = submissions.find(s => s.id === subId);
+    const teacherFileUrl  = teacherFile ? URL.createObjectURL(teacherFile) : existing?.teacher_file_url;
+    const teacherFileName = teacherFile ? teacherFile.name : existing?.teacher_file_name;
+
     const updated = submissions.map(s =>
       s.id === subId
-        ? { ...s, score, feedback: feedback || undefined, graded_at: new Date().toISOString() }
+        ? { ...s, score, feedback: feedback || undefined, status: "graded" as const, graded_at: new Date().toISOString(), teacher_file_url: teacherFileUrl, teacher_file_name: teacherFileName }
         : s
     );
     setSubmissions(updated);
     saveSubmissions(updated);
     setGrading(null);
+    setTeacherFile(null);
 
-    // Persist to Supabase (non-blocking; localStorage already saved)
-    await supabaseUpdateGrade(subId, score, feedback);
+    await supabaseUpdateGrade(subId, score, feedback, teacherFileUrl, teacherFileName);
   }
 
   const hwForSub = (sub: Submission) => myHomework.find(h => h.id === sub.homework_id);
   const classForHw = (classId: string) => MOCK_CLASSES.find(c => c.id === classId);
 
   return (
-    <PortalLayout role="teacher" userName="Tiến sĩ Sarah Mitchell" pageTitle="Quản lý Bài nộp">
+    <PortalLayout role="teacher" userName="Thầy Hùng Toán" pageTitle="Quản lý Bài nộp">
       <div className="space-y-6">
         <SectionHeader
           title="Chấm bài & Phản hồi"
@@ -241,7 +248,7 @@ export default function TeacherSubmissionsPage() {
                         <div className="flex items-center justify-between gap-4 flex-wrap sm:flex-nowrap">
                           <div className="flex items-center gap-3">
                             <Avatar size="sm">
-                              <AvatarFallback>{sub.student_name[0]}</AvatarFallback>
+                              <AvatarFallback name={sub.student_name} />
                             </Avatar>
                             <div>
                               <p className="text-sm font-semibold text-foreground">{sub.student_name}</p>
@@ -283,8 +290,8 @@ export default function TeacherSubmissionsPage() {
                             {/\.(jpg|jpeg|png)$/i.test(sub.file_name)
                               ? <Image className="h-3.5 w-3.5 text-blue-500 shrink-0" />
                               : <FileText className="h-3.5 w-3.5 text-red-500 shrink-0" />}
-                            <span className="truncate">{sub.file_name}</span>
-                            {sub.file_url && (
+                            <span className="truncate flex-1">{sub.file_name}</span>
+                            {sub.file_url ? (
                               <a
                                 href={sub.file_url}
                                 target="_blank"
@@ -294,15 +301,34 @@ export default function TeacherSubmissionsPage() {
                               >
                                 <Download className="h-3.5 w-3.5" />
                               </a>
+                            ) : (
+                              <span className="ml-auto shrink-0 p-1 text-muted-foreground/40" title="File chưa có URL (nộp offline)">
+                                <Download className="h-3.5 w-3.5" />
+                              </span>
                             )}
                           </div>
                         )}
 
-                        {/* Existing feedback display */}
-                        {isGraded && sub.feedback && !isGrading && (
-                          <div className="ml-11 flex items-start gap-2 text-xs text-muted-foreground bg-muted/40 rounded-lg px-3 py-2">
-                            <MessageSquare className="h-3.5 w-3.5 mt-0.5 shrink-0" />
-                            <span className="leading-relaxed">{sub.feedback}</span>
+                        {/* Existing feedback + teacher file display */}
+                        {isGraded && !isGrading && (sub.feedback || sub.teacher_file_name) && (
+                          <div className="ml-11 space-y-1.5">
+                            {sub.feedback && (
+                              <div className="flex items-start gap-2 text-xs text-muted-foreground bg-muted/40 rounded-lg px-3 py-2">
+                                <MessageSquare className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                                <span className="leading-relaxed">{sub.feedback}</span>
+                              </div>
+                            )}
+                            {sub.teacher_file_name && (
+                              <div className="flex items-center gap-2 text-xs bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-100 dark:border-indigo-800 rounded-lg px-3 py-2">
+                                <Paperclip className="h-3.5 w-3.5 text-indigo-500 shrink-0" />
+                                <span className="flex-1 truncate text-indigo-700 dark:text-indigo-300 font-medium">{sub.teacher_file_name}</span>
+                                {sub.teacher_file_url && (
+                                  <a href={sub.teacher_file_url} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:text-indigo-700">
+                                    <Download className="h-3.5 w-3.5" />
+                                  </a>
+                                )}
+                              </div>
+                            )}
                           </div>
                         )}
 
@@ -345,6 +371,39 @@ export default function TeacherSubmissionsPage() {
                                 className="w-full rounded-xl border border-input bg-card px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring resize-none placeholder:text-muted-foreground"
                               />
                             </div>
+
+                            {/* Teacher file attachment */}
+                            <div className="space-y-1.5">
+                              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
+                                <Paperclip className="h-3 w-3" /> Đính kèm tài liệu trả lại <span className="normal-case font-normal">(tuỳ chọn)</span>
+                              </label>
+                              {teacherFile ? (
+                                <div className="flex items-center gap-2 px-3 py-2 bg-primary/5 border border-primary/20 rounded-xl text-sm">
+                                  <FileText className="h-4 w-4 text-primary shrink-0" />
+                                  <span className="flex-1 truncate text-xs font-medium">{teacherFile.name}</span>
+                                  <button onClick={() => setTeacherFile(null)} className="text-muted-foreground hover:text-destructive">
+                                    <X className="h-3.5 w-3.5" />
+                                  </button>
+                                </div>
+                              ) : submissions.find(s => s.id === grading)?.teacher_file_name ? (
+                                <div className="flex items-center gap-2 px-3 py-2 bg-muted/40 border border-border/50 rounded-xl text-xs text-muted-foreground">
+                                  <Paperclip className="h-3.5 w-3.5 shrink-0" />
+                                  <span className="flex-1 truncate">{submissions.find(s => s.id === grading)?.teacher_file_name}</span>
+                                  <span className="text-[10px] bg-muted px-1.5 py-0.5 rounded">Đã đính kèm</span>
+                                </div>
+                              ) : null}
+                              <label
+                                className={`flex items-center gap-2 px-3 py-2 border-2 border-dashed rounded-xl cursor-pointer transition-colors text-xs ${tfDragOver ? "border-primary bg-primary/5" : "border-border hover:border-primary/40 hover:bg-muted/30"} text-muted-foreground`}
+                                onDragOver={e => { e.preventDefault(); setTfDragOver(true); }}
+                                onDragLeave={() => setTfDragOver(false)}
+                                onDrop={e => { e.preventDefault(); setTfDragOver(false); const f = e.dataTransfer.files[0]; if (f) setTeacherFile(f); }}
+                              >
+                                <Upload className="h-3.5 w-3.5 shrink-0" />
+                                <span>{teacherFile ? "Chọn file khác" : "Kéo thả hoặc nhấn để chọn file đính kèm"}</span>
+                                <input type="file" className="sr-only" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" onChange={e => { const f = e.target.files?.[0]; if (f) setTeacherFile(f); }} />
+                              </label>
+                            </div>
+
                             <div className="flex items-center gap-2 justify-end">
                               <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => setGrading(null)}>
                                 Huỷ

@@ -10,9 +10,7 @@ import { LearningModeBadge, SectionHeader } from "@/components/shared";
 import { MOCK_CLASSES, MOCK_TEACHERS } from "@/lib/mock-data";
 import { getOnlineLink } from "@/lib/storage";
 import { BookOpen, Clock, Video, MapPin, Users, Search, ChevronRight, GraduationCap } from "lucide-react";
-
-// ── Constants ─────────────────────────────────────────────────────────────────
-const STUDENT_ID = "s1";
+import { useStudentContext } from "@/hooks/useStudentContext";
 
 const DAY_VI: Record<string, string> = {
   Monday: "Thứ Hai", Tuesday: "Thứ Ba", Wednesday: "Thứ Tư",
@@ -27,14 +25,10 @@ const MODE_LABELS: Record<ModeFilter, string> = {
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function StudentClassesPage() {
+  const { studentName, myClasses } = useStudentContext();
   const [search,      setSearch]      = useState("");
   const [modeFilter,  setModeFilter]  = useState<ModeFilter>("all");
   const [onlineLinks, setOnlineLinks] = useState<Record<string, string>>({});
-
-  const myClasses = useMemo(
-    () => MOCK_CLASSES.filter(c => c.student_ids?.includes(STUDENT_ID)),
-    []
-  );
 
   useEffect(() => {
     const links: Record<string, string> = {};
@@ -52,7 +46,7 @@ export default function StudentClassesPage() {
   }), [myClasses, search, modeFilter]);
 
   return (
-    <PortalLayout role="student" userName="Nguyễn Anh Tuấn" pageTitle="Lớp học của tôi">
+    <PortalLayout role="student" userName={studentName} pageTitle="Lớp học của tôi">
       <div className="space-y-6 max-w-6xl mx-auto">
         <SectionHeader
           title="Lớp học đã đăng ký"

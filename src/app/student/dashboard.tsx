@@ -14,66 +14,37 @@ import {
   MOCK_CLASSES, MOCK_HOMEWORK, MOCK_ATTENDANCE,
   MOCK_EXAM_SCORES, MOCK_TEACHERS, ATTENDANCE_CHART_DATA,
 } from "@/lib/mock-data";
-import { getNotifications } from "@/lib/storage";
+import { getNotifications, getEnrollments } from "@/lib/storage";
 import { getSubmissionsByStudent } from "@/lib/supabase/submissions";
 import Link from "next/link";
 import { formatDate } from "@/lib/utils";
 import { AreaChart, Area, Tooltip, ResponsiveContainer } from "recharts";
 
-// ── Student constants ─────────────────────────────────────────────────────────
-const STUDENT_ID   = "s1";
-const STUDENT_NAME = "Nguyễn Anh Tuấn";
-
-// ── Student's data (computed once, not async) ─────────────────────────────────
-const myClasses  = MOCK_CLASSES.filter(c => c.student_ids?.includes(STUDENT_ID));
-const myClassIds = myClasses.map(c => c.id);
-const myHomework = MOCK_HOMEWORK.filter(h => myClassIds.includes(h.class_id));
-
-// Attendance rate from mock data
-const s1Attendance  = MOCK_ATTENDANCE.filter(a => a.student_id === STUDENT_ID);
-const attendanceRate = s1Attendance.length > 0
-  ? Math.round(
-      (s1Attendance.filter(a => a.status === "present" || a.status === "late").length
-        / s1Attendance.length) * 100
-    )
-  : 100;
-
-// Avg score from exam scores
-const s1Exams = MOCK_EXAM_SCORES.filter(e => e.student_id === STUDENT_ID);
-const avgScore = s1Exams.length > 0
-  ? (s1Exams.reduce((acc, e) => acc + (e.score / e.max_score) * 10, 0) / s1Exams.length).toFixed(1)
-  : null;
-
-// ── Schedule helpers ──────────────────────────────────────────────────────────
 const DOW_EN = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const DOW_VI: Record<string, string> = {
   Monday: "Thứ Hai", Tuesday: "Thứ Ba", Wednesday: "Thứ Tư",
   Thursday: "Thứ Năm", Friday: "Thứ Sáu", Saturday: "Thứ Bảy", Sunday: "Chủ Nhật",
 };
 
-interface WeekSession {
-  cls:        typeof myClasses[0];
-  tutorName:  string;
-  day:        string;
-  dayVi:      string;
-  start_time: string;
-  end_time:   string;
-  status:     "live" | "done" | "upcoming";
+function getCookie(name: string): string {
+  if (typeof document === "undefined") return "";
+  const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
+  return match ? decodeURIComponent(match[1]) : "";
 }
 
-function buildWeekSessions(): WeekSession[] {
-  const now       = new Date();
-  const todayIdx  = now.getDay(); // 0=Sun
-  const curHour   = now.getHours() + now.getMinutes() / 60;
+function buildWeekSessions(classes: typeof MOCK_CLASSES) {
+  const now      = new Date();
+  const todayIdx = now.getDay();
+  const curHour  = now.getHours() + now.getMinutes() / 60;
 
-  return myClasses
+  return classes
     .flatMap(cls => {
       const tutor = MOCK_TEACHERS.find(t => t.id === cls.tutor_id);
       return cls.schedule.map(s => {
         const dayIdx = DOW_EN.indexOf(s.day);
-        let status: WeekSession["status"];
-        if (dayIdx < todayIdx)       status = "done";
-        else if (dayIdx > todayIdx)  status = "upcoming";
+        let status: "live" | "done" | "upcoming";
+        if (dayIdx < todayIdx)      status = "done";
+        else if (dayIdx > todayIdx) status = "upcoming";
         else {
           const [sh, sm] = s.start_time.split(":").map(Number);
           const [eh, em] = s.end_time.split(":").map(Number);
@@ -84,50 +55,92 @@ function buildWeekSessions(): WeekSession[] {
                  : "upcoming";
         }
         return {
-          cls,
-          tutorName: tutor?.full_name ?? "Giáo viên",
-          day: s.day,
-          dayVi: DOW_VI[s.day] ?? s.day,
-          start_time: s.start_time,
-          end_time:   s.end_time,
-          status,
-        } as WeekSession;
+          cls, tutorName: tutor?.full_name ?? "Giáo viên",
+          day: s.day, dayVi: DOW_VI[s.day] ?? s.day,
+          start_time: s.start_time, end_time: s.end_time, status,
+        };
       });
     })
     .sort((a, b) => DOW_EN.indexOf(a.day) - DOW_EN.indexOf(b.day));
 }
 
-// ── Page ──────────────────────────────────────────────────────────────────────
 export default function StudentDashboard() {
+  const [studentId,   setStudentId]   = useState("s1");
+  const [studentName, setStudentName] = useState("Nguyễn Anh Tuấn");
+  const [myClasses,   setMyClasses]   = useState(() =>
+    MOCK_CLASSES.filter(c => c.student_ids?.includes("s1"))
+  );
+  const [avgScore,       setAvgScore]       = useState<string | null>(null);
+  const [attendanceRate, setAttendanceRate] = useState(100);
   const [unreadCount,    setUnreadCount]    = useState(0);
   const [submittedCount, setSubmittedCount] = useState(0);
 
   useEffect(() => {
-    // Unread notifications from storage (not static MOCK_NOTIFICATIONS)
+    // Determine if enrolled student or demo
+    const enrolledId   = getCookie("enrolled_student_id");   // e.g. "enr_<uuid>"
+    const enrolledName = getCookie("enrolled_student_name");
+    const enrolledClass = getCookie("enrolled_student_class");
+
+    let sid = "s1";
+    let sname = "Nguyễn Anh Tuấn";
+    let classes = MOCK_CLASSES.filter(c => c.student_ids?.includes("s1"));
+
+    if (enrolledId && enrolledName) {
+      sid   = enrolledId;
+      sname = enrolledName;
+      // Try to find their assigned class in MOCK_CLASSES
+      const assignedClass = enrolledClass
+        ? MOCK_CLASSES.filter(c => c.id === enrolledClass)
+        : [];
+      classes = assignedClass;
+    }
+
+    setStudentId(sid);
+    setStudentName(sname);
+    setMyClasses(classes);
+
+    // Scores
+    const exams = MOCK_EXAM_SCORES.filter(e => e.student_id === sid);
+    setAvgScore(exams.length > 0
+      ? (exams.reduce((acc, e) => acc + (e.score / e.max_score) * 10, 0) / exams.length).toFixed(1)
+      : null
+    );
+
+    // Attendance
+    const att = MOCK_ATTENDANCE.filter(a => a.student_id === sid);
+    setAttendanceRate(att.length > 0
+      ? Math.round((att.filter(a => a.status === "present" || a.status === "late").length / att.length) * 100)
+      : 100
+    );
+
+    // Notifications
     getNotifications().then(all => {
-      const unread = all.filter(
-        n => (n.target_role === "student" || n.target_role === "all") && !n.is_read
-      );
-      setUnreadCount(unread.length);
+      setUnreadCount(all.filter(n =>
+        (n.target_role === "student" || n.target_role === "all") && !n.is_read
+      ).length);
     });
 
-    // Submitted homework count from Supabase / localStorage
-    getSubmissionsByStudent(STUDENT_ID).then(subs => {
-      setSubmittedCount(subs.filter(s => myClassIds.includes(
-        myHomework.find(h => h.id === s.homework_id)?.class_id ?? ""
-      )).length);
+    // Submissions
+    getSubmissionsByStudent(sid).then(subs => {
+      const classIds = classes.map(c => c.id);
+      const hw = MOCK_HOMEWORK.filter(h => classIds.includes(h.class_id));
+      setSubmittedCount(subs.filter(s =>
+        hw.find(h => h.id === s.homework_id)
+      ).length);
     });
   }, []);
 
-  const now           = new Date();
-  const todayStr      = now.toLocaleDateString("vi-VN", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
-  const greetingHour  = now.getHours();
-  const greeting      = greetingHour < 12 ? "Chào buổi sáng" : greetingHour < 18 ? "Chào buổi chiều" : "Chào buổi tối";
+  const now             = new Date();
+  const todayStr        = now.toLocaleDateString("vi-VN", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+  const greetingHour    = now.getHours();
+  const greeting        = greetingHour < 12 ? "Chào buổi sáng" : greetingHour < 18 ? "Chào buổi chiều" : "Chào buổi tối";
 
+  const myClassIds        = myClasses.map(c => c.id);
+  const myHomework        = MOCK_HOMEWORK.filter(h => myClassIds.includes(h.class_id));
   const pendingHomework   = myHomework.filter(h => new Date(h.due_date) >= now);
   const homeworkTotal     = myHomework.length;
   const completionPct     = homeworkTotal > 0 ? Math.round((submittedCount / homeworkTotal) * 100) : 0;
-  const weekSessions      = buildWeekSessions();
+  const weekSessions      = buildWeekSessions(myClasses);
   const todaySessions     = weekSessions.filter(s => DOW_EN[now.getDay()] === s.day);
   const displaySessions   = todaySessions.length > 0 ? todaySessions : weekSessions;
   const scheduleTitle     = todaySessions.length > 0 ? "Lịch học hôm nay" : "Lịch học tuần này";
@@ -148,12 +161,14 @@ export default function StudentDashboard() {
               <Sparkles className="h-3.5 w-3.5 text-amber-300" /> TutorHub Học viên
             </div>
             <h1 className="text-4xl md:text-5xl font-black tracking-tight leading-tight text-transparent bg-clip-text bg-gradient-to-r from-white via-indigo-100 to-white">
-              {greeting}, <br />{STUDENT_NAME}! 👋
+              {greeting}, <br />{studentName}! 👋
             </h1>
             <p className="text-white/80 text-base md:text-lg font-medium max-w-md leading-relaxed">
-              {pendingHomework.length > 0
-                ? <>Bạn có <strong className="text-white">{pendingHomework.length} bài tập</strong> đang chờ và <strong className="text-white">{myClasses.length} lớp học</strong> đang theo học.</>
-                : <>Tuyệt vời! Bạn đã hoàn thành tất cả bài tập. Tiếp tục duy trì phong độ nhé!</>
+              {myClasses.length === 0
+                ? <>Chào mừng đến với TutorHub! Tài khoản của bạn đang được cấu hình lớp học.</>
+                : pendingHomework.length > 0
+                  ? <>Bạn có <strong className="text-white">{pendingHomework.length} bài tập</strong> đang chờ và <strong className="text-white">{myClasses.length} lớp học</strong> đang theo học.</>
+                  : <>Tuyệt vời! Bạn đã hoàn thành tất cả bài tập. Tiếp tục duy trì phong độ nhé!</>
               }
             </p>
             <div className="flex flex-wrap items-center gap-3 pt-2">
@@ -234,26 +249,24 @@ export default function StudentDashboard() {
             <Card className="border-dashed border-2">
               <CardContent className="p-10 text-center text-muted-foreground">
                 <Calendar className="h-10 w-10 mx-auto mb-3 opacity-20" />
-                <p className="font-semibold">Không có lớp học tuần này.</p>
+                <p className="font-semibold">
+                  {myClasses.length === 0 ? "Bạn chưa được phân lớp học." : "Không có lớp học tuần này."}
+                </p>
               </CardContent>
             </Card>
           ) : (
             <div className="space-y-4">
               {displaySessions.map((session, i) => (
                 <Card
-                  key={`${session.cls.id}-${session.day}`}
+                  key={`${session.cls.id}-${session.day}-${i}`}
                   className={`overflow-hidden border-0 shadow-md hover:shadow-xl transition-all duration-300 hover:-translate-x-1 border-l-4 ${
                     session.status === "live"
                       ? "border-l-red-500 ring-1 ring-red-500/20"
                       : "border-l-transparent"
                   }`}
                 >
-                  {session.status === "live" && (
-                    <div className="absolute top-0 right-0 h-full w-32 bg-gradient-to-l from-red-500/5 to-transparent pointer-events-none" />
-                  )}
                   <CardContent className="p-0">
                     <div className="flex flex-col sm:flex-row">
-                      {/* Time block */}
                       <div className="p-5 sm:w-48 bg-muted/20 border-b sm:border-b-0 sm:border-r border-border/50 flex flex-row sm:flex-col items-center sm:items-start justify-between sm:justify-center gap-2">
                         <div>
                           <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">{session.dayVi}</p>
@@ -270,8 +283,6 @@ export default function StudentDashboard() {
                           <Badge className="bg-primary/10 text-primary hover:bg-primary/20 border-0">Sắp tới</Badge>
                         )}
                       </div>
-
-                      {/* Class info */}
                       <div className="p-5 flex-1 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                         <div>
                           <h3 className="text-lg font-bold text-foreground mb-1">{session.cls.class_name}</h3>
@@ -326,7 +337,9 @@ export default function StudentDashboard() {
               <Card className="bg-emerald-50/60 dark:bg-emerald-950/20 border-emerald-100 dark:border-emerald-900/40">
                 <CardContent className="p-5 text-center">
                   <CheckSquare className="h-8 w-8 mx-auto mb-2 text-emerald-500" />
-                  <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-400">Không có bài tập nào đang chờ!</p>
+                  <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-400">
+                    {myClasses.length === 0 ? "Chưa có lớp học nào." : "Không có bài tập nào đang chờ!"}
+                  </p>
                 </CardContent>
               </Card>
             ) : (

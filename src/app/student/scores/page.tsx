@@ -7,15 +7,14 @@ import { Badge } from "@/components/ui/badge";
 import { SectionHeader, ProgressBar } from "@/components/shared";
 import { MOCK_EXAM_SCORES, MOCK_CLASSES, MOCK_TEACHERS } from "@/lib/mock-data";
 import { GraduationCap, TrendingUp, Trophy, Target, BookOpen, ChevronDown, Pencil, Check, X } from "lucide-react";
+import { useStudentContext } from "@/hooks/useStudentContext";
+import { getExamScoresByStudent, type StoredExamScore } from "@/lib/storage";
 import { formatDate } from "@/lib/utils";
 import {
   ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
   Radar, Tooltip,
 } from "recharts";
 
-// ── Constants ─────────────────────────────────────────────────────────────────
-const STUDENT_ID = "s1";
-const gpaTarget_KEY = `tutorhub_gpa_target_${STUDENT_ID}`;
 const DEFAULT_TARGET = 9.0;
 
 // Vietnamese grade scale (score/10)
@@ -39,11 +38,14 @@ function letterGrade(avg: number): string {
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function StudentScoresPage() {
+  const { studentId, studentName, myClasses } = useStudentContext();
+  const gpaTarget_KEY = `tutorhub_gpa_target_${studentId}`;
   const [classFilter,  setClassFilter]  = useState<string>("all");
   const [showAll,      setShowAll]      = useState(false);
   const [gpaTarget,    setGpaTarget]    = useState(DEFAULT_TARGET);
   const [editingGoal,  setEditingGoal]  = useState(false);
   const [draftTarget,  setDraftTarget]  = useState(DEFAULT_TARGET);
+  const [storedScores, setStoredScores] = useState<StoredExamScore[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -51,7 +53,8 @@ export default function StudentScoresPage() {
       const saved = localStorage.getItem(gpaTarget_KEY);
       if (saved) { const v = parseFloat(saved); if (!isNaN(v)) setGpaTarget(v); }
     } catch {}
-  }, []);
+    getExamScoresByStudent(studentId).then(setStoredScores);
+  }, [studentId, gpaTarget_KEY]);
 
   function startEdit() {
     setDraftTarget(gpaTarget);
@@ -68,17 +71,16 @@ export default function StudentScoresPage() {
 
   function cancelEdit() { setEditingGoal(false); }
 
-  // s1 scores newest first
-  const allScores = useMemo(
-    () => MOCK_EXAM_SCORES
-      .filter(s => s.student_id === STUDENT_ID)
-      .sort((a, b) => new Date(b.exam_date).getTime() - new Date(a.exam_date).getTime()),
-    []
-  );
+  // Merge mock scores (demo) + localStorage scores (real), deduplicated by id
+  const allScores = useMemo(() => {
+    const mockForStudent = MOCK_EXAM_SCORES.filter(s => s.student_id === studentId);
+    const combined = [...mockForStudent, ...storedScores];
+    const seen = new Set<string>();
+    return combined
+      .filter(s => { if (seen.has(s.id)) return false; seen.add(s.id); return true; })
+      .sort((a, b) => new Date(b.exam_date).getTime() - new Date(a.exam_date).getTime());
+  }, [studentId, storedScores]);
 
-  // My enrolled classes (those that appear in scores)
-  const myClassIds = [...new Set(allScores.map(s => s.class_id))];
-  const myClasses  = MOCK_CLASSES.filter(c => myClassIds.includes(c.id));
 
   // Filtered list
   const filtered = useMemo(
@@ -119,7 +121,7 @@ export default function StudentScoresPage() {
   const grade = letterGrade(avgScore);
 
   return (
-    <PortalLayout role="student" userName="Nguyễn Anh Tuấn" pageTitle="Kết quả học tập">
+    <PortalLayout role="student" userName={studentName} pageTitle="Kết quả học tập">
       <div className="space-y-6 max-w-6xl mx-auto">
         <SectionHeader
           title="Bảng điểm cá nhân"

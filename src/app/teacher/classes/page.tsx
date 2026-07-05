@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { LearningModeBadge, SectionHeader } from "@/components/shared";
 import { MOCK_CLASSES } from "@/lib/mock-data";
-import { getOnlineLink } from "@/lib/storage";
+import { getOnlineLink, getClassTeacherOverrides } from "@/lib/storage";
 import {
   BookOpen, Clock, Video, MapPin, Users, Settings, Search,
   GraduationCap, X, Plus, Trash2, Check,
@@ -349,14 +349,20 @@ export default function TeacherClassesPage() {
   const [extraClasses, setExtraClasses] = useState<ExtraClass[]>([]);
   const [showCreate,   setShowCreate]   = useState(false);
 
-  const baseClasses = useMemo(
-    () => MOCK_CLASSES.filter(c => c.tutor_id === TEACHER_ID),
-    []
-  );
+  const [teacherOverrides, setTeacherOverrides] = useState<Record<string, string>>({});
 
   useEffect(() => {
+    setTeacherOverrides(getClassTeacherOverrides());
     setExtraClasses(loadExtraClasses().filter(c => c.tutor_id === TEACHER_ID));
   }, []);
+
+  const baseClasses = useMemo(
+    () => MOCK_CLASSES.filter(c => {
+      const effectiveTutor = teacherOverrides[c.id] ?? c.tutor_id;
+      return effectiveTutor === TEACHER_ID;
+    }),
+    [teacherOverrides]
+  );
 
   const myClasses = useMemo(
     () => [...baseClasses, ...extraClasses],

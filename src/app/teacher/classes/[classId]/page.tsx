@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import PortalLayout from "@/components/layout/PortalLayout";
@@ -20,7 +20,10 @@ import {
   getOnlineLink, saveOnlineLink,
   getCurriculum, type CurriculumSession as CurriculumSessionData,
   getStudentPackages, saveStudentPackages, type StudentPackage,
+  getClassMaterials, saveClassMaterial, deleteClassMaterial, type StoredClassMaterial,
+  saveHomeworkAttachment, type HomeworkAttachment,
 } from "@/lib/storage";
+import { uploadClassFile } from "@/lib/upload";
 import { ClassSchedule } from "@/types";
 import {
   BookOpen, Clock, Video, Users, ArrowLeft, FileText, Download,
@@ -28,11 +31,12 @@ import {
   Calendar, Presentation, Tag, Trash2, Edit3, X, Check,
   Lock, Send, MessageSquare, Save, AlertCircle, CheckCircle2,
   Image, Loader2, CalendarDays, CheckSquare, UserCheck, UserX,
-  Map,
+  Map, Wallet,
 } from "lucide-react";
 import CurriculumTab from "@/components/teacher/CurriculumTab";
+import TuitionTab from "@/components/teacher/TuitionTab";
 
-type TabKey = "overview" | "curriculum" | "sessions" | "homework" | "schedule" | "lectures" | "materials" | "notes" | "students";
+type TabKey = "overview" | "curriculum" | "sessions" | "homework" | "schedule" | "lectures" | "materials" | "notes" | "students" | "tuition";
 
 const TABS: { key: TabKey; label: string; icon: React.ElementType }[] = [
   { key: "overview",    label: "Tổng quan",  icon: BookOpen },
@@ -44,6 +48,7 @@ const TABS: { key: TabKey; label: string; icon: React.ElementType }[] = [
   { key: "materials",   label: "Tài liệu",   icon: FileText },
   { key: "notes",       label: "Ghi chú",    icon: StickyNote },
   { key: "students",    label: "Học viên",   icon: Users },
+  { key: "tuition",    label: "Học phí",    icon: Wallet },
 ];
 
 const DAYS_VI = ["Thứ 2", "Thứ 3", "Thứ 4", "Thứ 5", "Thứ 6", "Thứ 7", "Chủ nhật"];
@@ -142,6 +147,7 @@ interface Homework {
   description?: string;
   due_date: string;
   created_at: string;
+  attachment?: HomeworkAttachment;
 }
 
 interface Submission {
@@ -222,22 +228,34 @@ function CurriculumSessionPreview({ session }: { session: CurriculumSessionData 
 function AddStudentModal({
   classId,
   enrolledIds,
+  approvedEnrollments,
   onAdd,
   onClose,
 }: {
   classId: string;
   enrolledIds: string[];
+  approvedEnrollments: { id: string; full_name: string; email: string; school: string; grade: string }[];
   onAdd: (ids: string[]) => void;
   onClose: () => void;
 }) {
-  const available = MOCK_STUDENTS.filter(s => !enrolledIds.includes(s.id));
+  const mockAvailable = MOCK_STUDENTS
+    .filter(s => !enrolledIds.includes(s.id))
+    .map(s => ({ id: s.id, full_name: s.full_name, email: "", school: s.school ?? "", grade: s.grade ?? "", isEnrolled: false }));
+  const enrolledAvailable = approvedEnrollments
+    .filter(e => !enrolledIds.includes(e.id))
+    .map(e => ({ ...e, isEnrolled: true }));
+  const available = [...mockAvailable, ...enrolledAvailable];
+
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
 
-  const filtered = available.filter(s =>
-    s.full_name.toLowerCase().includes(search.toLowerCase()) ||
-    s.school?.toLowerCase().includes(search.toLowerCase())
-  );
+  const filtered = available.filter(s => {
+    const q = search.toLowerCase();
+    return !q ||
+      s.full_name.toLowerCase().includes(q) ||
+      s.email.toLowerCase().includes(q) ||
+      s.school.toLowerCase().includes(q);
+  });
 
   function toggle(id: string) {
     setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
@@ -274,7 +292,7 @@ function AddStudentModal({
         <div className="px-5 py-3 border-b border-border shrink-0">
           <div className="relative">
             <Input
-              placeholder="Tìm theo tên hoặc trường..."
+              placeholder="Tìm theo tên, email hoặc trường..."
               value={search}
               onChange={e => setSearch(e.target.value)}
               className="pl-9 h-9"
@@ -304,8 +322,15 @@ function AddStudentModal({
                   {student.full_name.charAt(0)}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-foreground truncate">{student.full_name}</p>
-                  <p className="text-xs text-muted-foreground truncate">{student.school} · Lớp {student.grade}</p>
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-medium text-foreground truncate">{student.full_name}</p>
+                    {student.isEnrolled && (
+                      <span className="text-[10px] bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 px-1.5 py-0.5 rounded font-medium shrink-0">Đã duyệt</span>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground truncate">
+                    {student.email || student.school} {student.grade ? `· Lớp ${student.grade}` : ""}
+                  </p>
                 </div>
               </label>
             );
@@ -475,9 +500,36 @@ function HomeworkModal({
   const [title, setTitle] = useState(initial?.title ?? "");
   const [description, setDescription] = useState(initial?.description ?? "");
   const [dueDate, setDueDate] = useState(initial?.due_date ?? "");
+  const [file, setFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState("");
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!title.trim() || !dueDate) return;
+    setUploading(true);
+    setUploadError("");
+
+    let attachment: HomeworkAttachment | undefined;
+    if (file) {
+      try {
+        const uploaded = await uploadClassFile(file, classId, "homework");
+        const hwId = initial?.id ?? `hw_${Date.now()}`;
+        attachment = {
+          homework_id: hwId,
+          file_url: uploaded.url,
+          file_name: uploaded.name,
+          file_size: uploaded.size,
+          file_type: uploaded.file_type,
+        };
+        saveHomeworkAttachment(attachment);
+      } catch (e: any) {
+        setUploadError(e.message ?? "Lỗi tải lên file");
+        setUploading(false);
+        return;
+      }
+    }
+
     const hw: Homework = {
       id: initial?.id ?? `hw_${Date.now()}`,
       class_id: classId,
@@ -485,8 +537,10 @@ function HomeworkModal({
       description: description.trim() || undefined,
       due_date: dueDate,
       created_at: initial?.created_at ?? new Date().toISOString(),
+      attachment,
     };
     onSave(hw);
+    setUploading(false);
     onClose();
   };
 
@@ -518,11 +572,45 @@ function HomeworkModal({
               placeholder="Mô tả nội dung bài tập..."
             />
           </div>
+          <div>
+            <label className="text-sm font-medium text-foreground mb-1.5 block">Đính kèm file</label>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".pdf,.doc,.docx,.ppt,.pptx"
+              className="hidden"
+              onChange={e => setFile(e.target.files?.[0] ?? null)}
+            />
+            {file ? (
+              <div className="flex items-center gap-3 p-3 rounded-xl border border-border bg-muted/30">
+                <FileText className="h-5 w-5 text-primary shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-foreground truncate">{file.name}</p>
+                  <p className="text-xs text-muted-foreground">{(file.size / 1024 / 1024).toFixed(1)} MB</p>
+                </div>
+                <button onClick={() => setFile(null)} className="p-1 rounded hover:bg-muted text-muted-foreground">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="w-full border-2 border-dashed border-border rounded-xl p-4 text-center hover:border-primary/50 hover:bg-primary/5 transition-all"
+              >
+                <Upload className="h-5 w-5 text-muted-foreground mx-auto mb-1" />
+                <p className="text-sm text-muted-foreground">Kéo thả hoặc nhấn để chọn file</p>
+                <p className="text-xs text-muted-foreground mt-0.5">PDF, DOCX, PPTX · Tối đa 100MB</p>
+              </button>
+            )}
+            {uploadError && <p className="text-xs text-red-500 mt-1">{uploadError}</p>}
+          </div>
         </div>
         <div className="p-5 border-t border-border bg-muted/20 flex justify-end gap-3">
-          <Button variant="outline" onClick={onClose}>Hủy</Button>
-          <Button variant="gradient" disabled={!title.trim() || !dueDate} onClick={handleSubmit}>
-            <Check className="h-4 w-4 mr-2" />{initial?.id ? "Lưu thay đổi" : "Giao bài"}
+          <Button variant="outline" onClick={onClose} disabled={uploading}>Hủy</Button>
+          <Button variant="gradient" disabled={!title.trim() || !dueDate || uploading} onClick={handleSubmit}>
+            {uploading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Check className="h-4 w-4 mr-2" />}
+            {initial?.id ? "Lưu thay đổi" : "Giao bài"}
           </Button>
         </div>
       </div>
@@ -800,8 +888,89 @@ function ScheduleEditor({ classId, className, initialSchedule }: {
 
 // ── Upload modal ─────────────────────────────────────────────────────────────
 
-function UploadModal({ type, onClose }: { type: "lecture" | "material" | "note"; onClose: () => void }) {
+function UploadModal({
+  type,
+  classId,
+  onClose,
+  onMaterialSaved,
+}: {
+  type: "lecture" | "material" | "note";
+  classId: string;
+  onClose: () => void;
+  onMaterialSaved?: (mat: StoredClassMaterial) => void;
+}) {
   const titles = { lecture: "Thêm bài giảng mới", material: "Tải lên tài liệu", note: "Viết ghi chú mới" };
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+  const [category, setCategory] = useState("summary");
+  const [selectedPkgs, setSelectedPkgs] = useState<StudentPackage[]>([]); // empty = all packages
+  const [pinned, setPinned] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState("");
+  const [dragOver, setDragOver] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  function togglePkg(pkg: StudentPackage) {
+    setSelectedPkgs(prev => prev.includes(pkg) ? prev.filter(p => p !== pkg) : [...prev, pkg]);
+  }
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    const dropped = e.dataTransfer.files[0];
+    if (dropped) setFile(dropped);
+  };
+
+  const handleSubmit = async () => {
+    if (!title.trim()) return;
+    if (type !== "note" && !file) { setUploadError("Vui lòng chọn file cần tải lên"); return; }
+
+    setUploading(true);
+    setUploadError("");
+
+    try {
+      if (type === "material" && file) {
+        const uploaded = await uploadClassFile(file, classId, "materials");
+        const mat = saveClassMaterial({
+          class_id: classId,
+          title: title.trim(),
+          description: description.trim() || undefined,
+          file_url: uploaded.url,
+          file_type: uploaded.file_type,
+          file_size: uploaded.size,
+          category,
+          uploaded_by: "teacher",
+          created_at: new Date().toISOString(),
+          packages: selectedPkgs.length > 0 ? selectedPkgs : undefined,
+        });
+        onMaterialSaved?.(mat);
+      }
+      // lecture type: same flow (saved as material with type)
+      if (type === "lecture" && file) {
+        const uploaded = await uploadClassFile(file, classId, "materials");
+        const mat = saveClassMaterial({
+          class_id: classId,
+          title: title.trim(),
+          description: description.trim() || undefined,
+          file_url: uploaded.url,
+          file_type: uploaded.file_type,
+          file_size: uploaded.size,
+          category: "textbook",
+          uploaded_by: "teacher",
+          created_at: new Date().toISOString(),
+          packages: selectedPkgs.length > 0 ? selectedPkgs : undefined,
+        });
+        onMaterialSaved?.(mat);
+      }
+      onClose();
+    } catch (e: any) {
+      setUploadError(e.message ?? "Lỗi tải lên file");
+    } finally {
+      setUploading(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-fade-in">
       <div className="bg-card w-full max-w-lg rounded-2xl shadow-xl border border-border overflow-hidden">
@@ -812,25 +981,70 @@ function UploadModal({ type, onClose }: { type: "lecture" | "material" | "note";
         <div className="p-5 space-y-4">
           <div>
             <label className="text-sm font-medium text-foreground mb-1.5 block">Tiêu đề <span className="text-red-500">*</span></label>
-            <Input placeholder={type === "note" ? "VD: Lưu ý quan trọng..." : "VD: Chương 5 - Tích phân..."} />
+            <Input
+              value={title}
+              onChange={e => setTitle(e.target.value)}
+              placeholder={type === "note" ? "VD: Lưu ý quan trọng..." : "VD: Chương 5 - Tích phân..."}
+            />
           </div>
           <div>
             <label className="text-sm font-medium text-foreground mb-1.5 block">Mô tả</label>
-            <textarea className="w-full min-h-[100px] p-3 rounded-xl border border-border bg-background text-sm resize-none focus:outline-none focus:ring-2 focus:ring-primary/50" placeholder={type === "note" ? "Nội dung ghi chú..." : "Mô tả ngắn gọn..."} />
+            <textarea
+              value={description}
+              onChange={e => setDescription(e.target.value)}
+              className="w-full min-h-[80px] p-3 rounded-xl border border-border bg-background text-sm resize-none focus:outline-none focus:ring-2 focus:ring-primary/50 text-foreground"
+              placeholder={type === "note" ? "Nội dung ghi chú..." : "Mô tả ngắn gọn..."}
+            />
           </div>
+
           {type !== "note" && (
             <div>
-              <label className="text-sm font-medium text-foreground mb-1.5 block">Tải file lên</label>
-              <div className="border-2 border-dashed border-border rounded-xl p-8 text-center hover:border-primary/50 hover:bg-primary/5 transition-all cursor-pointer">
-                <Upload className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
-                <p className="text-sm font-medium text-foreground">Kéo thả file hoặc nhấn để chọn</p>
-                <p className="text-xs text-muted-foreground mt-1">PDF, DOCX, PPTX, MP4 · Tối đa 100MB</p>
-              </div>
+              <label className="text-sm font-medium text-foreground mb-1.5 block">
+                Tải file lên <span className="text-red-500">*</span>
+              </label>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".pdf,.doc,.docx,.ppt,.pptx"
+                className="hidden"
+                onChange={e => setFile(e.target.files?.[0] ?? null)}
+              />
+              {file ? (
+                <div className="flex items-center gap-3 p-3 rounded-xl border border-primary/30 bg-primary/5">
+                  <FileText className="h-5 w-5 text-primary shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-foreground truncate">{file.name}</p>
+                    <p className="text-xs text-muted-foreground">{(file.size / 1024 / 1024).toFixed(1)} MB</p>
+                  </div>
+                  <button onClick={() => setFile(null)} className="p-1 rounded hover:bg-muted text-muted-foreground">
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              ) : (
+                <div
+                  onClick={() => fileInputRef.current?.click()}
+                  onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+                  onDragLeave={() => setDragOver(false)}
+                  onDrop={handleDrop}
+                  className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all ${dragOver ? "border-primary bg-primary/10" : "border-border hover:border-primary/50 hover:bg-primary/5"}`}
+                >
+                  <Upload className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
+                  <p className="text-sm font-medium text-foreground">Kéo thả file hoặc nhấn để chọn</p>
+                  <p className="text-xs text-muted-foreground mt-1">PDF, DOCX, PPTX · Tối đa 100MB</p>
+                </div>
+              )}
+              {uploadError && (
+                <div className="flex items-center gap-2 mt-2 p-2.5 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
+                  <AlertCircle className="h-4 w-4 text-red-500 shrink-0" />
+                  <p className="text-xs text-red-600 dark:text-red-400">{uploadError}</p>
+                </div>
+              )}
             </div>
           )}
+
           {type === "note" && (
             <div className="flex items-center gap-2">
-              <input type="checkbox" id="pin-note" className="rounded" />
+              <input type="checkbox" id="pin-note" checked={pinned} onChange={e => setPinned(e.target.checked)} className="rounded" />
               <label htmlFor="pin-note" className="text-sm text-muted-foreground flex items-center gap-1.5"><Pin className="h-3.5 w-3.5" />Ghim ghi chú này</label>
             </div>
           )}
@@ -839,15 +1053,50 @@ function UploadModal({ type, onClose }: { type: "lecture" | "material" | "note";
               <label className="text-sm font-medium text-foreground mb-1.5 block">Phân loại</label>
               <div className="flex flex-wrap gap-2">
                 {Object.entries(CATEGORY_MAP).map(([key, val]) => (
-                  <button key={key} className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-all hover:shadow-sm ${val.color}`}>{val.label}</button>
+                  <button
+                    key={key}
+                    onClick={() => setCategory(key)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-all hover:shadow-sm ${val.color} ${category === key ? "ring-2 ring-offset-1 ring-primary/50" : ""}`}
+                  >
+                    {val.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {type !== "note" && (
+            <div>
+              <label className="text-sm font-medium text-foreground mb-1.5 block">
+                Giới hạn theo gói
+                <span className="ml-2 text-xs font-normal text-muted-foreground">(bỏ trống = tất cả gói đều xem được)</span>
+              </label>
+              <div className="flex gap-2">
+                {([
+                  { pkg: "online" as StudentPackage, label: "Online", color: "border-sky-300 text-sky-700 bg-sky-50 dark:bg-sky-900/20 dark:text-sky-400" },
+                  { pkg: "advanced" as StudentPackage, label: "Nâng cao", color: "border-violet-300 text-violet-700 bg-violet-50 dark:bg-violet-900/20 dark:text-violet-400" },
+                  { pkg: "offline" as StudentPackage, label: "Offline", color: "border-orange-300 text-orange-700 bg-orange-50 dark:bg-orange-900/20 dark:text-orange-400" },
+                ]).map(({ pkg, label, color }) => (
+                  <button
+                    key={pkg}
+                    type="button"
+                    onClick={() => togglePkg(pkg)}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${selectedPkgs.includes(pkg) ? `${color} ring-2 ring-offset-1 ring-primary/40` : "border-border text-muted-foreground hover:bg-muted"}`}
+                  >
+                    {selectedPkgs.includes(pkg) && <span>✓</span>}
+                    {label}
+                  </button>
                 ))}
               </div>
             </div>
           )}
         </div>
         <div className="p-5 border-t border-border bg-muted/20 flex justify-end gap-3">
-          <Button variant="outline" onClick={onClose}>Hủy</Button>
-          <Button variant="gradient"><Send className="h-4 w-4 mr-2" />{type === "note" ? "Đăng ghi chú" : "Tải lên"}</Button>
+          <Button variant="outline" onClick={onClose} disabled={uploading}>Hủy</Button>
+          <Button variant="gradient" disabled={uploading || !title.trim() || (type !== "note" && !file)} onClick={handleSubmit}>
+            {uploading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Send className="h-4 w-4 mr-2" />}
+            {type === "note" ? "Đăng ghi chú" : uploading ? "Đang tải lên..." : "Tải lên"}
+          </Button>
         </div>
       </div>
     </div>
@@ -963,6 +1212,33 @@ export default function TeacherClassDetailPage() {
   // Extra students added by teacher (persisted to localStorage)
   const [extraStudentIds, setExtraStudentIds] = useState<string[]>([]);
   const [addStudentModal, setAddStudentModal] = useState(false);
+  const [studentSearch, setStudentSearch] = useState("");
+
+  // Approved enrolled students from Supabase
+  const [approvedEnrollments, setApprovedEnrollments] = useState<{ id: string; full_name: string; email: string; school: string; grade: string }[]>([]);
+  useEffect(() => {
+    import("@/lib/storage").then(({ getEnrollments }) =>
+      getEnrollments().then(list => {
+        setApprovedEnrollments(
+          list
+            .filter(e => e.status === "approved")
+            .map(e => ({
+              id: e.supabase_user_id ?? `enr_${e.id}`,
+              full_name: e.full_name,
+              email: e.email,
+              school: e.school ?? "",
+              grade: e.grade ?? "",
+            }))
+        );
+      })
+    );
+  }, []);
+
+  // Uploaded materials (localStorage) merged with mock
+  const [uploadedMaterials, setUploadedMaterials] = useState<StoredClassMaterial[]>([]);
+  useEffect(() => {
+    setUploadedMaterials(getClassMaterials(classId));
+  }, [classId]);
 
   // Student packages per class (persisted to localStorage)
   const [studentPackages, setStudentPackages] = useState<Record<string, StudentPackage>>({});
@@ -1101,18 +1377,32 @@ export default function TeacherClassDetailPage() {
   }
 
   const teacher = MOCK_TEACHERS.find(t => t.id === cls.tutor_id);
-  const materials = MOCK_CLASS_MATERIALS.filter(m => m.class_id === classId);
+  const materials = [
+    ...MOCK_CLASS_MATERIALS.filter(m => m.class_id === classId),
+    ...uploadedMaterials,
+  ];
   const lectures = MOCK_LECTURES.filter(l => l.class_id === classId);
   const notes = MOCK_CLASS_NOTES.filter(n => n.class_id === classId);
 
   // Students enrolled in this class (mock + extra added by teacher)
   const allEnrolledIds = [...new Set([...(cls.student_ids ?? []), ...extraStudentIds])];
-  const classStudents = MOCK_STUDENTS.filter(s => allEnrolledIds.includes(s.id)).map((s, idx) => ({
+  const mockClassStudents = MOCK_STUDENTS.filter(s => allEnrolledIds.includes(s.id)).map((s, idx) => ({
     ...s,
     package: (studentPackages[s.id] ?? (idx % 3 === 0 ? "online" : idx % 3 === 1 ? "advanced" : "offline")) as StudentPackage,
     join_date: "2024-09-0" + (idx + 1),
     progress: [72, 85, 61, 90, 78][idx] ?? 70,
   }));
+  const enrolledClassStudents = approvedEnrollments
+    .filter(e => allEnrolledIds.includes(e.id))
+    .map((e, idx) => ({
+      id: e.id, user_id: e.id, full_name: e.full_name, email: e.email,
+      dob: "", school: e.school, grade: e.grade, learning_type: "online" as const,
+      parent_id: undefined, avatar_url: undefined, created_at: "",
+      package: (studentPackages[e.id] ?? "online") as StudentPackage,
+      join_date: new Date().toISOString().slice(0, 10),
+      progress: [72, 85, 61, 90, 78][idx] ?? 70,
+    }));
+  const classStudents = [...mockClassStudents, ...enrolledClassStudents];
 
   function handleSetPackage(studentId: string, pkg: StudentPackage) {
     const updated = { ...studentPackages, [studentId]: pkg };
@@ -1718,17 +2008,53 @@ export default function TeacherClassDetailPage() {
                           </div>
                           <div className="flex items-center gap-1">
                             <span className={`text-[10px] font-semibold px-2 py-1 rounded-full ${cat.color}`}>{cat.label}</span>
-                            <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity"><Trash2 className="h-3 w-3" /></Button>
+                            {mat.id.startsWith("mat_") && (
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-7 w-7 text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 opacity-0 group-hover:opacity-100 transition-opacity"
+                                onClick={() => {
+                                  deleteClassMaterial(mat.id);
+                                  setUploadedMaterials(getClassMaterials(classId));
+                                }}
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </Button>
+                            )}
                           </div>
                         </div>
                         <h3 className="font-semibold text-sm text-foreground line-clamp-2 mb-1">{mat.title}</h3>
-                        <p className="text-xs text-muted-foreground line-clamp-2 mb-3">{mat.description}</p>
+                        <p className="text-xs text-muted-foreground line-clamp-2 mb-2">{mat.description}</p>
+                        {"packages" in mat && mat.packages && mat.packages.length > 0 && (
+                          <div className="flex gap-1 flex-wrap mb-2">
+                            {(mat.packages as StudentPackage[]).map(pkg => (
+                              <span key={pkg} className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${
+                                pkg === "online" ? "bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-400"
+                                : pkg === "advanced" ? "bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400"
+                                : "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400"
+                              }`}>
+                                {pkg === "online" ? "Online" : pkg === "advanced" ? "Nâng cao" : "Offline"}
+                              </span>
+                            ))}
+                          </div>
+                        )}
                         <div className="flex items-center gap-3 text-[11px] text-muted-foreground mt-auto mb-3">
                           <span>{mat.file_size}</span><span>·</span>
                           <span className="flex items-center gap-1"><Download className="h-3 w-3" />{mat.download_count}</span>
                         </div>
                         <div className="pt-3 border-t border-border/50">
-                          <Button size="sm" variant="outline" className="w-full text-xs h-8"><Eye className="h-3 w-3 mr-1.5" />Xem trước</Button>
+                          {mat.file_url && !mat.file_url.startsWith("/uploads/") ? (
+                            <a
+                              href={mat.file_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-center justify-center gap-1.5 w-full h-8 text-xs rounded-lg border border-border bg-background hover:bg-muted transition-colors font-medium text-foreground"
+                            >
+                              <Eye className="h-3 w-3" />Xem / Tải xuống
+                            </a>
+                          ) : (
+                            <Button size="sm" variant="outline" className="w-full text-xs h-8"><Eye className="h-3 w-3 mr-1.5" />Xem trước</Button>
+                          )}
                         </div>
                       </CardContent>
                     </Card>
@@ -1790,7 +2116,12 @@ export default function TeacherClassDetailPage() {
                 </div>
                 <div className="flex gap-2 w-full sm:w-auto">
                   <div className="relative flex-1 sm:w-64">
-                    <Input placeholder="Tìm tên học viên..." className="pl-9" />
+                    <Input
+                      placeholder="Tìm tên học viên..."
+                      className="pl-9"
+                      value={studentSearch}
+                      onChange={e => setStudentSearch(e.target.value)}
+                    />
                     <Users className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   </div>
                   <Button variant="outline" onClick={() => setAddStudentModal(true)}><Plus className="h-4 w-4 mr-2" /> Thêm học viên</Button>
@@ -1825,7 +2156,7 @@ export default function TeacherClassDetailPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border">
-                      {classStudents.map(student => (
+                      {classStudents.filter(s => !studentSearch || s.full_name.toLowerCase().includes(studentSearch.toLowerCase())).map(student => (
                         <tr key={student.id} className="hover:bg-muted/30 transition-colors group">
                           <td className="p-4">
                             <div className="flex items-center gap-3">
@@ -1841,7 +2172,11 @@ export default function TeacherClassDetailPage() {
                                     </Badge>
                                   )}
                                 </div>
-                                <p className="text-[11px] text-muted-foreground">{student.school} · {student.grade}</p>
+                                {(student.school || student.grade) && (
+                                  <p className="text-[11px] text-muted-foreground">
+                                    {[student.school, student.grade].filter(Boolean).join(" · ")}
+                                  </p>
+                                )}
                               </div>
                             </div>
                           </td>
@@ -1889,10 +2224,21 @@ export default function TeacherClassDetailPage() {
               </div>
             </div>
           )}
+
+          {activeTab === "tuition" && (
+            <TuitionTab classId={classId} students={classStudents} />
+          )}
         </div>
       </div>
 
-      {uploadModal && <UploadModal type={uploadModal} onClose={() => setUploadModal(null)} />}
+      {uploadModal && (
+        <UploadModal
+          type={uploadModal}
+          classId={classId}
+          onClose={() => setUploadModal(null)}
+          onMaterialSaved={mat => setUploadedMaterials(prev => [...prev, mat])}
+        />
+      )}
       {commentModalStudent && (
         <FeedbackModal
           student={commentModalStudent}
@@ -1933,6 +2279,7 @@ export default function TeacherClassDetailPage() {
         <AddStudentModal
           classId={classId}
           enrolledIds={allEnrolledIds}
+          approvedEnrollments={approvedEnrollments}
           onAdd={newIds => setExtraStudentIds(prev => [...new Set([...prev, ...newIds])])}
           onClose={() => setAddStudentModal(false)}
         />

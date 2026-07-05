@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "db:seed": "tsx scripts/seed-dev.ts",
+    "db:reset": "echo \"Manually run supabase/schema.sql + supabase/migration_app_tables.sql + supabase/migration_missing_columns.sql in the Supabase SQL Editor first, then run: npm run db:seed\""
   },
   "dependencies": {
     "@radix-ui/react-avatar": "^1.1.11",
@@ -25,9 +27,17 @@
     "@radix-ui/react-tooltip": "^1.2.8",
     "@supabase/ssr": "^0.10.2",
     "@supabase/supabase-js": "^2.105.3",
+    "@tailwindcss/typography": "^0.5.20",
+    "@tiptap/extension-image": "^3.27.1",
+    "@tiptap/extension-mathematics": "^3.27.1",
+    "@tiptap/extension-placeholder": "^3.27.1",
+    "@tiptap/extension-text-align": "^3.27.1",
+    "@tiptap/react": "^3.27.1",
+    "@tiptap/starter-kit": "^3.27.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "date-fns": "^3.6.0",
+    "katex": "^0.17.0",
     "lucide-react": "^1.14.0",
     "next": "16.2.5",
     "next-themes": "^0.4.6",
@@ -45,6 +55,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.5",
     "tailwindcss": "^4",
+    "tsx": "^4.19.2",
     "typescript": "^5"
   }
 }

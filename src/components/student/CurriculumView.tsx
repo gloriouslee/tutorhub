@@ -1,42 +1,102 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { getCurriculum, type CurriculumLesson } from "@/lib/storage";
 import {
   ChevronDown, ChevronRight, PlayCircle, FileText,
   ClipboardList, Video, CheckCircle2, ExternalLink,
-  Download, BookOpen, Circle, CalendarDays,
+  Download, BookOpen, Circle, CalendarDays, X, Play, PenSquare,
 } from "lucide-react";
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
 type LessonType = CurriculumLesson["type"];
 
-const LESSON_META: Record<LessonType, { label: string; icon: React.ElementType; color: string; actionLabel: string }> = {
-  lecture:  { label: "Bài giảng",      icon: PlayCircle,    color: "text-blue-600 dark:text-blue-400",    actionLabel: "Xem bài giảng" },
-  material: { label: "Tài liệu",       icon: FileText,      color: "text-emerald-600 dark:text-emerald-400", actionLabel: "Tải xuống" },
-  homework: { label: "Bài tập",        icon: ClipboardList, color: "text-amber-600 dark:text-amber-400",  actionLabel: "Xem bài tập" },
-  solution: { label: "Video chữa bài", icon: Video,         color: "text-violet-600 dark:text-violet-400", actionLabel: "Xem chữa bài" },
+const LESSON_META: Record<LessonType, { label: string; icon: React.ElementType; color: string }> = {
+  lecture:  { label: "Bài giảng",      icon: PlayCircle,    color: "text-blue-600 dark:text-blue-400" },
+  material: { label: "Tài liệu",       icon: FileText,      color: "text-emerald-600 dark:text-emerald-400" },
+  homework: { label: "Bài tập",        icon: ClipboardList, color: "text-amber-600 dark:text-amber-400" },
+  solution: { label: "Video chữa bài", icon: Video,         color: "text-violet-600 dark:text-violet-400" },
+  exam:     { label: "Bài thi",        icon: PenSquare,     color: "text-rose-600 dark:text-rose-400" },
 };
 
+function getYouTubeId(url: string): string | null {
+  if (!url) return null;
+  const patterns = [
+    /[?&]v=([^&#]+)/,
+    /youtu\.be\/([^?&#]+)/,
+    /embed\/([^?&#]+)/,
+  ];
+  for (const p of patterns) {
+    const m = url.match(p);
+    if (m) return m[1];
+  }
+  return null;
+}
+
 // ── Props ─────────────────────────────────────────────────────────────────────
+
 interface Props {
   classId: string;
-  watched: Set<string>;            // IDs of watched/completed lessons
+  watched: Set<string>;
   onWatch: (id: string, url?: string) => void;
   submissions: { homework_id: string }[];
 }
 
-// ── Component ─────────────────────────────────────────────────────────────────
+// ── Embedded player ───────────────────────────────────────────────────────────
+
+function YoutubePlayer({ lesson, onClose }: { lesson: CurriculumLesson; onClose: () => void }) {
+  const ytId = getYouTubeId(lesson.video_url ?? "");
+  if (!ytId) return null;
+
+  return (
+    <div className="rounded-2xl overflow-hidden border border-border bg-card shadow-lg mb-5">
+      {/* Player header */}
+      <div className="flex items-center gap-3 px-4 py-2.5 bg-muted/50 border-b border-border">
+        <Play className="h-4 w-4 text-primary shrink-0" />
+        <span className="flex-1 text-sm font-medium truncate">{lesson.title}</span>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-7 px-2 text-xs gap-1 text-muted-foreground hover:text-foreground shrink-0"
+          onClick={() => window.open(lesson.video_url, "_blank", "noopener,noreferrer")}
+        >
+          <ExternalLink className="h-3 w-3" /> Mở tab mới
+        </Button>
+        <button
+          onClick={onClose}
+          className="p-1 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors shrink-0"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+
+      {/* iframe */}
+      <div className="relative w-full aspect-video bg-black">
+        <iframe
+          src={`https://www.youtube.com/embed/${ytId}?autoplay=1&rel=0`}
+          className="absolute inset-0 w-full h-full"
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+          allowFullScreen
+          title={lesson.title}
+        />
+      </div>
+    </div>
+  );
+}
+
+// ── Main component ────────────────────────────────────────────────────────────
+
 export default function CurriculumView({ classId, watched, onWatch, submissions }: Props) {
-  const [chapters,  setChapters]  = useState<ReturnType<typeof getCurriculum>>([]);
-  const [expanded,  setExpanded]  = useState<Set<string>>(new Set());
+  const [chapters,     setChapters]     = useState<ReturnType<typeof getCurriculum>>([]);
+  const [expanded,     setExpanded]     = useState<Set<string>>(new Set());
+  const [activeLesson, setActiveLesson] = useState<CurriculumLesson | null>(null);
 
   useEffect(() => {
     const data = getCurriculum(classId);
     setChapters(data);
-    // Expand first chapter + its first session by default
     const ids = new Set<string>();
     if (data[0]) {
       ids.add(data[0].id);
@@ -50,15 +110,27 @@ export default function CurriculumView({ classId, watched, onWatch, submissions 
   }
 
   function isCompleted(lesson: CurriculumLesson): boolean {
-    if (lesson.type === "homework") {
-      return submissions.some(s => s.homework_id === lesson.id);
-    }
+    if (lesson.type === "homework") return submissions.some(s => s.homework_id === lesson.id);
     return watched.has(lesson.id);
   }
 
+  function handlePlay(lesson: CurriculumLesson) {
+    onWatch(lesson.id, lesson.video_url);
+    const ytId = getYouTubeId(lesson.video_url ?? "");
+    if (ytId) {
+      setActiveLesson(lesson);
+    } else if (lesson.video_url) {
+      window.open(lesson.video_url, "_blank", "noopener,noreferrer");
+    }
+  }
+
+  const router = useRouter();
+
   function handleAction(lesson: CurriculumLesson) {
-    if (lesson.type === "lecture" || lesson.type === "solution") {
-      onWatch(lesson.id, lesson.video_url);
+    if (lesson.type === "exam") {
+      router.push(`/student/classes/${classId}/exam/${lesson.id}`);
+    } else if (lesson.type === "lecture" || lesson.type === "solution") {
+      handlePlay(lesson);
     } else if (lesson.type === "material" && lesson.file_url) {
       window.open(lesson.file_url, "_blank", "noopener,noreferrer");
       onWatch(lesson.id);
@@ -76,8 +148,7 @@ export default function CurriculumView({ classId, watched, onWatch, submissions 
     );
   }
 
-  // Compute overall progress
-  const allPublished = chapters.flatMap(ch => ch.sessions.flatMap(s => s.lessons.filter(l => l.is_published)));
+  const allPublished  = chapters.flatMap(ch => ch.sessions.flatMap(s => s.lessons.filter(l => l.is_published)));
   const completedCount = allPublished.filter(l => isCompleted(l)).length;
   const totalCount     = allPublished.length;
   const pct            = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
@@ -100,6 +171,9 @@ export default function CurriculumView({ classId, watched, onWatch, submissions 
         </div>
       )}
 
+      {/* Embedded player (shown when a YouTube lesson is active) */}
+      {activeLesson && <YoutubePlayer lesson={activeLesson} onClose={() => setActiveLesson(null)} />}
+
       {/* Chapters */}
       {chapters.map((chapter, ci) => {
         const chExpanded = expanded.has(chapter.id);
@@ -118,9 +192,7 @@ export default function CurriculumView({ classId, watched, onWatch, submissions 
                 <span className="text-xs font-bold text-primary">{ci + 1}</span>
               </div>
               <span className="flex-1 font-semibold text-sm text-foreground">{chapter.title}</span>
-              <span className="text-xs text-muted-foreground shrink-0">
-                {chDone}/{chLessons.length} hoàn thành
-              </span>
+              <span className="text-xs text-muted-foreground shrink-0">{chDone}/{chLessons.length} hoàn thành</span>
               {chDone === chLessons.length && chLessons.length > 0 && (
                 <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
               )}
@@ -133,7 +205,6 @@ export default function CurriculumView({ classId, watched, onWatch, submissions 
                   const sExpanded  = expanded.has(session.id);
                   const pubLessons = session.lessons.filter(l => l.is_published);
                   const sDone      = pubLessons.filter(l => isCompleted(l)).length;
-
                   if (pubLessons.length === 0) return null;
 
                   return (
@@ -161,12 +232,20 @@ export default function CurriculumView({ classId, watched, onWatch, submissions 
                           {pubLessons.map(lesson => {
                             const meta      = LESSON_META[lesson.type];
                             const done      = isCompleted(lesson);
-                            const hasAction = lesson.video_url || lesson.file_url || lesson.type === "homework";
+                            const isVideo   = lesson.type === "lecture" || lesson.type === "solution";
+                            const hasYt     = isVideo && !!getYouTubeId(lesson.video_url ?? "");
+                            const isPlaying = activeLesson?.id === lesson.id;
 
                             return (
                               <div
                                 key={lesson.id}
-                                className={`flex items-center gap-3 p-3 rounded-xl border transition-colors ${done ? "border-emerald-200 dark:border-emerald-800/40 bg-emerald-50/50 dark:bg-emerald-900/10" : "border-border/50 bg-background hover:border-border"}`}
+                                className={`flex items-center gap-3 p-3 rounded-xl border transition-colors ${
+                                  isPlaying
+                                    ? "border-primary/40 bg-primary/5"
+                                    : done
+                                    ? "border-emerald-200 dark:border-emerald-800/40 bg-emerald-50/50 dark:bg-emerald-900/10"
+                                    : "border-border/50 bg-background hover:border-border"
+                                }`}
                               >
                                 {/* Done indicator */}
                                 {done
@@ -179,7 +258,7 @@ export default function CurriculumView({ classId, watched, onWatch, submissions 
 
                                 {/* Info */}
                                 <div className="flex-1 min-w-0">
-                                  <p className={`text-sm font-medium truncate ${done ? "text-muted-foreground line-through" : "text-foreground"}`}>
+                                  <p className={`text-sm font-medium truncate ${done && !isPlaying ? "text-muted-foreground line-through" : "text-foreground"}`}>
                                     {lesson.title}
                                   </p>
                                   {lesson.description && (
@@ -197,20 +276,60 @@ export default function CurriculumView({ classId, watched, onWatch, submissions 
                                   {meta.label}
                                 </span>
 
-                                {/* Action */}
-                                {hasAction && (
-                                  <Button
-                                    size="sm"
-                                    variant={done ? "outline" : "default"}
-                                    className="shrink-0 h-7 text-xs px-2.5"
-                                    onClick={() => handleAction(lesson)}
-                                  >
-                                    {lesson.type === "material"
-                                      ? <><Download className="h-3 w-3 mr-1" />{meta.actionLabel}</>
-                                      : <><ExternalLink className="h-3 w-3 mr-1" />{meta.actionLabel}</>
-                                    }
-                                  </Button>
-                                )}
+                                {/* Actions */}
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                  {/* Exam button */}
+                                  {lesson.type === "exam" && (() => {
+                                    const status = lesson.exam_status ?? "draft";
+                                    const opensAt = lesson.exam_opens_at;
+                                    const isOpen = status === "open" || (status === "draft" && opensAt && new Date(opensAt) <= new Date());
+                                    if (!isOpen && !done) return (
+                                      <span className="text-[10px] text-muted-foreground px-2 py-1 rounded-lg bg-muted border border-border flex items-center gap-1">
+                                        🔒 {status === "closed" ? "Đã đóng" : "Chưa mở"}
+                                      </span>
+                                    );
+                                    return (
+                                      <Button
+                                        size="sm"
+                                        variant={done ? "outline" : "gradient"}
+                                        className="h-7 text-xs px-2.5"
+                                        onClick={() => handleAction(lesson)}
+                                      >
+                                        <PenSquare className="h-3 w-3 mr-1" />
+                                        {done ? "Xem lại" : "Vào thi"}
+                                      </Button>
+                                    );
+                                  })()}
+
+                                  {/* Main action button (non-exam) */}
+                                  {lesson.type !== "exam" && (lesson.video_url || lesson.file_url || lesson.type === "homework") && (
+                                    <Button
+                                      size="sm"
+                                      variant={isPlaying ? "default" : done ? "outline" : "default"}
+                                      className="h-7 text-xs px-2.5"
+                                      onClick={() => handleAction(lesson)}
+                                    >
+                                      {lesson.type === "material" ? (
+                                        <><Download className="h-3 w-3 mr-1" />Tải xuống</>
+                                      ) : isPlaying ? (
+                                        <><Play className="h-3 w-3 mr-1" />Đang xem</>
+                                      ) : (
+                                        <><Play className="h-3 w-3 mr-1" />Xem</>
+                                      )}
+                                    </Button>
+                                  )}
+
+                                  {/* Open in new tab (YouTube only) */}
+                                  {hasYt && (
+                                    <button
+                                      title="Mở trong tab mới"
+                                      className="h-7 w-7 flex items-center justify-center rounded-lg border border-border/60 hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                                      onClick={() => window.open(lesson.video_url, "_blank", "noopener,noreferrer")}
+                                    >
+                                      <ExternalLink className="h-3.5 w-3.5" />
+                                    </button>
+                                  )}
+                                </div>
                               </div>
                             );
                           })}

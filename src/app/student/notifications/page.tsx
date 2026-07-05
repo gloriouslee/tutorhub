@@ -13,6 +13,7 @@ import {
   type ScheduleNotification,
 } from "@/lib/storage";
 import { Bell, Check, CheckCircle2, AlertTriangle, Info, BookOpen, Calendar, Trash2 } from "lucide-react";
+import { useStudentContext } from "@/hooks/useStudentContext";
 import { Notification } from "@/types";
 
 // ── localStorage helpers ──────────────────────────────────────────────────────
@@ -89,6 +90,7 @@ const CATEGORY_META: Record<NotifCategory, {
 };
 
 export default function StudentNotificationsPage() {
+  const { studentName } = useStudentContext();
   const router = useRouter();
   const [scheduleNotifs, setScheduleNotifs] = useState<ScheduleNotification[]>([]);
   const [notifs, setNotifs] = useState<Notification[]>([]);
@@ -143,7 +145,7 @@ export default function StudentNotificationsPage() {
   };
 
   return (
-    <PortalLayout role="student" userName="Nguyễn Anh Tuấn" pageTitle="Thông báo">
+    <PortalLayout role="student" userName={studentName} pageTitle="Thông báo">
       <div className="space-y-6 max-w-3xl mx-auto">
         <SectionHeader
           title="Thông báo của bạn"

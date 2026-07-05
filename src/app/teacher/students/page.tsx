@@ -13,13 +13,14 @@ import {
 import {
   getStudentComments, saveStudentComment,
   getStudentPackages, type StudentPackage,
+  getExamScoresByStudent, saveExamScore, deleteExamScore, type StoredExamScore,
 } from "@/lib/storage";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   Search, GraduationCap, BookOpen, CheckSquare,
   Star, MessageSquare, X, ChevronDown, ChevronUp,
   ArrowLeft, TrendingUp, ClipboardList, UserCheck,
-  Clock, AlertCircle, CheckCircle2, XCircle, Target,
+  Clock, AlertCircle, CheckCircle2, XCircle, Target, Plus, Trash2,
 } from "lucide-react";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -183,6 +184,9 @@ function StudentDetailPanel({
   const [tab, setTab] = useState<DetailTab>("overview");
   const [lsSubmissions, setLsSubmissions] = useState<Submission[]>([]);
   const [gpaTarget, setGpaTarget] = useState<number | null>(null);
+  const [storedScores, setStoredScores] = useState<StoredExamScore[]>([]);
+  const [showScoreForm, setShowScoreForm] = useState(false);
+  const [scoreForm, setScoreForm] = useState({ exam_name: "", score: "", max_score: "10", exam_date: new Date().toISOString().slice(0, 10), class_id: "" });
 
   const studentClassIds = studentClasses.map(c => c.id);
   const classNameMap = Object.fromEntries(studentClasses.map(c => [c.id, c.class_name]));
@@ -196,18 +200,45 @@ function StudentDetailPanel({
       const val = localStorage.getItem(`tutorhub_gpa_target_${student.id}`);
       if (val) setGpaTarget(parseFloat(val));
     } catch {}
+    getExamScoresByStudent(student.id).then(setStoredScores);
+    setScoreForm(f => ({ ...f, class_id: studentClasses[0]?.id ?? "" }));
   }, [student.id]);
 
-  // Scores
-  const examScores = useMemo(
-    () => MOCK_EXAM_SCORES
-      .filter(e => e.student_id === student.id && studentClassIds.includes(e.class_id))
-      .sort((a, b) => a.exam_date.localeCompare(b.exam_date)),
-    [student.id, studentClassIds]
-  );
+  // Scores — merge mock + localStorage, deduped
+  const examScores = useMemo(() => {
+    const mock = MOCK_EXAM_SCORES.filter(e => e.student_id === student.id && studentClassIds.includes(e.class_id));
+    const real = storedScores.filter(e => studentClassIds.includes(e.class_id));
+    const seen = new Set<string>();
+    return [...mock, ...real]
+      .filter(e => { if (seen.has(e.id)) return false; seen.add(e.id); return true; })
+      .sort((a, b) => a.exam_date.localeCompare(b.exam_date));
+  }, [student.id, studentClassIds, storedScores]);
+
   const avgVal = examScores.length
     ? examScores.reduce((s, e) => s + (e.score / e.max_score) * 10, 0) / examScores.length
     : null;
+
+  async function handleSaveScore() {
+    const s = parseFloat(scoreForm.score);
+    const m = parseFloat(scoreForm.max_score);
+    if (!scoreForm.exam_name.trim() || isNaN(s) || isNaN(m) || !scoreForm.class_id) return;
+    await saveExamScore({
+      student_id: student.id,
+      class_id:   scoreForm.class_id,
+      exam_name:  scoreForm.exam_name.trim(),
+      score:      s,
+      max_score:  m,
+      exam_date:  scoreForm.exam_date,
+    });
+    getExamScoresByStudent(student.id).then(setStoredScores);
+    setShowScoreForm(false);
+    setScoreForm(f => ({ ...f, exam_name: "", score: "" }));
+  }
+
+  async function handleDeleteScore(id: string) {
+    await deleteExamScore(id);
+    getExamScoresByStudent(student.id).then(setStoredScores);
+  }
 
   // Attendance
   const mergedAttendance = useMemo(() => {
@@ -441,8 +472,49 @@ function StudentDetailPanel({
       {/* ── Điểm số ── */}
       {tab === "scores" && (
         <div className="space-y-4">
+          {/* Add score button + form */}
+          {!showScoreForm ? (
+            <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setShowScoreForm(true)}>
+              <Plus className="h-3.5 w-3.5" /> Thêm điểm kiểm tra
+            </Button>
+          ) : (
+            <Card className="border-primary/30 bg-primary/5">
+              <CardContent className="p-4 space-y-3">
+                <p className="text-sm font-semibold text-foreground">Nhập điểm kiểm tra mới</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="col-span-2 space-y-1">
+                    <label className="text-xs text-muted-foreground">Tên bài kiểm tra *</label>
+                    <input className="w-full h-9 px-3 rounded-lg border border-input bg-background text-sm outline-none focus:ring-2 focus:ring-primary" placeholder="VD: Kiểm tra 15' – Hàm số" value={scoreForm.exam_name} onChange={e => setScoreForm(f => ({ ...f, exam_name: e.target.value }))} />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs text-muted-foreground">Điểm *</label>
+                    <input type="number" min="0" step="0.1" className="w-full h-9 px-3 rounded-lg border border-input bg-background text-sm outline-none focus:ring-2 focus:ring-primary" placeholder="8.5" value={scoreForm.score} onChange={e => setScoreForm(f => ({ ...f, score: e.target.value }))} />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs text-muted-foreground">Tổng điểm</label>
+                    <input type="number" min="1" className="w-full h-9 px-3 rounded-lg border border-input bg-background text-sm outline-none focus:ring-2 focus:ring-primary" value={scoreForm.max_score} onChange={e => setScoreForm(f => ({ ...f, max_score: e.target.value }))} />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs text-muted-foreground">Ngày kiểm tra</label>
+                    <input type="date" className="w-full h-9 px-3 rounded-lg border border-input bg-background text-sm outline-none focus:ring-2 focus:ring-primary" value={scoreForm.exam_date} onChange={e => setScoreForm(f => ({ ...f, exam_date: e.target.value }))} />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs text-muted-foreground">Lớp</label>
+                    <select className="w-full h-9 px-3 rounded-lg border border-input bg-background text-sm outline-none focus:ring-2 focus:ring-primary" value={scoreForm.class_id} onChange={e => setScoreForm(f => ({ ...f, class_id: e.target.value }))}>
+                      {studentClasses.map(c => <option key={c.id} value={c.id}>{c.class_name}</option>)}
+                    </select>
+                  </div>
+                </div>
+                <div className="flex gap-2 pt-1">
+                  <Button size="sm" className="gap-1" onClick={handleSaveScore}><CheckCircle2 className="h-3.5 w-3.5" /> Lưu điểm</Button>
+                  <Button size="sm" variant="outline" onClick={() => setShowScoreForm(false)}>Huỷ</Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           {examScores.length === 0 ? (
-            <div className="py-12 text-center text-sm text-muted-foreground">Chưa có dữ liệu điểm.</div>
+            <div className="py-12 text-center text-sm text-muted-foreground">Chưa có dữ liệu điểm. Nhấn "Thêm điểm kiểm tra" để nhập.</div>
           ) : (
             <>
               {/* Bar chart */}
@@ -469,20 +541,31 @@ function StudentDetailPanel({
               <div className="space-y-2">
                 {examScores.map(e => {
                   const normalized = (e.score / e.max_score) * 10;
+                  const isStored = storedScores.some(s => s.id === e.id);
                   return (
-                    <Card key={e.id} className="border-border/60">
+                    <Card key={e.id} className={`border-border/60 ${isStored ? "ring-1 ring-primary/20" : ""}`}>
                       <CardContent className="p-4">
                         <div className="flex items-start justify-between gap-3">
                           <div className="flex-1 min-w-0">
-                            <p className="text-sm font-semibold text-foreground">{e.exam_name}</p>
+                            <div className="flex items-center gap-1.5">
+                              <p className="text-sm font-semibold text-foreground">{e.exam_name}</p>
+                              {isStored && <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary font-medium">Thực tế</span>}
+                            </div>
                             <p className="text-[11px] text-muted-foreground mt-0.5">
                               {new Date(e.exam_date).toLocaleDateString("vi-VN")} · {classNameMap[e.class_id] ?? e.class_id}
                             </p>
                           </div>
-                          <div className="text-right shrink-0">
-                            <span className={`text-xl font-black ${gradeColor(e.score, e.max_score)}`}>{e.score}</span>
-                            <span className="text-xs text-muted-foreground">/{e.max_score}</span>
-                            <p className={`text-[10px] font-semibold ${gradeColor(normalized, 10)}`}>({normalized.toFixed(1)}/10)</p>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <div className="text-right">
+                              <span className={`text-xl font-black ${gradeColor(e.score, e.max_score)}`}>{e.score}</span>
+                              <span className="text-xs text-muted-foreground">/{e.max_score}</span>
+                              <p className={`text-[10px] font-semibold ${gradeColor(normalized, 10)}`}>({normalized.toFixed(1)}/10)</p>
+                            </div>
+                            {isStored && (
+                              <button onClick={() => handleDeleteScore(e.id)} className="text-muted-foreground hover:text-red-500 transition-colors p-1">
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            )}
                           </div>
                         </div>
                         <ProgressBar value={(e.score / e.max_score) * 100} size="sm" color={barColor(e.score, e.max_score)} className="mt-2" />

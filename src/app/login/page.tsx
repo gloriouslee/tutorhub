@@ -3,10 +3,11 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { GraduationCap, Mail, Lock, Eye, EyeOff, ArrowRight, User, Users, Phone, BookOpen, Target, CheckCircle2 } from "lucide-react";
+import { GraduationCap, Mail, Lock, Eye, EyeOff, ArrowRight, User, Users, Phone, BookOpen, Target, CheckCircle2, Calendar } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { createClient } from "@/lib/supabase/client";
+import { createEnrollment, getEnrollments } from "@/lib/storage";
 
 const DEMO_USERS = [
   { role: "student", email: "student@tutorhub.com", label: "Học viên", color: "from-indigo-500 to-purple-600", icon: "🎓" },
@@ -29,11 +30,12 @@ export default function LoginPage() {
 
   // Register State
   const [regData, setRegData] = useState({
-    studentName: "", studentPhone: "", parentName: "", parentPhone: "",
+    studentName: "", email: "", dob: "", studentPhone: "", parentName: "", parentPhone: "",
     grade: "", school: "", subjects: [] as string[], targetScore: "", package: ""
   });
   const [regLoading, setRegLoading] = useState(false);
   const [regSuccess, setRegSuccess] = useState(false);
+  const [regError, setRegError] = useState("");
 
   const handleDemo = (demoEmail: string, role: string) => {
     setEmail(demoEmail);
@@ -52,25 +54,43 @@ export default function LoginPage() {
     setLoginError("");
     setLoginLoading(true);
 
+    // 1. Demo accounts
+    const demoUser = DEMO_USERS.find(d => d.email === email);
+    if (demoUser && password === "demo1234") {
+      document.cookie = `demo_role=${demoUser.role}; path=/; max-age=86400`;
+      setTimeout(() => { setLoginLoading(false); router.push(`/${demoUser.role}`); }, 600);
+      return;
+    }
+
+    // 2. localStorage enrolled student accounts
+    const enrollments = await getEnrollments();
+    const matched = enrollments.find(
+      enr => enr.status === "approved" &&
+        enr.account_username === email &&
+        enr.account_password === password
+    );
+    if (matched) {
+      document.cookie = `demo_role=student; path=/; max-age=86400`;
+      document.cookie = `enrolled_student_id=enr_${matched.id}; path=/; max-age=86400`;
+      document.cookie = `enrolled_student_name=${encodeURIComponent(matched.full_name)}; path=/; max-age=86400`;
+      document.cookie = `enrolled_student_class=${encodeURIComponent(matched.assigned_class_id ?? "")}; path=/; max-age=86400`;
+      setTimeout(() => { setLoginLoading(false); router.push("/student"); }, 600);
+      return;
+    }
+
+    // 3. Real Supabase auth (admin/teacher accounts)
     try {
       const supabase = createClient();
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-
       if (error) {
         setLoginError("Email hoặc mật khẩu không đúng.");
         setLoginLoading(false);
         return;
       }
-
-      // Get role from profiles table
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("role")
-        .eq("id", data.user.id)
-        .single();
-
-      const role = profile?.role ?? "student";
-      router.push(`/${role}`);
+      const role = data.user.user_metadata?.role as string | undefined;
+      if (role) { router.push(`/${role}`); return; }
+      const { data: profile } = await supabase.from("profiles").select("role").eq("id", data.user.id).single();
+      router.push(`/${profile?.role ?? "student"}`);
     } catch {
       setLoginError("Đã có lỗi xảy ra. Vui lòng thử lại.");
       setLoginLoading(false);
@@ -79,12 +99,34 @@ export default function LoginPage() {
 
   const handleRegisterSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setRegError("");
+    if (!regData.email) { setRegError("Vui lòng nhập email liên hệ."); return; }
+    if (!regData.dob) { setRegError("Vui lòng nhập ngày sinh học viên."); return; }
+    if (!regData.parentPhone) { setRegError("Vui lòng nhập số điện thoại phụ huynh."); return; }
     setRegLoading(true);
-    // Simulate API call to save admission data
-    setTimeout(() => {
-      setRegLoading(false);
+    const noteLines: string[] = [];
+    if (regData.studentPhone) noteLines.push(`SĐT học viên: ${regData.studentPhone}`);
+    if (regData.subjects.length) noteLines.push(`Môn học: ${regData.subjects.join(", ")}`);
+    if (regData.targetScore) noteLines.push(`Mục tiêu: ${regData.targetScore}`);
+    if (regData.package) noteLines.push(`Gói học: ${regData.package}`);
+    if (regData.parentName) noteLines.push(`Phụ huynh: ${regData.parentName}`);
+    try {
+      await createEnrollment({
+        full_name: regData.studentName,
+        email: regData.email,
+        dob: regData.dob,
+        school: regData.school,
+        grade: regData.grade,
+        requested_class_id: "",
+        parent_phone: regData.parentPhone,
+        note: noteLines.join(" | "),
+      });
       setRegSuccess(true);
-    }, 1500);
+    } catch {
+      setRegError("Có lỗi khi gửi hồ sơ. Vui lòng thử lại.");
+    } finally {
+      setRegLoading(false);
+    }
   };
 
   const toggleSubject = (sub: string) => {
@@ -148,10 +190,14 @@ export default function LoginPage() {
                     <Input className="bg-white/10 border-white/20 text-white placeholder:text-white/40 h-11" placeholder="Nguyễn Văn A" required value={regData.studentName} onChange={e => setRegData({...regData, studentName: e.target.value})} />
                   </div>
                   <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-white/70">Số điện thoại học viên</label>
-                    <Input className="bg-white/10 border-white/20 text-white placeholder:text-white/40 h-11" placeholder="Tuỳ chọn" value={regData.studentPhone} onChange={e => setRegData({...regData, studentPhone: e.target.value})} />
+                    <label className="text-xs font-medium text-white/70">Email liên hệ *</label>
+                    <Input type="email" className="bg-white/10 border-white/20 text-white placeholder:text-white/40 h-11" placeholder="email@example.com" required value={regData.email} onChange={e => setRegData({...regData, email: e.target.value})} />
                   </div>
                   <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-medium text-white/70">Ngày sinh *</label>
+                      <Input type="date" className="bg-white/10 border-white/20 text-white placeholder:text-white/40 h-11" required value={regData.dob} onChange={e => setRegData({...regData, dob: e.target.value})} />
+                    </div>
                     <div className="space-y-1.5">
                       <label className="text-xs font-medium text-white/70">Lớp *</label>
                       <select className="flex h-11 w-full items-center justify-between rounded-xl border border-white/20 bg-white/10 px-3 py-2 text-sm text-white outline-none focus:ring-2 focus:ring-indigo-500" required value={regData.grade} onChange={e => setRegData({...regData, grade: e.target.value})}>
@@ -162,10 +208,14 @@ export default function LoginPage() {
                         <option value="12" className="text-gray-900">Lớp 12</option>
                       </select>
                     </div>
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-white/70">Trường học</label>
-                      <Input className="bg-white/10 border-white/20 text-white placeholder:text-white/40 h-11" placeholder="VD: THPT Chu Văn An" value={regData.school} onChange={e => setRegData({...regData, school: e.target.value})} />
-                    </div>
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-white/70">Số điện thoại học viên</label>
+                    <Input type="tel" className="bg-white/10 border-white/20 text-white placeholder:text-white/40 h-11" placeholder="Tuỳ chọn" value={regData.studentPhone} onChange={e => setRegData({...regData, studentPhone: e.target.value})} />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-white/70">Trường học</label>
+                    <Input className="bg-white/10 border-white/20 text-white placeholder:text-white/40 h-11" placeholder="VD: THPT Chu Văn An" value={regData.school} onChange={e => setRegData({...regData, school: e.target.value})} />
                   </div>
                 </div>
 
@@ -228,6 +278,11 @@ export default function LoginPage() {
                 </div>
               </div>
 
+              {regError && (
+                <div className="text-sm text-red-300 bg-red-500/10 border border-red-500/30 px-4 py-3 rounded-xl">
+                  {regError}
+                </div>
+              )}
               <Button type="submit" size="lg" disabled={regLoading} className="w-full bg-white text-indigo-900 hover:bg-white/90 font-bold mt-4">
                 {regLoading ? "Đang gửi hồ sơ..." : "Gửi Hồ Sơ Nhập Học"}
               </Button>

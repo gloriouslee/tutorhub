@@ -7,7 +7,7 @@ import { LearningModeBadge, SectionHeader } from "@/components/shared";
 import { Search, Plus, X, Edit, Trash2, Calendar, MapPin, Video, User } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { useState, useEffect } from "react";
-import { getClasses, saveClasses, getTeachers, getStudents } from "@/lib/storage";
+import { getClasses, saveClasses, getTeachers, getStudents, setClassTeacherOverride } from "@/lib/storage";
 import { Class, Teacher, Student } from "@/types";
 
 export default function AdminClassesPage() {
@@ -125,6 +125,8 @@ export default function AdminClassesPage() {
       );
       setClasses(updated);
       await saveClasses(updated);
+      // Persist teacher assignment so teacher portal picks it up
+      setClassTeacherOverride(editingClass.id, formData.tutor_id);
     } else {
       // Add
       const newId = `c${classes.length + 1}-${Math.floor(Math.random() * 1000)}`;

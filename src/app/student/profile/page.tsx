@@ -9,16 +9,15 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { SectionHeader } from "@/components/shared";
 import { MOCK_STUDENTS, MOCK_CLASSES, MOCK_TEACHERS } from "@/lib/mock-data";
-import { getCurrentStudentAccount, type StudentAccount } from "@/lib/storage";
+import { getCurrentStudentAccount, getStudentAccounts, type StudentAccount } from "@/lib/storage";
+import { useStudentContext } from "@/hooks/useStudentContext";
 import {
   User, Mail, Phone, BookOpen, Shield, Key, Camera,
   GraduationCap, Calendar, CheckCircle2, Save, RotateCcw,
   AlertCircle, Eye, EyeOff,
 } from "lucide-react";
 
-// ── Constants ─────────────────────────────────────────────────────────────────
-const STUDENT_ID   = "s1";
-const LS_PROFILE   = "tutorhub_student_profile";
+const LS_PROFILE = "tutorhub_student_profile";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 interface ProfileData {
@@ -47,7 +46,7 @@ function buildProfile(account: StudentAccount | null): ProfileData {
       from_enrollment: true,
     };
   }
-  const s = MOCK_STUDENTS.find(s => s.id === STUDENT_ID)!;
+  const s = MOCK_STUDENTS.find(s => s.id === "s1")!;
   return {
     full_name:       s.full_name,
     email:           s.email,
@@ -70,6 +69,7 @@ function loadSavedProfile(base: ProfileData): ProfileData {
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function StudentProfilePage() {
+  const { studentId, studentName, myClasses: enrolledClasses } = useStudentContext();
   const [account, setAccount] = useState<StudentAccount | null>(null);
   const [loaded,  setLoaded]  = useState(false);
 
@@ -90,19 +90,19 @@ export default function StudentProfilePage() {
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    const acc = getCurrentStudentAccount();
+    // Find account matching the enrolled student cookie, or fall back to last approved
+    const accounts = getStudentAccounts();
+    const acc = accounts.find(a => a.student_id === studentId) ?? getCurrentStudentAccount();
     setAccount(acc);
     const base = buildProfile(acc);
     setForm(loadSavedProfile(base));
     setLoaded(true);
-  }, []);
+  }, [studentId]);
 
   if (!loaded || !form) return null;
 
   const base = buildProfile(account);
 
-  // Enrolled classes from MOCK_CLASSES
-  const enrolledClasses = MOCK_CLASSES.filter(c => (c.student_ids ?? []).includes(STUDENT_ID));
 
   const initials = form.full_name
     .split(" ")

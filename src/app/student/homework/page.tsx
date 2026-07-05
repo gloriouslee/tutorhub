@@ -6,6 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { SectionHeader } from "@/components/shared";
 import { MOCK_HOMEWORK, MOCK_CLASSES } from "@/lib/mock-data";
+import { useStudentContext } from "@/hooks/useStudentContext";
 import {
   FileText, Clock, CheckCircle2, Upload, Calendar,
   AlertCircle, X, Check, Download, Loader2, Star,
@@ -19,17 +20,9 @@ import {
 } from "@/lib/supabase/submissions";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-const STUDENT_ID   = "s1";
-const STUDENT_NAME = "Nguyễn Anh Tuấn";
-const ACCEPTED     = ".pdf,.doc,.docx,.jpg,.jpeg,.png";
-const MAX_MB       = 10;
-const LS_KEY       = "tutorhub_submissions";
-
-// Student's enrolled classes & homework
-const myClassIds = MOCK_CLASSES
-  .filter(c => c.student_ids?.includes(STUDENT_ID))
-  .map(c => c.id);
-const myHomework = MOCK_HOMEWORK.filter(h => myClassIds.includes(h.class_id));
+const ACCEPTED = ".pdf,.doc,.docx,.jpg,.jpeg,.png";
+const MAX_MB   = 10;
+const LS_KEY   = "tutorhub_submissions";
 
 // ── localStorage fallback ─────────────────────────────────────────────────────
 function loadLocalSubs(): SubmissionRecord[] {
@@ -49,6 +42,9 @@ type FilterTab = "all" | "pending" | "submitted" | "graded";
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function StudentHomeworkPage() {
+  const { studentId: STUDENT_ID, studentName: STUDENT_NAME, myClasses } = useStudentContext();
+  const myClassIds = myClasses.map(c => c.id);
+  const myHomework = MOCK_HOMEWORK.filter(h => myClassIds.includes(h.class_id));
   const [submissions,  setSubmissions]  = useState<SubmissionRecord[]>([]);
   const [filterTab,    setFilterTab]    = useState<FilterTab>("all");
   const [selectedHw,   setSelectedHw]   = useState<typeof myHomework[0] | null>(null);
@@ -279,16 +275,44 @@ export default function StudentHomeworkPage() {
                           )}
 
                           {/* Feedback */}
-                          {sub?.feedback && (
+                          {sub?.status === "graded" && (
                             <div className="mt-3 p-3 bg-emerald-50/60 dark:bg-emerald-950/20 rounded-xl border border-emerald-100 dark:border-emerald-900/40 text-sm">
-                              <p className="font-semibold text-emerald-700 dark:text-emerald-400 text-xs mb-1">
-                                Nhận xét của Giáo viên:
-                              </p>
-                              <p className="text-foreground/80 italic">"{sub.feedback}"</p>
+                              <div className="flex items-center justify-between mb-1">
+                                <p className="font-semibold text-emerald-700 dark:text-emerald-400 text-xs">
+                                  Nhận xét của Giáo viên:
+                                </p>
+                                {sub.graded_at && (
+                                  <p className="text-[10px] text-muted-foreground">
+                                    {new Date(sub.graded_at).toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit", year: "numeric" })}
+                                  </p>
+                                )}
+                              </div>
+                              {sub.feedback
+                                ? <p className="text-foreground/80 italic">"{sub.feedback}"</p>
+                                : <p className="text-muted-foreground italic">Giáo viên chưa để lại nhận xét.</p>
+                              }
                               {sub.score != null && (
                                 <p className="mt-1.5 font-bold text-emerald-700 dark:text-emerald-400">
                                   Điểm: {sub.score}/10
                                 </p>
+                              )}
+                              {(sub as SubmissionRecord & { teacher_file_name?: string; teacher_file_url?: string }).teacher_file_name && (
+                                <div className="mt-2 flex items-center gap-2 px-2.5 py-1.5 bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-100 dark:border-indigo-800 rounded-lg text-xs">
+                                  <Download className="h-3.5 w-3.5 text-indigo-500 shrink-0" />
+                                  <span className="flex-1 truncate text-indigo-700 dark:text-indigo-300 font-medium">
+                                    {(sub as SubmissionRecord & { teacher_file_name?: string }).teacher_file_name}
+                                  </span>
+                                  {(sub as SubmissionRecord & { teacher_file_url?: string }).teacher_file_url && (
+                                    <a
+                                      href={(sub as SubmissionRecord & { teacher_file_url?: string }).teacher_file_url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="font-semibold text-indigo-600 hover:underline"
+                                    >
+                                      Tải xuống
+                                    </a>
+                                  )}
+                                </div>
                               )}
                             </div>
                           )}
@@ -304,9 +328,18 @@ export default function StudentHomeworkPage() {
                               >
                                 <Upload className="h-3.5 w-3.5 mr-1.5" /> Nộp bài
                               </Button>
-                            ) : (
+                            ) : sub.status === "graded" ? (
                               <Button variant="outline" size="sm" className="font-semibold" disabled>
-                                <CheckCircle2 className="h-3.5 w-3.5 mr-1.5 text-emerald-500" /> Đã nộp
+                                <CheckCircle2 className="h-3.5 w-3.5 mr-1.5 text-emerald-500" /> Đã chấm
+                              </Button>
+                            ) : (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="font-semibold text-primary border-primary/40 hover:bg-primary/5"
+                                onClick={() => openModal(hw, "submit")}
+                              >
+                                <Upload className="h-3.5 w-3.5 mr-1.5" /> Nộp lại
                               </Button>
                             )}
                             <Button

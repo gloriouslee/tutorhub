@@ -8,7 +8,7 @@ import {
   BookOpen, Calendar, ClipboardList, GraduationCap,
   LayoutDashboard, Bell, User, LogOut, ChevronLeft,
   Users, DollarSign, Settings, BarChart3, FileText,
-  CheckSquare, BookMarked, MessageSquare, Home, X,
+  CheckSquare, BookMarked, MessageSquare, Home, X, Shield,
 } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { UserRole } from "@/types";
@@ -58,12 +58,13 @@ const navConfig: Record<UserRole, NavItem[]> = {
     { label: "Học viên",   href: "/admin/students",         icon: GraduationCap },
     { label: "Giáo viên",  href: "/admin/teachers",         icon: Users },
     { label: "Lớp học",    href: "/admin/classes",          icon: BookOpen },
-    { label: "Tài liệu",   href: "/admin/materials",        icon: BookMarked },
+
     { label: "Đăng ký HV", href: "/admin/enrollments",      icon: GraduationCap },
     { label: "Giao dịch",  href: "/admin/transactions",     icon: CheckSquare },
     { label: "Thanh toán", href: "/admin/payments",         icon: DollarSign },
     { label: "Báo cáo",    href: "/admin/reports",          icon: BarChart3 },
     { label: "Thông báo",  href: "/admin/notifications",    icon: Bell },
+    { label: "Tài khoản",  href: "/admin/users",            icon: Shield },
     { label: "Cài đặt",    href: "/admin/settings",         icon: Settings },
   ],
 };
@@ -164,8 +165,17 @@ export default function Sidebar({ role, userName, isOpen = true, onClose }: Side
     setBadges(computeBadges(role));
   }, [role, pathname]);
 
-  const handleLogout = () => {
-    document.cookie = "demo_role=; path=/; max-age=0";
+  const handleLogout = async () => {
+    // Clear all session cookies
+    const cookiesToClear = ["demo_role", "enrolled_student_id", "enrolled_student_name", "enrolled_student_class"];
+    cookiesToClear.forEach(name => {
+      document.cookie = `${name}=; path=/; max-age=0`;
+    });
+    // Also sign out of Supabase if there's a real session
+    try {
+      const { createClient } = await import("@/lib/supabase/client");
+      await createClient().auth.signOut();
+    } catch {}
     router.push("/login");
   };
 

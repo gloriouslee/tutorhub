@@ -13,7 +13,7 @@ import {
   MOCK_LECTURES, MOCK_CLASS_NOTES, MOCK_EXAM_SCORES, MOCK_HOMEWORK, MOCK_ATTENDANCE,
 } from "@/lib/mock-data";
 import { getSubmissionsByStudent, type SubmissionRecord } from "@/lib/supabase/submissions";
-import { getOnlineLink, getStudentPackages, getCurriculum, type StudentPackage, type CurriculumSession } from "@/lib/storage";
+import { getOnlineLink, getStudentPackages, getCurriculum, getClassMaterials, incrementMaterialDownload, type StudentPackage, type CurriculumSession, type StoredClassMaterial } from "@/lib/storage";
 import CurriculumView from "@/components/student/CurriculumView";
 import {
   BookOpen, Clock, Video, MapPin, Users, ArrowLeft, FileText, Download,
@@ -23,9 +23,7 @@ import {
   ClipboardList, ChevronDown, Send, XCircle, CheckSquare,
 } from "lucide-react";
 import { formatDate } from "@/lib/utils";
-
-// ── Constants ─────────────────────────────────────────────────────────────────
-const CURRENT_STUDENT_ID = "s1";
+import { useStudentContext } from "@/hooks/useStudentContext";
 
 type AttendanceStatus = "present" | "absent" | "late" | "excused";
 
@@ -135,13 +133,11 @@ function StudentCurriculumSessionPreview({ session }: { session: CurriculumSessi
 }
 
 // ── localStorage: per-student watched lectures ────────────────────────────────
-const watchedKey = `tutorhub_watched_${CURRENT_STUDENT_ID}`;
-
-function loadWatched(): Set<string> {
-  try { return new Set(JSON.parse(localStorage.getItem(watchedKey) ?? "[]")); } catch { return new Set(); }
+function loadWatched(studentId: string): Set<string> {
+  try { return new Set(JSON.parse(localStorage.getItem(`tutorhub_watched_${studentId}`) ?? "[]")); } catch { return new Set(); }
 }
-function saveWatched(s: Set<string>) {
-  localStorage.setItem(watchedKey, JSON.stringify([...s]));
+function saveWatched(studentId: string, s: Set<string>) {
+  localStorage.setItem(`tutorhub_watched_${studentId}`, JSON.stringify([...s]));
 }
 
 // ── localStorage: submissions fallback ───────────────────────────────────────
@@ -151,6 +147,8 @@ function loadLocalSubs(): SubmissionRecord[] {
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function StudentClassDetailPage() {
+  const { studentId, studentName } = useStudentContext();
+  const CURRENT_STUDENT_ID = studentId;
   const params  = useParams();
   const classId = params.classId as string;
 
@@ -164,7 +162,7 @@ export default function StudentClassDetailPage() {
   const [sessionNotes, setSessionNotes] = useState<Record<string, string>>({});
 
   useEffect(() => {
-    setWatched(loadWatched());
+    setWatched(loadWatched(studentId));
     setOnlineLink(getOnlineLink(classId) ?? "");
     // Load submissions for homework status
     getSubmissionsByStudent(CURRENT_STUDENT_ID).then(remote => {
@@ -192,7 +190,7 @@ export default function StudentClassDetailPage() {
   // ── Not found ─────────────────────────────────────────────────────────────
   if (!cls) {
     return (
-      <PortalLayout role="student" userName="Nguyễn Anh Tuấn" pageTitle="Lớp học">
+      <PortalLayout role="student" userName={studentName} pageTitle="Lớp học">
         <div className="flex flex-col items-center justify-center py-20">
           <BookOpen className="h-16 w-16 text-muted-foreground/30 mb-4" />
           <h2 className="text-lg font-semibold">Không tìm thấy lớp học</h2>
@@ -205,7 +203,7 @@ export default function StudentClassDetailPage() {
   // ── Enrollment check ──────────────────────────────────────────────────────
   if (!(cls.student_ids ?? []).includes(CURRENT_STUDENT_ID)) {
     return (
-      <PortalLayout role="student" userName="Nguyễn Anh Tuấn" pageTitle="Lớp học">
+      <PortalLayout role="student" userName={studentName} pageTitle="Lớp học">
         <div className="flex flex-col items-center justify-center py-20 text-center">
           <ShieldAlert className="h-16 w-16 text-muted-foreground/30 mb-4" />
           <h2 className="text-lg font-semibold">Bạn không có quyền truy cập lớp này</h2>
@@ -218,7 +216,21 @@ export default function StudentClassDetailPage() {
 
   // ── Data ──────────────────────────────────────────────────────────────────
   const teacher           = MOCK_TEACHERS.find(t => t.id === cls.tutor_id);
-  const materials         = MOCK_CLASS_MATERIALS.filter(m => m.class_id === classId);
+  const [uploadedMaterials, setUploadedMaterials] = useState<StoredClassMaterial[]>([]);
+  const studentPkg: StudentPackage | undefined = useMemo(
+    () => getStudentPackages(classId)[studentId],
+    [classId, studentId],
+  );
+  useEffect(() => { setUploadedMaterials(getClassMaterials(classId)); }, [classId]);
+
+  const materials = useMemo(() => {
+    const mockMats = MOCK_CLASS_MATERIALS.filter(m => m.class_id === classId);
+    const realMats = uploadedMaterials.filter(m => {
+      if (!m.packages || m.packages.length === 0) return true;
+      return studentPkg ? m.packages.includes(studentPkg) : false;
+    });
+    return [...mockMats, ...realMats];
+  }, [classId, uploadedMaterials, studentPkg]);
   const lectures          = MOCK_LECTURES.filter(l => l.class_id === classId);
   const notes             = MOCK_CLASS_NOTES.filter(n => n.class_id === classId);
   const classHomework     = MOCK_HOMEWORK.filter(h => h.class_id === classId);
@@ -244,7 +256,7 @@ export default function StudentClassDetailPage() {
     const next = new Set(watched);
     next.add(lecId);
     setWatched(next);
-    saveWatched(next);
+    saveWatched(studentId, next);
     if (videoUrl) window.open(videoUrl, "_blank", "noopener,noreferrer");
   }
 
@@ -275,7 +287,7 @@ export default function StudentClassDetailPage() {
   ];
 
   return (
-    <PortalLayout role="student" userName="Nguyễn Anh Tuấn" pageTitle={cls.class_name}>
+    <PortalLayout role="student" userName={studentName} pageTitle={cls.class_name}>
       <div className="space-y-6 max-w-6xl mx-auto">
 
         <Link href="/student/classes" className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-primary transition-colors">
@@ -731,12 +743,11 @@ export default function StudentClassDetailPage() {
             <CurriculumView
               classId={classId}
               watched={watched}
-              onWatch={(id, url) => {
+              onWatch={(id) => {
                 const next = new Set(watched);
                 next.add(id);
                 setWatched(next);
-                saveWatched(next);
-                if (url) window.open(url, "_blank", "noopener,noreferrer");
+                saveWatched(studentId, next);
               }}
               submissions={submissions.map(s => ({ homework_id: s.homework_id }))}
             />
@@ -853,6 +864,19 @@ export default function StudentClassDetailPage() {
                             <span className={`text-[10px] font-semibold px-2 py-1 rounded-full ${cat.color}`}>{cat.label}</span>
                           </div>
                           <h3 className="font-semibold text-sm text-foreground line-clamp-2 mb-1.5 group-hover:text-primary transition-colors">{mat.title}</h3>
+                          {"packages" in mat && mat.packages && mat.packages.length > 0 && (
+                            <div className="flex gap-1 flex-wrap mb-1.5">
+                              {(mat.packages as StudentPackage[]).map((pkg) => (
+                                <span key={pkg} className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${
+                                  pkg === "online" ? "bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-400"
+                                  : pkg === "advanced" ? "bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400"
+                                  : "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400"
+                                }`}>
+                                  {pkg === "online" ? "Online" : pkg === "advanced" ? "Nâng cao" : "Offline"}
+                                </span>
+                              ))}
+                            </div>
+                          )}
                           <p className="text-xs text-muted-foreground line-clamp-2 mb-3">{mat.description}</p>
                           <div className="flex items-center gap-2 text-[11px] text-muted-foreground mt-auto mb-3 flex-wrap">
                             <span>{mat.file_size}</span>
@@ -876,6 +900,7 @@ export default function StudentClassDetailPage() {
                               className="flex-1 text-xs h-8"
                               onClick={() => {
                                 if (!mat.file_url) return;
+                                if (mat.id.startsWith("mat_")) incrementMaterialDownload(mat.id);
                                 const a = document.createElement("a");
                                 a.href = mat.file_url;
                                 a.download = mat.title;

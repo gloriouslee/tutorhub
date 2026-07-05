@@ -17,9 +17,7 @@ import {
   Info, TrendingDown, Wallet,
 } from "lucide-react";
 import { formatDate } from "@/lib/utils";
-
-// ── Constants ─────────────────────────────────────────────────────────────────
-const STUDENT = { id: "s1", name: "Nguyễn Anh Tuấn", email: "tuan.nva@gmail.com" };
+import { useStudentContext } from "@/hooks/useStudentContext";
 
 const PACKAGES: Record<string, { id: string; title: string; price: number }> = {
   pp1: { id: "pp1", title: "Toán 12 — Siêu Ôn Luyện THPT Quốc Gia",    price: 299000 },
@@ -54,6 +52,8 @@ type ModalTarget =
 
 // ── Inner component ───────────────────────────────────────────────────────────
 function PaymentsContent() {
+  const { studentId, studentName } = useStudentContext();
+  const STUDENT = { id: studentId, name: studentName, email: "" };
   const params   = useSearchParams();
   const pkgParam = params.get("pkg");
 
@@ -483,8 +483,9 @@ function PaymentsContent() {
 }
 
 export default function StudentPaymentsPage() {
+  const { studentName } = useStudentContext();
   return (
-    <PortalLayout role="student" userName="Nguyễn Anh Tuấn" pageTitle="Thanh toán">
+    <PortalLayout role="student" userName={studentName} pageTitle="Thanh toán">
       <Suspense fallback={<div className="py-20 text-center text-sm text-muted-foreground">Đang tải...</div>}>
         <PaymentsContent />
       </Suspense>

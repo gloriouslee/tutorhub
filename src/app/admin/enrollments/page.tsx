@@ -14,7 +14,7 @@ import {
 import { MOCK_CLASSES } from "@/lib/mock-data";
 import {
   CheckCircle2, XCircle, Clock, User, Mail, Phone, BookOpen,
-  Calendar, GraduationCap, Search, RefreshCw, Eye, X,
+  Calendar, GraduationCap, Search, RefreshCw, Eye, EyeOff, X,
   AlertCircle, Key, ArrowRight, FileText,
 } from "lucide-react";
 
@@ -54,17 +54,23 @@ function ApproveModal({ enrollment, onClose, onDone }: ApproveModalProps) {
   const [showPassword, setShowPassword]       = useState(false);
   const [submitting, setSubmitting]           = useState(false);
 
+  const [approveError, setApproveError] = useState("");
+
   const handleApprove = async () => {
     if (!assignedClassId || !username.trim() || !password.trim()) return;
     setSubmitting(true);
-    await new Promise(r => setTimeout(r, 500));
-    approveEnrollment(enrollment.id, {
-      assigned_class_id: assignedClassId,
-      account_username:  username.trim(),
-      account_password:  password.trim(),
-    });
-    setSubmitting(false);
-    onDone();
+    setApproveError("");
+    try {
+      await approveEnrollment(enrollment.id, {
+        assigned_class_id: assignedClassId,
+        account_username:  username.trim(),
+        account_password:  password.trim(),
+      });
+      onDone();
+    } catch (err: unknown) {
+      setApproveError(err instanceof Error ? err.message : "Lỗi khi duyệt đơn");
+      setSubmitting(false);
+    }
   };
 
   const requestedClass = MOCK_CLASSES.find(c => c.id === enrollment.requested_class_id);
@@ -171,6 +177,11 @@ function ApproveModal({ enrollment, onClose, onDone }: ApproveModalProps) {
         </div>
 
         {/* Footer */}
+        {approveError && (
+          <div className="mx-5 mb-1 text-sm text-red-600 bg-red-50 dark:bg-red-900/20 px-3 py-2 rounded-lg border border-red-200 dark:border-red-800">
+            {approveError}
+          </div>
+        )}
         <div className="p-4 border-t border-border/50 flex gap-3 shrink-0">
           <Button variant="outline" className="flex-1" onClick={onClose}>Hủy</Button>
           <Button
@@ -200,10 +211,12 @@ function RejectModal({ enrollment, onClose, onDone }: ApproveModalProps) {
 
   const handleReject = async () => {
     setSubmitting(true);
-    await new Promise(r => setTimeout(r, 400));
-    rejectEnrollment(enrollment.id, reason.trim() || undefined);
-    setSubmitting(false);
-    onDone();
+    try {
+      await rejectEnrollment(enrollment.id, reason.trim() || undefined);
+      onDone();
+    } catch {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -259,8 +272,15 @@ export default function AdminEnrollmentsPage() {
   const [search, setSearch]           = useState("");
   const [approveTarget, setApproveTarget] = useState<EnrollmentRequest | null>(null);
   const [rejectTarget,  setRejectTarget]  = useState<EnrollmentRequest | null>(null);
+  const [shownPassIds,  setShownPassIds]  = useState<Set<string>>(new Set());
 
-  const reload = () => setEnrollments(getEnrollments());
+  const togglePass = (id: string) => setShownPassIds(prev => {
+    const next = new Set(prev);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
+  });
+
+  const reload = () => { getEnrollments().then(setEnrollments); };
   useEffect(() => { reload(); }, []);
 
   const filtered = enrollments
@@ -417,10 +437,36 @@ export default function AdminEnrollmentsPage() {
 
                         {/* Account info if approved */}
                         {enr.status === "approved" && enr.account_username && (
-                          <div className="flex items-center gap-2 text-xs text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/10 px-3 py-1.5 rounded-lg border border-emerald-200 dark:border-emerald-800/50">
-                            <Key className="h-3.5 w-3.5 shrink-0" />
-                            Tài khoản: <strong>{enr.account_username}</strong>
-                            <span className="ml-1 text-muted-foreground">· Duyệt: {enr.reviewed_at ? fmtDate(enr.reviewed_at) : ""}</span>
+                          <div className="text-xs bg-emerald-50 dark:bg-emerald-900/10 px-3 py-2 rounded-lg border border-emerald-200 dark:border-emerald-800/50 space-y-1">
+                            <div className="flex items-center gap-1.5 text-emerald-700 dark:text-emerald-400 font-semibold">
+                              <Key className="h-3.5 w-3.5 shrink-0" /> Thông tin tài khoản
+                              <span className="ml-auto text-muted-foreground font-normal">Duyệt: {enr.reviewed_at ? fmtDate(enr.reviewed_at) : ""}</span>
+                            </div>
+                            <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-foreground">
+                              <div>
+                                <span className="text-muted-foreground">Tên đăng nhập: </span>
+                                <strong>{enr.account_username}</strong>
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-muted-foreground">Mật khẩu: </span>
+                                <strong className="font-mono">
+                                  {shownPassIds.has(enr.id) ? enr.account_password : "••••••••"}
+                                </strong>
+                                <button
+                                  type="button"
+                                  onClick={() => togglePass(enr.id)}
+                                  className="text-muted-foreground hover:text-foreground ml-1"
+                                >
+                                  {shownPassIds.has(enr.id) ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                                </button>
+                              </div>
+                            </div>
+                            {enr.assigned_class_id && (
+                              <div>
+                                <span className="text-muted-foreground">Lớp được phân: </span>
+                                <strong>{MOCK_CLASSES.find(c => c.id === enr.assigned_class_id)?.class_name ?? enr.assigned_class_id}</strong>
+                              </div>
+                            )}
                           </div>
                         )}
 

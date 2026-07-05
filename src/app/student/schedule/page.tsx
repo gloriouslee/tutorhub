@@ -6,17 +6,12 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { SectionHeader } from "@/components/shared";
 import { MOCK_CLASSES, MOCK_TEACHERS } from "@/lib/mock-data";
+import { useStudentContext } from "@/hooks/useStudentContext";
 import {
   Clock, MapPin, Video, ChevronLeft, ChevronRight,
   CalendarDays, CalendarRange, User,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Current student — in a real app this comes from auth session
-// ─────────────────────────────────────────────────────────────────────────────
-
-const CURRENT_STUDENT_ID = "s1";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -52,10 +47,6 @@ function formatDate(d: Date) {
 
 const TEACHER_BY_ID = Object.fromEntries(MOCK_TEACHERS.map(t => [t.id, t]));
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Build session map keyed by day-of-week — only for enrolled classes
-// ─────────────────────────────────────────────────────────────────────────────
-
 interface Session {
   classId:   string;
   className: string;
@@ -68,43 +59,30 @@ interface Session {
   teacher:   string;
 }
 
-const SESSION_BY_DOW: Record<number, Session[]> = { 0: [], 1: [], 2: [], 3: [], 4: [], 5: [], 6: [] };
-
-MOCK_CLASSES
-  .filter(cls => (cls.student_ids ?? []).includes(CURRENT_STUDENT_ID))
-  .forEach(cls => {
-    const teacher = TEACHER_BY_ID[cls.tutor_id]?.full_name ?? "GV chưa xác định";
-    cls.schedule.forEach(slot => {
-      const dow = DAY_EN_TO_DOW[slot.day];
-      if (dow === undefined) return;
-      SESSION_BY_DOW[dow].push({
-        classId:   cls.id,
-        className: cls.class_name,
-        subject:   cls.subject,
-        start:     slot.start_time,
-        end:       slot.end_time,
-        color:     cls.color,
-        // online nếu learning_mode là "online"; hybrid/offline dùng phòng học
-        isOnline:  cls.learning_mode === "online",
-        classroom: cls.classroom,
-        teacher,
-      });
-    });
-  });
-
-Object.values(SESSION_BY_DOW).forEach(arr =>
-  arr.sort((a, b) => a.start.localeCompare(b.start))
-);
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Component
-// ─────────────────────────────────────────────────────────────────────────────
-
 type Range = "2w" | "1m";
 
 export default function StudentSchedulePage() {
+  const { studentName, myClasses } = useStudentContext();
   const [range, setRange]   = useState<Range>("2w");
   const [offset, setOffset] = useState(0);
+
+  const SESSION_BY_DOW = useMemo(() => {
+    const map: Record<number, Session[]> = { 0: [], 1: [], 2: [], 3: [], 4: [], 5: [], 6: [] };
+    myClasses.forEach(cls => {
+      const teacher = TEACHER_BY_ID[cls.tutor_id]?.full_name ?? "GV chưa xác định";
+      cls.schedule.forEach(slot => {
+        const dow = DAY_EN_TO_DOW[slot.day];
+        if (dow === undefined) return;
+        map[dow].push({
+          classId: cls.id, className: cls.class_name, subject: cls.subject,
+          start: slot.start_time, end: slot.end_time, color: cls.color,
+          isOnline: cls.learning_mode === "online", classroom: cls.classroom, teacher,
+        });
+      });
+    });
+    Object.values(map).forEach(arr => arr.sort((a, b) => a.start.localeCompare(b.start)));
+    return map;
+  }, [myClasses]);
 
   const today = useMemo(() => {
     const d = new Date();
@@ -163,7 +141,7 @@ export default function StudentSchedulePage() {
   const totalSessions = visibleDays.reduce((s, d) => s + d.sessions.length, 0);
 
   return (
-    <PortalLayout role="student" userName="Nguyễn Anh Tuấn" pageTitle="Lịch học">
+    <PortalLayout role="student" userName={studentName} pageTitle="Lịch học">
       <div className="space-y-5 max-w-3xl mx-auto">
 
         <SectionHeader

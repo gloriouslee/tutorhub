@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { getGrantedPackages, getStudentPackages } from "@/lib/storage";
+import { getGrantedPackages, getStudentPackages, getCourseRating, submitCourseReview, getCourseReviews, type CourseReview } from "@/lib/storage";
+import { useStudentContext } from "@/hooks/useStudentContext";
 import type { StudentPackage } from "@/lib/storage";
 import {
   PlayCircle, FileText, Pencil, Download, CheckCircle2,
@@ -245,19 +246,41 @@ const PAID_PACKAGES: PaidPackage[] = [
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-const CURRENT_STUDENT_ID = "s1";
 
-interface TeacherCourse { id: string; classId?: string; packages: StudentPackage[] }
+interface TeacherCourse {
+  id: string; classId?: string; packages: StudentPackage[];
+  type?: string; title?: string; subject?: string; grade?: number;
+  price?: number; originalPrice?: number; tier?: string;
+  description?: string; includes?: string[]; rating?: number; reviewCount?: number;
+  chapters?: PaidChapter[]; published?: boolean;
+}
+
 function loadTeacherCourses(): TeacherCourse[] {
   try {
     const raw = typeof window !== "undefined" ? localStorage.getItem("tutorhub_teacher_materials") : null;
     if (raw) return JSON.parse(raw) as TeacherCourse[];
   } catch {}
-  // Default: tc1 belongs to c1, packages open to all
   return [
     { id: "tc1", classId: "c1", packages: ["online", "advanced", "offline"] },
     { id: "tc2", packages: ["advanced", "offline"] },
   ];
+}
+
+function teacherCourseToPaidPackage(tc: TeacherCourse): PaidPackage {
+  return {
+    id: tc.id,
+    title: tc.title ?? "Gói tài liệu",
+    subject: tc.subject ?? "Chung",
+    grade: tc.grade ?? 12,
+    price: tc.price ?? 0,
+    originalPrice: tc.originalPrice,
+    tier: (tc.tier as PaidPackage["tier"]) ?? "basic",
+    description: tc.description ?? "",
+    includes: tc.includes ?? [],
+    rating: tc.rating ?? 0,
+    reviewCount: tc.reviewCount ?? 0,
+    chapters: tc.chapters ?? [],
+  };
 }
 
 const PKG_META: Record<StudentPackage, { label: string; icon: React.ElementType; color: string }> = {
@@ -525,9 +548,91 @@ function PackageModal({
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Browse view
+// ── Review modal ──────────────────────────────────────────────────────────────
+
+function ReviewModal({
+  courseId, courseName, studentId, studentName, existingReview, onSave, onClose,
+}: {
+  courseId: string; courseName: string;
+  studentId: string; studentName: string;
+  existingReview?: CourseReview;
+  onSave: () => void; onClose: () => void;
+}) {
+  const [rating, setRating]   = useState(existingReview?.rating ?? 0);
+  const [hovered, setHovered] = useState(0);
+  const [comment, setComment] = useState(existingReview?.comment ?? "");
+
+  function handleSubmit() {
+    if (!rating) return;
+    submitCourseReview({
+      course_id: courseId, student_id: studentId, student_name: studentName,
+      rating, comment: comment.trim() || undefined,
+      created_at: new Date().toISOString(),
+    });
+    onSave();
+    onClose();
+  }
+
+  const display = hovered || rating;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={onClose}>
+      <div className="bg-card border border-border rounded-2xl shadow-xl w-full max-w-sm" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+          <div>
+            <p className="font-semibold text-foreground text-sm">Đánh giá khóa học</p>
+            <p className="text-xs text-muted-foreground line-clamp-1">{courseName}</p>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="p-5 space-y-4">
+          {/* Star picker */}
+          <div className="flex flex-col items-center gap-2">
+            <div className="flex gap-1">
+              {[1,2,3,4,5].map(s => (
+                <button
+                  key={s}
+                  onMouseEnter={() => setHovered(s)}
+                  onMouseLeave={() => setHovered(0)}
+                  onClick={() => setRating(s)}
+                  className="p-1 transition-transform hover:scale-110"
+                >
+                  <Star className={`h-8 w-8 transition-colors ${s <= display ? "fill-amber-400 text-amber-400" : "text-border"}`} />
+                </button>
+              ))}
+            </div>
+            <p className="text-sm text-muted-foreground">
+              {display === 0 ? "Chọn số sao" : display === 1 ? "Rất tệ" : display === 2 ? "Tệ" : display === 3 ? "Bình thường" : display === 4 ? "Tốt" : "Xuất sắc"}
+            </p>
+          </div>
+          {/* Comment */}
+          <div>
+            <label className="text-xs font-medium text-muted-foreground block mb-1.5">Nhận xét (tuỳ chọn)</label>
+            <textarea
+              value={comment}
+              onChange={e => setComment(e.target.value)}
+              rows={3}
+              placeholder="Chia sẻ cảm nhận của bạn về khóa học..."
+              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm resize-none outline-none focus:ring-2 focus:ring-primary/40 text-foreground"
+            />
+          </div>
+        </div>
+        <div className="flex gap-2 px-5 pb-5">
+          <Button variant="outline" className="flex-1" onClick={onClose}>Huỷ</Button>
+          <Button variant="gradient" className="flex-1" disabled={!rating} onClick={handleSubmit}>
+            <Star className="h-3.5 w-3.5 mr-1.5 fill-current" />
+            {existingReview ? "Cập nhật" : "Gửi đánh giá"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 function BrowseView({ onSelectCourse }: { onSelectCourse: (c: OwnedCourse, isLocked: boolean) => void }) {
+  const { studentId: CURRENT_STUDENT_ID, studentName: CURRENT_STUDENT_NAME, myClasses, assignedClassId } = useStudentContext();
   const router = useRouter();
   const [search, setSearch] = useState("");
   const [selectedPkg, setSelectedPkg] = useState<PaidPackage | null>(null);
@@ -535,26 +640,57 @@ function BrowseView({ onSelectCourse }: { onSelectCourse: (c: OwnedCourse, isLoc
   const [grantedPkgIds, setGrantedPkgIds] = useState<string[]>([]);
   const [studentPkgs, setStudentPkgs] = useState<Record<string, StudentPackage | null>>({});
   const [teacherCourses, setTeacherCourses] = useState<TeacherCourse[]>([]);
+  const [ratings, setRatings] = useState<Record<string, { rating: number; reviewCount: number }>>({});
+  const [reviewModal, setReviewModal] = useState<{ courseId: string; courseName: string } | null>(null);
+
+  // Filter courses to only those matching the student's enrolled classes
+  const myClassIds = myClasses.map(c => c.id);
+  const isEnrolled = CURRENT_STUDENT_ID.startsWith("enr_");
+  const myCourses = isEnrolled
+    ? OWNED_COURSES.filter(oc => oc.classId && myClassIds.includes(oc.classId))
+    : OWNED_COURSES;
+
+  const reloadRatings = (pkgIds: string[]) => {
+    const map: Record<string, { rating: number; reviewCount: number }> = {};
+    pkgIds.forEach(id => { map[id] = getCourseRating(id); });
+    setRatings(map);
+  };
 
   useEffect(() => {
-    setGrantedPkgIds(getGrantedPackages());
+    const granted = getGrantedPackages();
+    setGrantedPkgIds(granted);
     const tc = loadTeacherCourses();
     setTeacherCourses(tc);
-    // Load student package for each owned course's class
     const map: Record<string, StudentPackage | null> = {};
     OWNED_COURSES.forEach(oc => {
       const pkgs = getStudentPackages(oc.classId);
-      map[oc.id] = pkgs[CURRENT_STUDENT_ID] ?? null;
+      const pkg = pkgs[CURRENT_STUDENT_ID] ?? (isEnrolled && oc.classId === assignedClassId ? "online" : null);
+      map[oc.id] = pkg;
     });
     setStudentPkgs(map);
-  }, []);
+    // Load computed ratings for all paid packages (mock + teacher)
+    const allIds = [...PAID_PACKAGES.map(p => p.id), ...tc.filter(t => t.type === "paid_package").map(t => t.id)];
+    reloadRatings(allIds);
+  }, [CURRENT_STUDENT_ID, assignedClassId]);
+
+  // Teacher-created paid packages from localStorage (published only)
+  const teacherPaidPackages = teacherCourses
+    .filter(tc => tc.type === "paid_package" && tc.published && tc.title)
+    .map(teacherCourseToPaidPackage);
+
+  // Merge: teacher packages override PAID_PACKAGES with same id, then append rest
+  const teacherIds = new Set(teacherPaidPackages.map(p => p.id));
+  const allPaidPackages = [
+    ...teacherPaidPackages,
+    ...PAID_PACKAGES.filter(p => !teacherIds.has(p.id)),
+  ];
 
   const filteredPkg = search.trim()
-    ? PAID_PACKAGES.filter(p =>
+    ? allPaidPackages.filter(p =>
         p.title.toLowerCase().includes(search.toLowerCase()) ||
         p.subject.toLowerCase().includes(search.toLowerCase())
       )
-    : PAID_PACKAGES;
+    : allPaidPackages;
 
   return (
     <div className="space-y-10">
@@ -566,7 +702,11 @@ function BrowseView({ onSelectCourse }: { onSelectCourse: (c: OwnedCourse, isLoc
           <p className="text-sm text-muted-foreground mt-0.5">Tài liệu từ các lớp học bạn đang theo học</p>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {OWNED_COURSES.map(course => {
+          {myCourses.length === 0 ? (
+            <div className="col-span-full py-10 text-center text-sm text-muted-foreground border-2 border-dashed border-border/50 rounded-2xl">
+              Chưa có tài liệu nào. Tài liệu sẽ hiển thị sau khi bạn được phân lớp học.
+            </div>
+          ) : myCourses.map(course => {
             const allLessons = course.chapters.flatMap(ch => ch.lessons);
             const done = allLessons.filter(l => l.status === "done").length;
             const pct = Math.round((done / allLessons.length) * 100);
@@ -697,17 +837,36 @@ function BrowseView({ onSelectCourse }: { onSelectCourse: (c: OwnedCourse, isLoc
                     )}
                   </div>
 
-                  <div className="flex items-center gap-1.5 mb-4">
-                    <Star className="h-3.5 w-3.5 text-amber-400 fill-amber-400" />
-                    <span className="text-xs font-semibold">{pkg.rating}</span>
-                    <span className="text-xs text-muted-foreground">({pkg.reviewCount})</span>
-                  </div>
+                  {(() => {
+                    const computed = ratings[pkg.id];
+                    const r = computed?.reviewCount ? computed.rating : pkg.rating;
+                    const n = computed?.reviewCount ?? pkg.reviewCount;
+                    if (!r && !n) return null;
+                    return (
+                      <div className="flex items-center gap-1.5 mb-4">
+                        <Star className="h-3.5 w-3.5 text-amber-400 fill-amber-400" />
+                        <span className="text-xs font-semibold">{r > 0 ? r.toFixed(1) : "—"}</span>
+                        <span className="text-xs text-muted-foreground">({n} đánh giá)</span>
+                      </div>
+                    );
+                  })()}
 
                   <div className="border-t border-border pt-3 mt-auto space-y-2">
                     {grantedPkgIds.includes(pkg.id) ? (
-                      <div className="flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400 text-sm font-medium">
-                        <CheckCircle2 className="h-4 w-4" /> Đã sở hữu
-                      </div>
+                      <>
+                        <div className="flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400 text-sm font-medium">
+                          <CheckCircle2 className="h-4 w-4" /> Đã sở hữu
+                        </div>
+                        <button
+                          onClick={() => setReviewModal({ courseId: pkg.id, courseName: pkg.title })}
+                          className="w-full text-xs text-amber-600 dark:text-amber-400 hover:underline flex items-center justify-center gap-1 py-1"
+                        >
+                          <Star className="h-3 w-3 fill-amber-400 text-amber-400" />
+                          {getCourseReviews(pkg.id).find(r => r.student_id === CURRENT_STUDENT_ID)
+                            ? "Cập nhật đánh giá của bạn"
+                            : "Đánh giá khóa học"}
+                        </button>
+                      </>
                     ) : (
                       <>
                         <div className="flex items-center justify-between">
@@ -761,6 +920,20 @@ function BrowseView({ onSelectCourse }: { onSelectCourse: (c: OwnedCourse, isLoc
           packageTitle={previewLesson.pkg.title}
           onClose={() => setPreviewLesson(null)}
           onBuy={() => { setPreviewLesson(null); setSelectedPkg(previewLesson.pkg); }}
+        />
+      )}
+      {reviewModal && (
+        <ReviewModal
+          courseId={reviewModal.courseId}
+          courseName={reviewModal.courseName}
+          studentId={CURRENT_STUDENT_ID}
+          studentName={CURRENT_STUDENT_NAME}
+          existingReview={getCourseReviews(reviewModal.courseId).find(r => r.student_id === CURRENT_STUDENT_ID)}
+          onSave={() => {
+            const allIds = [...PAID_PACKAGES.map(p => p.id), ...teacherCourses.filter(t => t.type === "paid_package").map(t => t.id)];
+            reloadRatings(allIds);
+          }}
+          onClose={() => setReviewModal(null)}
         />
       )}
     </div>
@@ -1003,10 +1176,11 @@ function PlayerView({ course, isPackageLocked, onBack }: { course: OwnedCourse; 
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default function StudentMaterialsPage() {
+  const { studentName } = useStudentContext();
   const [selectedCourse, setSelectedCourse] = useState<OwnedCourse | null>(null);
   const [courseLocked, setCourseLocked] = useState(false);
   return (
-    <PortalLayout role="student" userName="" pageTitle="Tài liệu">
+    <PortalLayout role="student" userName={studentName} pageTitle="Tài liệu">
       <div className="max-w-7xl mx-auto">
         {selectedCourse
           ? <PlayerView course={selectedCourse} isPackageLocked={courseLocked} onBack={() => setSelectedCourse(null)} />
