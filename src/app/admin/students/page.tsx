@@ -6,7 +6,8 @@ import { Button } from "@/components/ui/button";
 import { LearningModeBadge, SectionHeader } from "@/components/shared";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { ProgressBar } from "@/components/shared";
-import { Search, Plus, Filter, X, Edit, Trash2 } from "lucide-react";
+import { Search, Plus, X, Edit, Trash2, ExternalLink } from "lucide-react";
+import Link from "next/link";
 import { Input } from "@/components/ui/input";
 import { useState, useEffect } from "react";
 import { getStudents, saveStudents, getPayments, getAttendance } from "@/lib/storage";
@@ -24,6 +25,7 @@ export default function AdminStudentsPage() {
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [formData, setFormData] = useState({
     full_name: "",
+    email: "",
     dob: "",
     grade: "Lớp 8",
     school: "",
@@ -46,13 +48,7 @@ export default function AdminStudentsPage() {
 
   const handleOpenAddModal = () => {
     setEditingStudent(null);
-    setFormData({
-      full_name: "",
-      dob: "",
-      grade: "Lớp 8",
-      school: "",
-      learning_type: "hybrid",
-    });
+    setFormData({ full_name: "", email: "", dob: "", grade: "Lớp 8", school: "", learning_type: "hybrid" });
     setIsModalOpen(true);
   };
 
@@ -60,6 +56,7 @@ export default function AdminStudentsPage() {
     setEditingStudent(student);
     setFormData({
       full_name: student.full_name,
+      email: (student as any).email ?? "",
       dob: student.dob,
       grade: student.grade,
       school: student.school,
@@ -94,12 +91,13 @@ export default function AdminStudentsPage() {
         id: newId,
         user_id: `u${students.length + 1}-${Math.floor(Math.random() * 1000)}`,
         full_name: formData.full_name,
+        email: formData.email,
         dob: formData.dob,
         grade: formData.grade,
         school: formData.school,
         learning_type: formData.learning_type,
         created_at: new Date().toISOString().split("T")[0],
-      };
+      } as any;
       const updated = [...students, newStudent];
       setStudents(updated);
       await saveStudents(updated);
@@ -131,15 +129,15 @@ export default function AdminStudentsPage() {
         />
 
         {/* Filters */}
-        <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex flex-col gap-3">
           <Input
             placeholder="Tìm học viên..."
             value={search}
             onChange={e => setSearch(e.target.value)}
             leftIcon={<Search className="h-4 w-4" />}
-            className="w-64 bg-card"
+            className="w-full sm:w-72 bg-card"
           />
-          <div className="flex items-center gap-2 ml-auto">
+          <div className="flex items-center gap-2 flex-wrap">
             {(["All", "Online", "Offline", "Hybrid"] as const).map(f => (
               <button
                 key={f}
@@ -163,7 +161,7 @@ export default function AdminStudentsPage() {
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-border bg-muted/20">
-                    {["Học viên", "Lớp & Trường", "Hình thức", "Chuyên cần", "Học phí", "Thao tác"].map(h => (
+                    {["Học viên", "Lớp & Trường", "Hình thức", "Chuyên cần", "Học phí", "Thao tác", ""].map(h => (
                       <th key={h} className="text-left p-4 text-xs font-semibold text-muted-foreground">{h}</th>
                     ))}
                   </tr>
@@ -177,10 +175,14 @@ export default function AdminStudentsPage() {
                     </tr>
                   ) : (
                     filtered.map((student, i) => {
-                      const payment = payments.find(p => p.student_id === student.id);
+                      // Ưu tiên payment pending/overdue, fallback về mới nhất
+                      const studentPayments = payments.filter(p => p.student_id === student.id);
+                      const payment = studentPayments.find(p => p.payment_status === "overdue")
+                        ?? studentPayments.find(p => p.payment_status === "pending")
+                        ?? studentPayments[studentPayments.length - 1];
                       const attRecords = attendance.filter(a => a.student_id === student.id);
                       const presentCount = attRecords.filter(a => a.status === "present").length;
-                      const attRate = attRecords.length > 0 ? Math.round((presentCount / attRecords.length) * 100) : 85;
+                      const attRate = attRecords.length > 0 ? Math.round((presentCount / attRecords.length) * 100) : null;
 
                       return (
                         <tr key={student.id} className="hover:bg-muted/30 transition-colors animate-fade-in" style={{ animationDelay: `${i * 30}ms` }}>
@@ -189,7 +191,7 @@ export default function AdminStudentsPage() {
                               <Avatar size="sm"><AvatarFallback name={student.full_name} /></Avatar>
                               <div>
                                 <p className="text-sm font-semibold text-foreground">{student.full_name}</p>
-                                <p className="text-[11px] text-muted-foreground">ID: {student.id}</p>
+                                <p className="text-[11px] text-muted-foreground">{(student as any).email || `ID: ${student.id}`}</p>
                               </div>
                             </div>
                           </td>
@@ -199,7 +201,9 @@ export default function AdminStudentsPage() {
                           </td>
                           <td className="p-4"><LearningModeBadge mode={student.learning_type} /></td>
                           <td className="p-4 w-32">
-                            <ProgressBar value={attRate} size="sm" />
+                            {attRate !== null
+                              ? <ProgressBar value={attRate} size="sm" />
+                              : <span className="text-xs text-muted-foreground">—</span>}
                           </td>
                           <td className="p-4">
                             {payment ? (
@@ -221,6 +225,14 @@ export default function AdminStudentsPage() {
                                 <Trash2 className="h-3 w-3 mr-1" /> Xóa
                               </Button>
                             </div>
+                          </td>
+                          <td className="p-4">
+                            <Link
+                              href={`/admin/classes?student=${student.id}`}
+                              className="text-xs text-rose-500 hover:text-rose-600 font-semibold flex items-center gap-1 transition-colors whitespace-nowrap"
+                            >
+                              <ExternalLink className="h-3 w-3" /> Xem lớp
+                            </Link>
                           </td>
                         </tr>
                       );
@@ -251,6 +263,15 @@ export default function AdminStudentsPage() {
                   value={formData.full_name}
                   onChange={e => setFormData({ ...formData, full_name: e.target.value })}
                   placeholder="VD: Nguyễn Văn A"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-muted-foreground uppercase">Email liên hệ</label>
+                <Input
+                  type="email"
+                  value={formData.email}
+                  onChange={e => setFormData({ ...formData, email: e.target.value })}
+                  placeholder="VD: hocvien@gmail.com"
                 />
               </div>
               <div className="grid grid-cols-2 gap-4">

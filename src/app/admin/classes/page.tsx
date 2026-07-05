@@ -14,6 +14,7 @@ import { Class, Teacher, Student } from "@/types";
 function AdminClassesPageInner() {
   const searchParams = useSearchParams();
   const teacherParam = searchParams.get("teacher") ?? "";
+  const studentParam = searchParams.get("student") ?? "";
 
   const [classes, setClasses] = useState<Class[]>([]);
   const [teachers, setTeachers] = useState<Teacher[]>([]);
@@ -21,6 +22,7 @@ function AdminClassesPageInner() {
   const [search, setSearch] = useState("");
   const [filterMode, setFilterMode] = useState<"All" | "online" | "offline" | "hybrid">("All");
   const [filterTeacher, setFilterTeacher] = useState(teacherParam);
+  const [filterStudent, setFilterStudent] = useState(studentParam);
 
   // Modal states
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -166,7 +168,10 @@ function AdminClassesPageInner() {
     const matchesTeacher =
       !filterTeacher ||
       c.tutor_id === filterTeacher;
-    return matchesSearch && matchesMode && matchesTeacher;
+    const matchesStudent =
+      !filterStudent ||
+      ((c as any).student_ids ?? []).includes(filterStudent);
+    return matchesSearch && matchesMode && matchesTeacher && matchesStudent;
   });
 
   return (
@@ -208,17 +213,26 @@ function AdminClassesPageInner() {
           </div>
         </div>
 
-        {/* Teacher filter banner */}
+        {/* Active filter banners */}
         {filterTeacher && (() => {
           const t = teachers.find(tc => tc.id === filterTeacher);
           return t ? (
             <div className="flex items-center gap-2 text-sm bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800 rounded-xl px-4 py-2.5">
               <span className="text-rose-600 dark:text-rose-400 font-semibold">Lọc theo giáo viên:</span>
               <span className="text-foreground font-medium">{t.full_name}</span>
-              <button
-                onClick={() => setFilterTeacher("")}
-                className="ml-auto text-rose-400 hover:text-rose-600 transition-colors"
-              >
+              <button onClick={() => setFilterTeacher("")} className="ml-auto text-rose-400 hover:text-rose-600 transition-colors">
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          ) : null;
+        })()}
+        {filterStudent && (() => {
+          const s = students.find(st => st.id === filterStudent);
+          return s ? (
+            <div className="flex items-center gap-2 text-sm bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800 rounded-xl px-4 py-2.5">
+              <span className="text-rose-600 dark:text-rose-400 font-semibold">Lọc theo học viên:</span>
+              <span className="text-foreground font-medium">{s.full_name}</span>
+              <button onClick={() => setFilterStudent("")} className="ml-auto text-rose-400 hover:text-rose-600 transition-colors">
                 <X className="h-3.5 w-3.5" />
               </button>
             </div>
