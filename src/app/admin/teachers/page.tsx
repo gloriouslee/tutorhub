@@ -25,9 +25,14 @@ export default function AdminTeachersPage() {
   const [editingTeacher, setEditingTeacher] = useState<Teacher | null>(null);
   const [formData, setFormData] = useState({
     full_name: "",
+    email: "",
     specialization: "Toán học",
     bio: "",
   });
+  const [createAccount, setCreateAccount] = useState(true);
+  const [accountPassword, setAccountPassword] = useState("");
+  const [accountError, setAccountError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     async function loadData() {
@@ -45,9 +50,13 @@ export default function AdminTeachersPage() {
     setEditingTeacher(null);
     setFormData({
       full_name: "",
+      email: "",
       specialization: "Toán học",
       bio: "",
     });
+    setCreateAccount(true);
+    setAccountPassword("");
+    setAccountError("");
     setIsModalOpen(true);
   };
 
@@ -55,6 +64,7 @@ export default function AdminTeachersPage() {
     setEditingTeacher(teacher);
     setFormData({
       full_name: teacher.full_name,
+      email: (teacher as any).email ?? "",
       specialization: teacher.specialization,
       bio: teacher.bio || "",
     });
@@ -71,6 +81,7 @@ export default function AdminTeachersPage() {
 
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setAccountError("");
     if (editingTeacher) {
       // Edit
       const updated = teachers.map(t =>
@@ -80,21 +91,56 @@ export default function AdminTeachersPage() {
       );
       setTeachers(updated);
       await saveTeachers(updated);
-    } else {
-      // Add
-      const newId = `t${teachers.length + 1}-${Math.floor(Math.random() * 1000)}`;
-      const newTeacher: Teacher = {
-        id: newId,
-        user_id: `tu${teachers.length + 1}-${Math.floor(Math.random() * 1000)}`,
-        full_name: formData.full_name,
-        specialization: formData.specialization,
-        bio: formData.bio,
-        created_at: toLocalDateKey(new Date()),
-      };
-      const updated = [...teachers, newTeacher];
-      setTeachers(updated);
-      await saveTeachers(updated);
+      setIsModalOpen(false);
+      return;
     }
+
+    // Add — tạo tài khoản đăng nhập trước (nếu bật) để lấy user_id thật
+    const newId = `t${Date.now()}`;
+    let authUserId: string | null = null;
+    if (createAccount) {
+      if (!formData.email) { setAccountError("Cần email để tạo tài khoản đăng nhập."); return; }
+      if (accountPassword.length < 6) { setAccountError("Mật khẩu tối thiểu 6 ký tự."); return; }
+      setSubmitting(true);
+      try {
+        const res = await fetch("/api/admin/create-account", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            email: formData.email,
+            password: accountPassword,
+            full_name: formData.full_name,
+            role: "teacher",
+            record_id: newId,
+          }),
+        });
+        const body = await res.json();
+        if (!res.ok) {
+          setAccountError(body.error ?? "Không tạo được tài khoản.");
+          setSubmitting(false);
+          return;
+        }
+        authUserId = body.user_id;
+      } catch {
+        setAccountError("Không kết nối được máy chủ để tạo tài khoản.");
+        setSubmitting(false);
+        return;
+      }
+    }
+
+    const newTeacher: Teacher = {
+      id: newId,
+      user_id: authUserId,
+      full_name: formData.full_name,
+      email: formData.email,
+      specialization: formData.specialization,
+      bio: formData.bio,
+      created_at: toLocalDateKey(new Date()),
+    } as any;
+    const updated = [...teachers, newTeacher];
+    setTeachers(updated);
+    await saveTeachers(updated);
+    setSubmitting(false);
     setIsModalOpen(false);
   };
 
@@ -249,6 +295,15 @@ export default function AdminTeachersPage() {
                 />
               </div>
               <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-muted-foreground uppercase">Email liên hệ</label>
+                <Input
+                  type="email"
+                  value={formData.email}
+                  onChange={e => setFormData({ ...formData, email: e.target.value })}
+                  placeholder="VD: giaovien@tutorhub.vn"
+                />
+              </div>
+              <div className="space-y-1.5">
                 <label className="text-xs font-semibold text-muted-foreground uppercase">Chuyên môn *</label>
                 <Input
                   required
@@ -266,12 +321,42 @@ export default function AdminTeachersPage() {
                   placeholder="Kinh nghiệm giảng dạy, phong cách dạy..."
                 />
               </div>
+              {!editingTeacher && (
+                <div className="space-y-3 border-t border-border pt-4">
+                  <label className="flex items-center gap-2 text-sm font-medium text-foreground cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={createAccount}
+                      onChange={e => setCreateAccount(e.target.checked)}
+                      className="h-4 w-4 rounded border-input accent-primary"
+                    />
+                    Tạo tài khoản đăng nhập cho giáo viên
+                  </label>
+                  {createAccount && (
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-semibold text-muted-foreground uppercase">Mật khẩu ban đầu *</label>
+                      <Input
+                        type="text"
+                        value={accountPassword}
+                        onChange={e => setAccountPassword(e.target.value)}
+                        placeholder="Tối thiểu 6 ký tự"
+                      />
+                      <p className="text-[11px] text-muted-foreground">
+                        Đăng nhập bằng email liên hệ ở trên + mật khẩu này.
+                      </p>
+                    </div>
+                  )}
+                  {accountError && (
+                    <p className="text-xs text-red-500 font-medium">{accountError}</p>
+                  )}
+                </div>
+              )}
               <div className="flex justify-end gap-3 pt-4 border-t border-border mt-6">
                 <Button type="button" variant="outline" onClick={() => setIsModalOpen(false)}>
                   Hủy
                 </Button>
-                <Button type="submit" variant="gradient">
-                  {editingTeacher ? "Lưu thay đổi" : "Thêm mới"}
+                <Button type="submit" variant="gradient" disabled={submitting}>
+                  {submitting ? "Đang tạo..." : editingTeacher ? "Lưu thay đổi" : "Thêm mới"}
                 </Button>
               </div>
             </form>
