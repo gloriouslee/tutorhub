@@ -1,0 +1,90 @@
+"use client";
+
+import { useState, useEffect } from "react";
+import { Button } from "@/components/ui/button";
+import { Upload, X, Save, CheckCircle2 } from "lucide-react";
+import { formatDate } from "./classDetail.types";
+
+export default function SessionNotesPanel({
+  classId,
+  dateStr,
+  onClose,
+}: {
+  classId: string;
+  dateStr: string;
+  onClose: () => void;
+}) {
+  const storageKey = `tutorhub_session_notes_${classId}`;
+  const [note, setNote] = useState("");
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(storageKey);
+      if (raw) {
+        const notes: Record<string, string> = JSON.parse(raw);
+        setNote(notes[dateStr] ?? "");
+      }
+    } catch {}
+  }, [storageKey, dateStr]);
+
+  const handleSave = () => {
+    try {
+      const raw = localStorage.getItem(storageKey);
+      const notes: Record<string, string> = raw ? JSON.parse(raw) : {};
+      notes[dateStr] = note;
+      localStorage.setItem(storageKey, JSON.stringify(notes));
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch {}
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-fade-in">
+      <div className="bg-card w-full max-w-md rounded-2xl shadow-xl border border-border overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+        <div className="flex items-center justify-between p-5 border-b border-border">
+          <div>
+            <h3 className="font-semibold text-foreground">Tài liệu buổi học</h3>
+            <p className="text-xs text-muted-foreground mt-0.5">{formatDate(dateStr)}</p>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="p-5 space-y-4">
+          <div>
+            <label className="text-sm font-medium text-foreground mb-1.5 block">Ghi chú buổi học</label>
+            <textarea
+              value={note}
+              onChange={e => setNote(e.target.value)}
+              rows={5}
+              className="w-full p-3 rounded-xl border border-border bg-background text-sm resize-none focus:outline-none focus:ring-2 focus:ring-primary/50 text-foreground"
+              placeholder="Nội dung, nhận xét, lưu ý cho buổi học này..."
+            />
+          </div>
+          <div>
+            <label className="text-sm font-medium text-foreground mb-1.5 block">Tài liệu đính kèm</label>
+            <div className="border-2 border-dashed border-border rounded-xl p-6 text-center hover:border-primary/50 hover:bg-primary/5 transition-all cursor-pointer">
+              <Upload className="h-6 w-6 text-muted-foreground mx-auto mb-2" />
+              <p className="text-sm text-muted-foreground">Nhấn để tải file lên</p>
+              <p className="text-xs text-muted-foreground mt-0.5">PDF, DOCX, ảnh · Tối đa 50MB</p>
+            </div>
+          </div>
+        </div>
+        <div className="p-5 border-t border-border bg-muted/20 flex items-center justify-between gap-3">
+          {saved && (
+            <span className="flex items-center gap-1.5 text-xs text-emerald-600 font-medium">
+              <CheckCircle2 className="h-3.5 w-3.5" /> Đã lưu
+            </span>
+          )}
+          <div className="flex gap-3 ml-auto">
+            <Button variant="outline" onClick={onClose}>Đóng</Button>
+            <Button variant="gradient" onClick={handleSave}>
+              <Save className="h-4 w-4 mr-2" />Lưu ghi chú
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
