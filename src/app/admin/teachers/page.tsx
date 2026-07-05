@@ -5,7 +5,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { SectionHeader } from "@/components/shared";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Search, Plus, X, Edit, Trash2, BookOpen } from "lucide-react";
+import { Search, Plus, X, Edit, Trash2, BookOpen, Users, ExternalLink } from "lucide-react";
+import Link from "next/link";
 import { Input } from "@/components/ui/input";
 import { useState, useEffect } from "react";
 import { getTeachers, saveTeachers, getClasses } from "@/lib/storage";
@@ -121,15 +122,15 @@ export default function AdminTeachersPage() {
         />
 
         {/* Filters */}
-        <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex flex-col gap-3">
           <Input
             placeholder="Tìm giáo viên..."
             value={search}
             onChange={e => setSearch(e.target.value)}
             leftIcon={<Search className="h-4 w-4" />}
-            className="w-64 bg-card"
+            className="w-full sm:w-72 bg-card"
           />
-          <div className="flex items-center gap-2 ml-auto">
+          <div className="flex items-center gap-2 flex-wrap">
             <button
               onClick={() => setFilterSpec("All")}
               className={`px-3 py-1.5 text-xs font-semibold rounded-xl transition-all ${
@@ -165,6 +166,9 @@ export default function AdminTeachersPage() {
           ) : (
             filtered.map((t, i) => {
               const teacherClasses = classes.filter(c => c.tutor_id === t.id);
+              const studentCount = teacherClasses.reduce(
+                (sum, c) => sum + ((c as any).student_ids?.length ?? 0), 0
+              );
               return (
                 <Card key={t.id} className="animate-fade-in hover:shadow-lg transition-all border border-border" style={{ animationDelay: `${i * 30}ms` }}>
                   <CardContent className="p-5 flex flex-col h-full justify-between gap-4">
@@ -185,13 +189,26 @@ export default function AdminTeachersPage() {
                       <p className="text-xs text-muted-foreground line-clamp-3 min-h-[48px]">
                         {t.bio || "Chưa có thông tin giới thiệu."}
                       </p>
+
+                      <div className="flex items-center gap-4">
+                        <span className="text-xs text-muted-foreground flex items-center gap-1 font-semibold">
+                          <BookOpen className="h-3.5 w-3.5 text-rose-400" />
+                          {teacherClasses.length} lớp
+                        </span>
+                        <span className="text-xs text-muted-foreground flex items-center gap-1 font-semibold">
+                          <Users className="h-3.5 w-3.5 text-rose-400" />
+                          {studentCount} học viên
+                        </span>
+                      </div>
                     </div>
 
                     <div className="border-t border-border pt-3.5 flex items-center justify-between">
-                      <span className="text-xs text-muted-foreground flex items-center gap-1 font-semibold">
-                        <BookOpen className="h-3.5 w-3.5 text-rose-400" />
-                        {teacherClasses.length} lớp
-                      </span>
+                      <Link
+                        href={`/admin/classes?teacher=${t.id}`}
+                        className="text-xs text-rose-500 hover:text-rose-600 font-semibold flex items-center gap-1 transition-colors"
+                      >
+                        <ExternalLink className="h-3 w-3" /> Xem lớp
+                      </Link>
                       <div className="flex gap-1.5">
                         <Button size="sm" variant="outline" className="h-8 py-0" onClick={() => handleOpenEditModal(t)}>
                           <Edit className="h-3 w-3 mr-1" /> Sửa

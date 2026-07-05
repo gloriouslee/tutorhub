@@ -6,16 +6,21 @@ import { Button } from "@/components/ui/button";
 import { LearningModeBadge, SectionHeader } from "@/components/shared";
 import { Search, Plus, X, Edit, Trash2, Calendar, MapPin, Video, User } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { getClasses, saveClasses, getTeachers, getStudents, setClassTeacherOverride } from "@/lib/storage";
 import { Class, Teacher, Student } from "@/types";
 
-export default function AdminClassesPage() {
+function AdminClassesPageInner() {
+  const searchParams = useSearchParams();
+  const teacherParam = searchParams.get("teacher") ?? "";
+
   const [classes, setClasses] = useState<Class[]>([]);
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
   const [search, setSearch] = useState("");
   const [filterMode, setFilterMode] = useState<"All" | "online" | "offline" | "hybrid">("All");
+  const [filterTeacher, setFilterTeacher] = useState(teacherParam);
 
   // Modal states
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -158,7 +163,10 @@ export default function AdminClassesPage() {
     const matchesMode =
       filterMode === "All" ||
       c.learning_mode === filterMode;
-    return matchesSearch && matchesMode;
+    const matchesTeacher =
+      !filterTeacher ||
+      c.tutor_id === filterTeacher;
+    return matchesSearch && matchesMode && matchesTeacher;
   });
 
   return (
@@ -199,6 +207,23 @@ export default function AdminClassesPage() {
             ))}
           </div>
         </div>
+
+        {/* Teacher filter banner */}
+        {filterTeacher && (() => {
+          const t = teachers.find(tc => tc.id === filterTeacher);
+          return t ? (
+            <div className="flex items-center gap-2 text-sm bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800 rounded-xl px-4 py-2.5">
+              <span className="text-rose-600 dark:text-rose-400 font-semibold">Lọc theo giáo viên:</span>
+              <span className="text-foreground font-medium">{t.full_name}</span>
+              <button
+                onClick={() => setFilterTeacher("")}
+                className="ml-auto text-rose-400 hover:text-rose-600 transition-colors"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          ) : null;
+        })()}
 
         {/* Classes grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -444,5 +469,13 @@ export default function AdminClassesPage() {
         </div>
       )}
     </PortalLayout>
+  );
+}
+
+export default function AdminClassesPage() {
+  return (
+    <Suspense>
+      <AdminClassesPageInner />
+    </Suspense>
   );
 }
