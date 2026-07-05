@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { SectionHeader } from "@/components/shared";
 import MaterialsUploadForm from "@/components/shared/MaterialsUploadForm";
@@ -32,23 +32,42 @@ function TypeBadge({ type }: { type: string }) {
   );
 }
 
+const UPLOADED_KEY = "tutorhub_admin_materials";
+const DELETED_KEY = "tutorhub_admin_materials_deleted";
+
+function readJSON<T>(key: string, fallback: T): T {
+  try { return JSON.parse(localStorage.getItem(key) ?? "") as T; } catch { return fallback; }
+}
+
 export default function AdminMaterialsPage() {
-  const [materials, setMaterials] = useState(MOCK_CLASS_MATERIALS);
+  const [materials, setMaterials] = useState<any[]>([]);
   const [filterClass, setFilterClass] = useState("all");
-  const [refreshKey, setRefreshKey] = useState(0);
+
+  const loadMaterials = useCallback(() => {
+    const uploaded = readJSON<any[]>(UPLOADED_KEY, []);
+    const deleted = new Set(readJSON<string[]>(DELETED_KEY, []));
+    setMaterials([...uploaded, ...MOCK_CLASS_MATERIALS].filter(m => !deleted.has(m.id)));
+  }, []);
+
+  useEffect(() => { loadMaterials(); }, [loadMaterials]);
 
   const filtered = filterClass === "all"
     ? materials
     : materials.filter(m => m.class_id === filterClass);
 
   const getClassName = (classId: string) =>
-    MOCK_CLASSES.find(c => c.id === classId)?.class_name ?? classId;
+    classId === "all" ? "Tất cả lớp" : (MOCK_CLASSES.find(c => c.id === classId)?.class_name ?? classId);
 
-  const handleDelete = (id: string) =>
+  const handleDelete = (id: string) => {
+    const deleted = readJSON<string[]>(DELETED_KEY, []);
+    localStorage.setItem(DELETED_KEY, JSON.stringify([...deleted, id]));
+    const uploaded = readJSON<any[]>(UPLOADED_KEY, []);
+    localStorage.setItem(UPLOADED_KEY, JSON.stringify(uploaded.filter(m => m.id !== id)));
     setMaterials(prev => prev.filter(m => m.id !== id));
+  };
 
   return (
-    <PortalLayout role="admin" userName="" pageTitle="Quản lý tài liệu">
+    <PortalLayout role="admin" userName="Admin User" pageTitle="Quản lý tài liệu">
       <div className="max-w-5xl mx-auto space-y-8">
 
         {/* Upload section */}
@@ -59,7 +78,7 @@ export default function AdminMaterialsPage() {
           />
           <MaterialsUploadForm
             classes={MOCK_CLASSES}
-            onSaved={() => setRefreshKey(k => k + 1)}
+            onSaved={loadMaterials}
           />
         </div>
 
@@ -81,7 +100,7 @@ export default function AdminMaterialsPage() {
                   <option key={c.id} value={c.id}>{c.class_name}</option>
                 ))}
               </select>
-              <Button size="sm" variant="outline" className="h-9 gap-1.5" onClick={() => setRefreshKey(k => k + 1)}>
+              <Button size="sm" variant="outline" className="h-9 gap-1.5" onClick={loadMaterials}>
                 <RefreshCw className="h-3.5 w-3.5" /> Làm mới
               </Button>
             </div>

@@ -38,17 +38,29 @@ export default function AdminPaymentsPage() {
     loadData();
   }, []);
 
+  const todayKey = toLocalDateKey(new Date());
+  const isOverdue = (p: Payment) =>
+    p.payment_status === "overdue" || (p.payment_status === "pending" && p.due_date < todayKey);
   const totalCollected = payments.filter(p => p.payment_status === "paid").reduce((s, p) => s + p.amount, 0);
-  const totalPending = payments.filter(p => p.payment_status === "pending").reduce((s, p) => s + p.amount, 0);
-  const totalOverdue = payments.filter(p => p.payment_status === "overdue").reduce((s, p) => s + p.amount, 0);
+  const totalPending = payments.filter(p => p.payment_status === "pending" && !isOverdue(p)).reduce((s, p) => s + p.amount, 0);
+  const totalOverdue = payments.filter(isOverdue).reduce((s, p) => s + p.amount, 0);
 
-  const monthlyData = [
-    { month: "Th.1", collected: 3200000 },
-    { month: "Th.2", collected: 4400000 },
-    { month: "Th.3", collected: 3600000 },
-    { month: "Th.4", collected: 4200000 },
-    { month: "Th.5", collected: totalCollected },
-  ];
+  // Last 5 calendar months of collected revenue, from real paid payments
+  const monthlyData = Array.from({ length: 5 }, (_, i) => {
+    const d = new Date();
+    d.setDate(1);
+    d.setMonth(d.getMonth() - (4 - i));
+    const y = d.getFullYear();
+    const m = d.getMonth();
+    const collected = payments
+      .filter(p => p.payment_status === "paid")
+      .filter(p => {
+        const pd = new Date(p.paid_date || p.due_date);
+        return pd.getFullYear() === y && pd.getMonth() === m;
+      })
+      .reduce((s, p) => s + p.amount, 0);
+    return { month: `Th.${m + 1}`, collected };
+  });
 
   const handleMarkPaid = async (id: string) => {
     const updated = payments.map(p =>
@@ -65,7 +77,7 @@ export default function AdminPaymentsPage() {
     setFormData({
       student_id: defaultStudent,
       amount: "1200000",
-      description: "Học phí Tháng 6",
+      description: `Học phí Tháng ${new Date().getMonth() + 1}`,
       due_date: toLocalDateKey(new Date(new Date().getFullYear(), new Date().getMonth() + 1, 1)),
     });
     setIsModalOpen(true);
@@ -74,6 +86,10 @@ export default function AdminPaymentsPage() {
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.student_id) return;
+    if (!(Number(formData.amount) > 0)) {
+      alert("Số tiền phải lớn hơn 0.");
+      return;
+    }
 
     const newPayment: Payment = {
       id: `pay${payments.length + 1}-${Math.floor(Math.random() * 1000)}`,

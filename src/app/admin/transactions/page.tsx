@@ -70,7 +70,7 @@ export default function AdminTransactionsPage() {
   ];
 
   return (
-    <PortalLayout role="admin" userName="" pageTitle="Giao dịch tài liệu">
+    <PortalLayout role="admin" userName="Admin User" pageTitle="Giao dịch tài liệu">
       <div className="max-w-5xl mx-auto space-y-6">
         <SectionHeader
           title="Giao dịch mua tài liệu"

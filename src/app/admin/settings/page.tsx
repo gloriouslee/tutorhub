@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { SectionHeader } from "@/components/shared";
 import { Input } from "@/components/ui/input";
 import { Settings, Database, Sliders, Shield, Download, RotateCcw, Save, Check } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { resetAllStorage, getStudents, getTeachers, getClasses, getPayments, getAttendance, getNotifications } from "@/lib/storage";
 
 const TABS = [
@@ -34,8 +34,29 @@ export default function AdminSettingsPage() {
   const [maxStudents, setMaxStudents]       = useState("15");
   const [gradingScale, setGradingScale]     = useState("0-10");
 
+  const SETTINGS_KEY = "tutorhub_admin_settings";
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(SETTINGS_KEY);
+      if (!raw) return;
+      const saved = JSON.parse(raw);
+      if (saved.centerName)     setCenterName(saved.centerName);
+      if (saved.phone)          setPhone(saved.phone);
+      if (saved.email)          setEmail(saved.email);
+      if (saved.timezone)       setTimezone(saved.timezone);
+      if (saved.lessonDuration) setLessonDuration(saved.lessonDuration);
+      if (saved.maxStudents)    setMaxStudents(saved.maxStudents);
+      if (saved.gradingScale)   setGradingScale(saved.gradingScale);
+    } catch {
+      // ignore corrupted settings
+    }
+  }, []);
+
   const handleSaveSettings = (e: React.FormEvent) => {
     e.preventDefault();
+    const settings = { centerName, phone, email, timezone, lessonDuration, maxStudents, gradingScale };
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
     setSaveSuccess(true);
     setTimeout(() => setSaveSuccess(false), 3000);
   };

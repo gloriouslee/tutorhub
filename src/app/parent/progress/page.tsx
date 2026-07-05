@@ -4,12 +4,11 @@ import { useState, useEffect } from "react";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { SectionHeader } from "@/components/shared";
-import { 
-  STUDENT_SCORE_DATA, 
-  MOCK_EXAM_SCORES, 
-  MOCK_STUDENTS 
+import {
+  MOCK_EXAM_SCORES,
+  MOCK_STUDENTS,
+  MOCK_ATTENDANCE
 } from "@/lib/mock-data";
 import { getStudentComments } from "@/lib/storage";
 import { 
@@ -21,15 +20,6 @@ import {
   Tooltip, CartesianGrid, Radar, RadarChart, PolarGrid, 
   PolarAngleAxis, PolarRadiusAxis, Area, AreaChart
 } from "recharts";
-
-// Simulate progress trend over months for the line chart
-const TREND_DATA = [
-  { month: "T1", score: 7.5 },
-  { month: "T2", score: 7.8 },
-  { month: "T3", score: 8.2 },
-  { month: "T4", score: 8.5 },
-  { month: "T5", score: 9.1 },
-];
 
 export default function ParentProgressPage() {
   // Parent "p1" has students "s1" and "s4"
@@ -54,6 +44,43 @@ export default function ParentProgressPage() {
 
   // Exams for selected child
   const childExams = MOCK_EXAM_SCORES.filter(e => e.student_id === selectedChild?.id);
+
+  // Normalize scores to a 10-point scale
+  const normalizedExams = childExams.map(e => ({
+    ...e,
+    norm: e.max_score && e.max_score !== 10 ? Number(((e.score / e.max_score) * 10).toFixed(1)) : e.score,
+  }));
+
+  // Average score for the selected child
+  const childAvg = normalizedExams.length
+    ? (normalizedExams.reduce((acc, e) => acc + e.norm, 0) / normalizedExams.length).toFixed(1)
+    : null;
+
+  // Score trend over time (sorted by exam date)
+  const trendData = [...normalizedExams]
+    .sort((a, b) => new Date(a.exam_date).getTime() - new Date(b.exam_date).getTime())
+    .map(e => ({
+      month: new Date(e.exam_date).toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit" }),
+      score: e.norm,
+    }));
+
+  // Attendance rate for the selected child
+  const childAttendance = MOCK_ATTENDANCE.filter(a => a.student_id === selectedChild?.id);
+  const attendanceRate = childAttendance.length
+    ? Math.round((childAttendance.filter(a => a.status !== "absent").length / childAttendance.length) * 100)
+    : null;
+
+  // Radar: child's scores grouped by exam topic (averaged when repeated)
+  const radarGroups = new Map<string, { sum: number; n: number }>();
+  normalizedExams.forEach(e => {
+    const topic = (e.exam_name.split("–").pop() ?? e.exam_name).trim();
+    const cur = radarGroups.get(topic) ?? { sum: 0, n: 0 };
+    radarGroups.set(topic, { sum: cur.sum + e.norm, n: cur.n + 1 });
+  });
+  const radarData = [...radarGroups.entries()].map(([subject, v]) => ({
+    subject,
+    score: Number((v.sum / v.n).toFixed(1)),
+  }));
 
   return (
     <PortalLayout role="parent" userName="Trần Văn Minh" pageTitle="Tiến độ học tập">
@@ -93,9 +120,9 @@ export default function ParentProgressPage() {
                     <span className="text-2xl font-black">{selectedChild?.full_name.charAt(0)}</span>
                   </div>
                   <div>
-                    <p className="text-2xl font-bold">8.8</p>
+                    <p className="text-2xl font-bold">{childAvg ?? "—"}</p>
                     <p className="text-xs text-indigo-100 flex items-center gap-1">
-                      <TrendingUp className="h-3 w-3" /> Điểm trung bình (Tháng này)
+                      <TrendingUp className="h-3 w-3" /> Điểm trung bình
                     </p>
                   </div>
                 </div>
@@ -110,8 +137,8 @@ export default function ParentProgressPage() {
                     <Target className="h-5 w-5" />
                   </div>
                   <div>
-                    <p className="text-2xl font-bold text-foreground">Top 5%</p>
-                    <p className="text-[11px] text-muted-foreground uppercase tracking-wider font-semibold">Xếp hạng lớp</p>
+                    <p className="text-2xl font-bold text-foreground">{attendanceRate !== null ? `${attendanceRate}%` : "—"}</p>
+                    <p className="text-[11px] text-muted-foreground uppercase tracking-wider font-semibold">Tỷ lệ chuyên cần</p>
                   </div>
                 </CardContent>
               </Card>
@@ -121,8 +148,8 @@ export default function ParentProgressPage() {
                     <Award className="h-5 w-5" />
                   </div>
                   <div>
-                    <p className="text-2xl font-bold text-foreground">12</p>
-                    <p className="text-[11px] text-muted-foreground uppercase tracking-wider font-semibold">Huy hiệu đạt được</p>
+                    <p className="text-2xl font-bold text-foreground">{childExams.length}</p>
+                    <p className="text-[11px] text-muted-foreground uppercase tracking-wider font-semibold">Bài thi đã làm</p>
                   </div>
                 </CardContent>
               </Card>
@@ -135,12 +162,17 @@ export default function ParentProgressPage() {
             <Card className="border-0 shadow-sm col-span-1 md:col-span-2 overflow-hidden">
               <CardHeader className="pb-2 border-b border-border/50 bg-muted/20">
                 <CardTitle className="text-base flex items-center gap-2">
-                  <BarChart3 className="h-4 w-4 text-primary" /> Phổ điểm qua các tháng
+                  <BarChart3 className="h-4 w-4 text-primary" /> Phổ điểm qua các bài thi
                 </CardTitle>
               </CardHeader>
               <CardContent className="p-6 pt-8 h-[280px]">
+                {trendData.length === 0 ? (
+                  <div className="h-full flex items-center justify-center text-sm text-muted-foreground">
+                    Chưa có dữ liệu điểm thi.
+                  </div>
+                ) : (
                 <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={TREND_DATA} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
+                  <AreaChart data={trendData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
                     <defs>
                       <linearGradient id="colorScore" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3}/>
@@ -149,7 +181,7 @@ export default function ParentProgressPage() {
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#888888" opacity={0.2} />
                     <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{ fontSize: 12 }} dy={10} />
-                    <YAxis domain={[5, 10]} axisLine={false} tickLine={false} tick={{ fontSize: 12 }} />
+                    <YAxis domain={[0, 10]} axisLine={false} tickLine={false} tick={{ fontSize: 12 }} />
                     <Tooltip 
                       contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.1)' }}
                       cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }}
@@ -157,6 +189,7 @@ export default function ParentProgressPage() {
                     <Area type="monotone" dataKey="score" stroke="#6366f1" strokeWidth={3} fillOpacity={1} fill="url(#colorScore)" />
                   </AreaChart>
                 </ResponsiveContainer>
+                )}
               </CardContent>
             </Card>
 
@@ -164,12 +197,25 @@ export default function ParentProgressPage() {
             <Card className="border-0 shadow-sm">
               <CardHeader className="pb-2 border-b border-border/50 bg-muted/20">
                 <CardTitle className="text-base flex items-center gap-2">
-                  <Star className="h-4 w-4 text-amber-500" /> Năng lực theo môn học
+                  <Star className="h-4 w-4 text-amber-500" /> Năng lực theo chuyên đề
                 </CardTitle>
               </CardHeader>
               <CardContent className="p-4 h-[250px] flex items-center justify-center">
+                {radarData.length < 3 ? (
+                  <div className="w-full space-y-3 px-2">
+                    {radarData.length === 0 && (
+                      <p className="text-sm text-muted-foreground text-center">Chưa có dữ liệu điểm thi.</p>
+                    )}
+                    {radarData.map(d => (
+                      <div key={d.subject} className="flex items-center justify-between text-sm">
+                        <span className="font-medium text-foreground">{d.subject}</span>
+                        <span className="font-bold text-primary">{d.score}/10</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
                 <ResponsiveContainer width="100%" height="100%">
-                  <RadarChart cx="50%" cy="50%" outerRadius="70%" data={STUDENT_SCORE_DATA}>
+                  <RadarChart cx="50%" cy="50%" outerRadius="70%" data={radarData}>
                     <PolarGrid stroke="#888888" opacity={0.2} />
                     <PolarAngleAxis dataKey="subject" tick={{ fill: '#888888', fontSize: 11, fontWeight: 'bold' }} />
                     <PolarRadiusAxis angle={30} domain={[0, 10]} tick={false} axisLine={false} />
@@ -177,6 +223,7 @@ export default function ParentProgressPage() {
                     <Tooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} />
                   </RadarChart>
                 </ResponsiveContainer>
+                )}
               </CardContent>
             </Card>
 
@@ -247,7 +294,6 @@ export default function ParentProgressPage() {
                     
                     <div className="flex items-center justify-between text-[11px] text-muted-foreground font-medium">
                       <span className="flex items-center gap-1"><Calendar className="h-3 w-3" /> {new Date(exam.exam_date).toLocaleDateString('vi-VN')}</span>
-                      <Button variant="link" className="h-auto p-0 text-[11px]">Xem bài giải &rarr;</Button>
                     </div>
                   </CardContent>
                 </Card>

@@ -652,6 +652,23 @@ export function getStudentAccounts(): StudentAccount[] {
   } catch { return []; }
 }
 
+export async function changeStudentPassword(
+  studentId: string,
+  currentPassword: string,
+  newPassword: string
+): Promise<"ok" | "wrong_password" | "not_found"> {
+  if (!studentId.startsWith("enr_")) return "not_found";
+  const enrollmentId = studentId.slice(4);
+  const all = await getEnrollments();
+  const enr = all.find(e => e.id === enrollmentId);
+  if (!enr || enr.status !== "approved") return "not_found";
+  if (enr.account_password !== currentPassword) return "wrong_password";
+  localStorage.setItem(ENROLL_KEY, JSON.stringify(
+    all.map(e => e.id === enrollmentId ? { ...e, account_password: newPassword } : e)
+  ));
+  return "ok";
+}
+
 export function getCurrentStudentAccount(): StudentAccount | null {
   const accounts = getStudentAccounts();
   return accounts.length > 0 ? accounts[accounts.length - 1] : null;

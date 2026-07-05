@@ -364,7 +364,7 @@ export default function AdminUsersPage() {
   }
 
   return (
-    <PortalLayout role="admin" userName="Demo User" pageTitle="Quản lý tài khoản">
+    <PortalLayout role="admin" userName="Admin User" pageTitle="Quản lý tài khoản">
       <div className="space-y-6">
 
         {/* Header */}

@@ -9,7 +9,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { SectionHeader } from "@/components/shared";
 import { MOCK_STUDENTS, MOCK_CLASSES, MOCK_TEACHERS } from "@/lib/mock-data";
-import { getCurrentStudentAccount, getStudentAccounts, type StudentAccount } from "@/lib/storage";
+import { getStudentAccounts, changeStudentPassword, type StudentAccount } from "@/lib/storage";
 import { useStudentContext } from "@/hooks/useStudentContext";
 import {
   User, Mail, Phone, BookOpen, Shield, Key, Camera,
@@ -17,7 +17,7 @@ import {
   AlertCircle, Eye, EyeOff,
 } from "lucide-react";
 
-const LS_PROFILE = "tutorhub_student_profile";
+const profileKey = (studentId: string) => `tutorhub_student_profile_${studentId}`;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 interface ProfileData {
@@ -59,9 +59,9 @@ function buildProfile(account: StudentAccount | null): ProfileData {
   };
 }
 
-function loadSavedProfile(base: ProfileData): ProfileData {
+function loadSavedProfile(base: ProfileData, studentId: string): ProfileData {
   try {
-    const raw = localStorage.getItem(LS_PROFILE);
+    const raw = localStorage.getItem(profileKey(studentId));
     if (!raw) return base;
     return { ...base, ...JSON.parse(raw) };
   } catch { return base; }
@@ -90,12 +90,12 @@ export default function StudentProfilePage() {
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    // Find account matching the enrolled student cookie, or fall back to last approved
+    // Find account matching the enrolled student cookie (demo s1 gets mock profile)
     const accounts = getStudentAccounts();
-    const acc = accounts.find(a => a.student_id === studentId) ?? getCurrentStudentAccount();
+    const acc = accounts.find(a => a.student_id === studentId) ?? null;
     setAccount(acc);
     const base = buildProfile(acc);
-    setForm(loadSavedProfile(base));
+    setForm(loadSavedProfile(base, studentId));
     setLoaded(true);
   }, [studentId]);
 
@@ -122,7 +122,7 @@ export default function StudentProfilePage() {
     e.preventDefault();
     if (!form) return;
     try {
-      localStorage.setItem(LS_PROFILE, JSON.stringify({
+      localStorage.setItem(profileKey(studentId), JSON.stringify({
         full_name: form.full_name,
         email:     form.email,
         dob:       form.dob,
@@ -137,17 +137,29 @@ export default function StudentProfilePage() {
   }
 
   function handleReset() {
-    setForm(loadSavedProfile(base));
+    setForm(loadSavedProfile(base, studentId));
     setDirty(false);
     setSaved(false);
   }
 
-  function handlePasswordChange(e: React.FormEvent) {
+  async function handlePasswordChange(e: React.FormEvent) {
     e.preventDefault();
     if (!curPwd) { setPwdMsg({ ok: false, text: "Vui lòng nhập mật khẩu hiện tại." }); return; }
     if (newPwd.length < 6) { setPwdMsg({ ok: false, text: "Mật khẩu mới phải có ít nhất 6 ký tự." }); return; }
     if (newPwd !== confPwd) { setPwdMsg({ ok: false, text: "Mật khẩu xác nhận không khớp." }); return; }
-    // Mock success
+    if (!studentId.startsWith("enr_")) {
+      setPwdMsg({ ok: false, text: "Tài khoản demo không thể đổi mật khẩu." });
+      return;
+    }
+    const result = await changeStudentPassword(studentId, curPwd, newPwd);
+    if (result === "wrong_password") {
+      setPwdMsg({ ok: false, text: "Mật khẩu hiện tại không đúng." });
+      return;
+    }
+    if (result === "not_found") {
+      setPwdMsg({ ok: false, text: "Không tìm thấy tài khoản để đổi mật khẩu." });
+      return;
+    }
     setPwdMsg({ ok: true, text: "Đổi mật khẩu thành công!" });
     setCurPwd(""); setNewPwd(""); setConfPwd("");
     setTimeout(() => setPwdMsg(null), 4000);

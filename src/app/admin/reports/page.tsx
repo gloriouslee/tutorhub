@@ -19,7 +19,7 @@ export default function AdminReportsPage() {
   const [isExporting, setIsExporting] = useState(false);
   const [exportSuccess, setExportSuccess] = useState(false);
   const [reportType, setReportType] = useState("tuition");
-  const [reportFormat, setReportFormat] = useState("pdf");
+  const [reportFormat, setReportFormat] = useState("csv");
 
   useEffect(() => {
     async function loadData() {
@@ -38,36 +38,115 @@ export default function AdminReportsPage() {
   const hybridCount  = students.filter(s => s.learning_type === "hybrid").length;
 
   const modeData = [
-    { name: "Trực tuyến", value: onlineCount  || 1, color: "#3b82f6" },
-    { name: "Tại lớp",    value: offlineCount || 1, color: "#8b5cf6" },
-    { name: "Kết hợp",    value: hybridCount  || 1, color: "#14b8a6" },
+    { name: "Trực tuyến", value: onlineCount,  color: "#3b82f6" },
+    { name: "Tại lớp",    value: offlineCount, color: "#8b5cf6" },
+    { name: "Kết hợp",    value: hybridCount,  color: "#14b8a6" },
   ];
 
-  const revenueData = [
-    { month: "Th.1", doanhThu: 84000000, mucTieu: 90000000 },
-    { month: "Th.2", doanhThu: 92000000, mucTieu: 90000000 },
-    { month: "Th.3", doanhThu: 78000000, mucTieu: 90000000 },
-    { month: "Th.4", doanhThu: 96000000, mucTieu: 90000000 },
-    { month: "Th.5", doanhThu: totalCollected || 89000000, mucTieu: 95000000 },
-  ];
+  // Last 5 months (including current), computed from real data
+  const MONTHS = ["Th.1", "Th.2", "Th.3", "Th.4", "Th.5", "Th.6", "Th.7", "Th.8", "Th.9", "Th.10", "Th.11", "Th.12"];
+  const now = new Date();
+  const lastMonths = Array.from({ length: 5 }, (_, i) => {
+    const d = new Date(now.getFullYear(), now.getMonth() - (4 - i), 1);
+    return { year: d.getFullYear(), month: d.getMonth() };
+  });
 
-  const attendanceRateData = [
-    { month: "Th.1", coMat: 88, vangMat: 8, treGio: 4 },
-    { month: "Th.2", coMat: 92, vangMat: 5, treGio: 3 },
-    { month: "Th.3", coMat: 85, vangMat: 10, treGio: 5 },
-    { month: "Th.4", coMat: 90, vangMat: 6, treGio: 4 },
-    { month: "Th.5", coMat: 93, vangMat: 4, treGio: 3 },
-  ];
+  const revenueData = lastMonths.map(({ year, month }) => {
+    const doanhThu = payments
+      .filter(p => {
+        if (p.payment_status !== "paid") return false;
+        const d = new Date(p.paid_date || p.due_date);
+        return d.getFullYear() === year && d.getMonth() === month;
+      })
+      .reduce((s, p) => s + p.amount, 0);
+    return { month: MONTHS[month], doanhThu, mucTieu: 90000000 };
+  });
+
+  const attendanceRateData = lastMonths.map(({ year, month }) => {
+    const recs = attendance.filter(a => {
+      const d = new Date(a.attendance_date);
+      return d.getFullYear() === year && d.getMonth() === month;
+    });
+    const pct = (n: number) => (recs.length > 0 ? Math.round((n / recs.length) * 100) : 0);
+    return {
+      month: MONTHS[month],
+      coMat:   pct(recs.filter(a => a.status === "present").length),
+      treGio:  pct(recs.filter(a => a.status === "late").length),
+      vangMat: pct(recs.filter(a => a.status === "absent").length),
+    };
+  });
+
+  const csvEscape = (v: any) => {
+    const s = String(v ?? "");
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+
+  const buildReportRows = (): string[][] => {
+    switch (reportType) {
+      case "tuition":
+        return [
+          ["Học viên", "Mô tả", "Số tiền", "Hạn nộp", "Ngày nộp", "Trạng thái"],
+          ...payments.map(p => {
+            const st = students.find(s => s.id === p.student_id);
+            return [st?.full_name ?? p.student_id, p.description, p.amount, p.due_date, p.paid_date ?? "", p.payment_status];
+          }),
+        ];
+      case "attendance":
+        return [
+          ["Ngày", "Lớp", "Học viên", "Trạng thái"],
+          ...attendance.map(a => {
+            const cls = classes.find(c => c.id === a.class_id);
+            const st = students.find(s => s.id === a.student_id);
+            return [a.attendance_date, cls?.class_name ?? a.class_id, st?.full_name ?? a.student_id, a.status];
+          }),
+        ];
+      case "enrollment":
+        return [
+          ["Họ tên", "Khối lớp", "Trường", "Hình thức học"],
+          ...students.map(s => [s.full_name, s.grade, s.school, s.learning_type]),
+        ];
+      case "teachers":
+      default:
+        return [
+          ["Lớp", "Môn học", "Hình thức", "Giáo viên (ID)", "Số học viên"],
+          ...classes.map(c => [c.class_name, c.subject, c.learning_mode, c.tutor_id, (c.student_ids ?? []).length]),
+        ];
+    }
+  };
 
   const handleExport = (e: React.FormEvent) => {
     e.preventDefault();
     setIsExporting(true);
     setExportSuccess(false);
-    setTimeout(() => {
-      setIsExporting(false);
+    try {
+      const rows = buildReportRows();
+      const dateKey = new Date().toISOString().split("T")[0];
+      const fileName = `tutorhub_baocao_${reportType}_${dateKey}`;
+      let blob: Blob;
+      let ext: string;
+      if (reportFormat === "json") {
+        const [header, ...data] = rows;
+        const objects = data.map(r => Object.fromEntries(header.map((h, i) => [h, r[i]])));
+        blob = new Blob([JSON.stringify(objects, null, 2)], { type: "application/json;charset=utf-8" });
+        ext = "json";
+      } else {
+        const csv = "﻿" + rows.map(r => r.map(csvEscape).join(",")).join("\n");
+        blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+        ext = "csv";
+      }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.setAttribute("href", url);
+      a.setAttribute("download", `${fileName}.${ext}`);
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
       setExportSuccess(true);
       setTimeout(() => setExportSuccess(false), 4000);
-    }, 2000);
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   return (
@@ -187,8 +266,8 @@ export default function AdminReportsPage() {
                     value={reportFormat}
                     onChange={e => setReportFormat(e.target.value)}
                   >
-                    <option value="pdf">Tệp PDF (.pdf)</option>
-                    <option value="csv">Bảng tính Excel (.csv)</option>
+                    <option value="csv">Bảng tính CSV (.csv)</option>
+                    <option value="json">Tệp JSON (.json)</option>
                   </select>
                 </div>
 

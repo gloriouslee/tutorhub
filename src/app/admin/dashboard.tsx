@@ -42,26 +42,40 @@ export default function AdminDashboard() {
   const hybridCount  = students.filter(s => s.learning_type === "hybrid").length;
 
   const pieData = [
-    { name: "Trực tuyến", value: onlineCount  || 1, color: "#3b82f6" },
-    { name: "Tại lớp",    value: offlineCount || 1, color: "#8b5cf6" },
-    { name: "Kết hợp",    value: hybridCount  || 1, color: "#14b8a6" },
+    { name: "Trực tuyến", value: onlineCount,  color: "#3b82f6" },
+    { name: "Tại lớp",    value: offlineCount, color: "#8b5cf6" },
+    { name: "Kết hợp",    value: hybridCount,  color: "#14b8a6" },
   ];
 
-  const revenueChartData = [
-    { month: "Th.1", doanhThu: 84000000, mucTieu: 90000000 },
-    { month: "Th.2", doanhThu: 92000000, mucTieu: 90000000 },
-    { month: "Th.3", doanhThu: 78000000, mucTieu: 90000000 },
-    { month: "Th.4", doanhThu: 96000000, mucTieu: 90000000 },
-    { month: "Th.5", doanhThu: totalRevenue || 89000000, mucTieu: 95000000 },
-  ];
+  // Last 5 months (including current), computed from real data
+  const now = new Date();
+  const lastMonths = Array.from({ length: 5 }, (_, i) => {
+    const d = new Date(now.getFullYear(), now.getMonth() - (4 - i), 1);
+    return { year: d.getFullYear(), month: d.getMonth() };
+  });
 
-  const attendanceChartData = [
-    { month: "Th.1", diemDanh: 88 },
-    { month: "Th.2", diemDanh: 92 },
-    { month: "Th.3", diemDanh: 85 },
-    { month: "Th.4", diemDanh: 90 },
-    { month: "Th.5", diemDanh: 93 },
-  ];
+  const revenueChartData = lastMonths.map(({ year, month }) => {
+    const doanhThu = payments
+      .filter(p => {
+        if (p.payment_status !== "paid") return false;
+        const d = new Date(p.paid_date || p.due_date);
+        return d.getFullYear() === year && d.getMonth() === month;
+      })
+      .reduce((s, p) => s + p.amount, 0);
+    return { month: MONTHS[month], doanhThu, mucTieu: 90000000 };
+  });
+
+  const attendanceChartData = lastMonths.map(({ year, month }) => {
+    const monthRecords = attendance.filter(a => {
+      const d = new Date(a.attendance_date);
+      return d.getFullYear() === year && d.getMonth() === month;
+    });
+    const attended = monthRecords.filter(a => a.status === "present" || a.status === "late").length;
+    return {
+      month: MONTHS[month],
+      diemDanh: monthRecords.length > 0 ? Math.round((attended / monthRecords.length) * 100) : 0,
+    };
+  });
 
   return (
     <div className="space-y-6">
@@ -86,10 +100,10 @@ export default function AdminDashboard() {
 
       {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard title="Tổng học viên"  value={students.length}          icon={GraduationCap} iconBg="bg-rose-100 dark:bg-rose-900/30"    iconColor="text-rose-600"    delay={0}   trend={{ value: 12, label: "so với tháng trước" }} />
+        <StatCard title="Tổng học viên"  value={students.length}          icon={GraduationCap} iconBg="bg-rose-100 dark:bg-rose-900/30"    iconColor="text-rose-600"    delay={0} />
         <StatCard title="Giáo viên"      value={teachers.length}          icon={Users}         iconBg="bg-pink-100 dark:bg-pink-900/30"    iconColor="text-pink-600"    delay={100} />
         <StatCard title="Lớp đang hoạt động" value={classes.length}      icon={BookOpen}      iconBg="bg-fuchsia-100 dark:bg-fuchsia-900/30" iconColor="text-fuchsia-600" delay={200} />
-        <StatCard title="Doanh thu tháng" value={formatCurrency(totalRevenue)} icon={DollarSign} iconBg="bg-purple-100 dark:bg-purple-900/30" iconColor="text-purple-600" delay={300} trend={{ value: 8, label: "so với tháng trước" }} />
+        <StatCard title="Doanh thu tháng" value={formatCurrency(totalRevenue)} icon={DollarSign} iconBg="bg-purple-100 dark:bg-purple-900/30" iconColor="text-purple-600" delay={300} />
       </div>
 
       {/* Charts row */}
@@ -209,7 +223,7 @@ export default function AdminDashboard() {
                 <CartesianGrid strokeDasharray="3 3" stroke="rgb(var(--border))" />
                 <XAxis dataKey="month" tick={{ fontSize: 11, fill: "rgb(var(--muted-foreground))" }} axisLine={false} tickLine={false} />
                 <YAxis tick={{ fontSize: 11, fill: "rgb(var(--muted-foreground))" }} axisLine={false} tickLine={false}
-                  tickFormatter={v => `${v}%`} domain={[70, 100]} />
+                  tickFormatter={v => `${v}%`} domain={[0, 100]} />
                 <Tooltip
                   contentStyle={{ background: "rgb(var(--card))", border: "1px solid rgb(var(--border))", borderRadius: 12, fontSize: 12 }}
                   formatter={(v: any) => [`${v}%`, "Có mặt"]}
@@ -233,7 +247,7 @@ export default function AdminDashboard() {
           <CardContent className="space-y-3">
             {teachers.slice(0, 4).map(t => {
               const teacherClasses   = classes.filter(c => c.tutor_id === t.id);
-              const totalStudents    = teacherClasses.reduce((s: number, c: any) => s + (c.student_ids?.length ?? 4), 0);
+              const totalStudents    = teacherClasses.reduce((s: number, c: any) => s + (c.student_ids?.length ?? 0), 0);
               return (
                 <div key={t.id} className="flex items-center gap-3 p-2.5 rounded-xl hover:bg-muted transition-colors">
                   <Avatar size="sm"><AvatarFallback name={t.full_name} /></Avatar>

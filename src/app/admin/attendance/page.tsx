@@ -37,24 +37,11 @@ export default function AdminAttendancePage() {
   const presentRecords = attendance.filter(a => a.status === "present").length;
   const lateRecords = attendance.filter(a => a.status === "late").length;
   const absentRecords = attendance.filter(a => a.status === "absent").length;
-  const attendanceRate = totalRecords > 0 ? Math.round(((presentRecords + lateRecords) / totalRecords) * 100) : 89;
+  const attendanceRate = totalRecords > 0 ? Math.round(((presentRecords + lateRecords) / totalRecords) * 100) : null;
 
-  // Filter students for selected class (mock mapping: odd classes have odd student IDs, etc., or just list all students to keep it simple)
-  // Let's map: s1, s2, s3, s4 are in c1; s1, s5 are in c2; s2, s3 are in c3; s4 is in c4
-  const getStudentsInClass = (classId: string): Student[] => {
-    switch (classId) {
-      case "c1":
-        return students.filter(s => ["s1", "s2", "s3", "s4"].includes(s.id));
-      case "c2":
-        return students.filter(s => ["s1", "s5"].includes(s.id));
-      case "c3":
-        return students.filter(s => ["s2", "s3"].includes(s.id));
-      case "c4":
-        return students.filter(s => ["s4"].includes(s.id));
-      default:
-        return students;
-    }
-  };
+  // Students enrolled in a class, based on the class's real student_ids
+  const getStudentsInClass = (cls: Class): Student[] =>
+    students.filter(s => (cls.student_ids ?? []).includes(s.id));
 
   const handleMarkAttendance = async (studentId: string, status: "present" | "late" | "absent" | "excused") => {
     if (!selectedClass) return;
@@ -84,23 +71,23 @@ export default function AdminAttendancePage() {
     await saveAttendance(updated);
   };
 
-  const classStudents = selectedClass ? getStudentsInClass(selectedClass.id) : [];
+  const classStudents = selectedClass ? getStudentsInClass(selectedClass) : [];
 
   return (
     <PortalLayout role="admin" userName="Admin User" pageTitle="Chuyên cần">
       <div className="space-y-6">
         <SectionHeader
-          title="Attendance & Check-in"
-          subtitle="Track and log student attendance for active classes"
+          title="Điểm danh & Check-in"
+          subtitle="Theo dõi và ghi nhận chuyên cần của học viên"
         />
 
         {/* Stats Row */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {[
-            { label: "Attendance Rate", value: `${attendanceRate}%`, icon: CheckSquare, color: "text-rose-500", bg: "bg-rose-50 dark:bg-rose-950/20" },
-            { label: "Present Count", value: presentRecords, icon: Check, color: "text-emerald-500", bg: "bg-emerald-50 dark:bg-emerald-950/20" },
-            { label: "Late Check-ins", value: lateRecords, icon: AlertCircle, color: "text-amber-500", bg: "bg-amber-50 dark:bg-amber-950/20" },
-            { label: "Absences", value: absentRecords, icon: X, color: "text-red-500", bg: "bg-red-50 dark:bg-red-950/20" },
+            { label: "Tỷ lệ chuyên cần", value: attendanceRate !== null ? `${attendanceRate}%` : "—", icon: CheckSquare, color: "text-rose-500", bg: "bg-rose-50 dark:bg-rose-950/20" },
+            { label: "Số lượt có mặt", value: presentRecords, icon: Check, color: "text-emerald-500", bg: "bg-emerald-50 dark:bg-emerald-950/20" },
+            { label: "Số lượt đi muộn", value: lateRecords, icon: AlertCircle, color: "text-amber-500", bg: "bg-amber-50 dark:bg-amber-950/20" },
+            { label: "Số lượt vắng", value: absentRecords, icon: X, color: "text-red-500", bg: "bg-red-50 dark:bg-red-950/20" },
           ].map(({ label, value, icon: Icon, color, bg }) => (
             <Card key={label} className="border border-border">
               <CardContent className="p-4 flex items-center justify-between">
@@ -121,7 +108,7 @@ export default function AdminAttendancePage() {
           <Card className="lg:col-span-1 border border-border">
             <CardHeader className="pb-3 border-b border-border bg-muted/10">
               <CardTitle className="text-sm flex items-center gap-2">
-                <Users className="h-4 w-4 text-rose-500" /> Active Classes
+                <Users className="h-4 w-4 text-rose-500" /> Lớp đang hoạt động
               </CardTitle>
             </CardHeader>
             <CardContent className="p-2 space-y-1">
@@ -149,10 +136,10 @@ export default function AdminAttendancePage() {
             <CardHeader className="pb-3 border-b border-border bg-muted/10 flex flex-row items-center justify-between flex-wrap gap-4">
               <div>
                 <CardTitle className="text-sm font-bold text-foreground">
-                  Check-in Checklist: {selectedClass?.class_name}
+                  Danh sách điểm danh: {selectedClass?.class_name}
                 </CardTitle>
                 <p className="text-xs text-muted-foreground mt-1">
-                  Mark attendance status for the selected date.
+                  Ghi nhận trạng thái chuyên cần cho ngày đã chọn.
                 </p>
               </div>
               <div className="flex items-center gap-2">
@@ -168,16 +155,16 @@ export default function AdminAttendancePage() {
             <CardContent className="p-0">
               {classStudents.length === 0 ? (
                 <div className="p-12 text-center text-muted-foreground text-sm">
-                  No students assigned to this class.
+                  Chưa có học viên nào trong lớp này.
                 </div>
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full">
                     <thead>
                       <tr className="border-b border-border bg-muted/5">
-                        <th className="text-left p-4 text-xs font-semibold text-muted-foreground">Student</th>
-                        <th className="text-left p-4 text-xs font-semibold text-muted-foreground">Status (Selected Date)</th>
-                        <th className="text-right p-4 text-xs font-semibold text-muted-foreground">Record Action</th>
+                        <th className="text-left p-4 text-xs font-semibold text-muted-foreground">Học viên</th>
+                        <th className="text-left p-4 text-xs font-semibold text-muted-foreground">Trạng thái (ngày đã chọn)</th>
+                        <th className="text-right p-4 text-xs font-semibold text-muted-foreground">Thao tác</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border">
@@ -212,9 +199,9 @@ export default function AdminAttendancePage() {
                             <td className="p-4">
                               <div className="flex items-center justify-end gap-1.5">
                                 {[
-                                  { key: "present" as const, label: "Present", color: "bg-emerald-500 hover:bg-emerald-600 text-white" },
-                                  { key: "late" as const, label: "Late", color: "bg-amber-500 hover:bg-amber-600 text-white" },
-                                  { key: "absent" as const, label: "Absent", color: "bg-red-500 hover:bg-red-600 text-white" },
+                                  { key: "present" as const, label: "Có mặt", color: "bg-emerald-500 hover:bg-emerald-600 text-white" },
+                                  { key: "late" as const, label: "Muộn", color: "bg-amber-500 hover:bg-amber-600 text-white" },
+                                  { key: "absent" as const, label: "Vắng", color: "bg-red-500 hover:bg-red-600 text-white" },
                                 ].map(btn => (
                                   <button
                                     key={btn.key}

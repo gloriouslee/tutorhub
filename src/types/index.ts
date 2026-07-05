@@ -53,6 +53,7 @@ export interface Class {
   schedule: ClassSchedule[];
   description?: string;
   max_students?: number;
+  student_ids?: string[];
   color?: string;
   created_at: string;
 }

@@ -250,8 +250,7 @@ function AdminClassesPageInner() {
           ) : (
             filtered.map((cls, i) => {
               const tutor = teachers.find(t => t.id === cls.tutor_id);
-              // Mock student count for dynamic display
-              const studentCount = 4 + (i * 2) % 8;
+              const studentCount = (cls.student_ids ?? []).length;
 
               return (
                 <Card key={cls.id} className="animate-fade-in hover:shadow-lg transition-all border border-border" style={{ animationDelay: `${i * 30}ms` }}>

@@ -28,8 +28,8 @@ const CONTACTS = [
   },
   {
     id: "c2",
-    name: "Cô Lan Anh Hóa",
-    role: "Giáo viên môn Hóa",
+    name: "Cô Lan Anh",
+    role: "Giáo viên Toán Hình Học",
     avatar: "L",
     online: false,
     lastActive: "2 giờ trước",
@@ -37,7 +37,7 @@ const CONTACTS = [
     messages: [
       { id: "m1", senderId: "c2", text: "Chào phụ huynh em Thảo My.", time: "Hôm qua", isRead: true },
       { id: "m2", senderId: "c2", text: "Kỳ thi thử vừa rồi My làm bài khá tốt, điểm cao nhất lớp.", time: "Hôm qua", isRead: true },
-      { id: "m3", senderId: "c2", text: "Tuy nhiên phụ huynh nhắc bé ôn lại bài 3 phần Hữu cơ nhé, phần đó My hay làm ẩu.", time: "14:30", isRead: false },
+      { id: "m3", senderId: "c2", text: "Tuy nhiên phụ huynh nhắc bé ôn lại chuyên đề Hình học không gian nhé, phần đó My hay làm ẩu.", time: "14:30", isRead: false },
       { id: "m4", senderId: "c2", text: "Tối nay tôi sẽ gửi file bài tập lên hệ thống.", time: "14:31", isRead: false },
     ]
   },
@@ -57,13 +57,34 @@ const CONTACTS = [
   }
 ];
 
+const LS_MESSAGES = "tutorhub_parent_messages";
+
 export default function ParentMessagesPage() {
   const [contacts, setContacts] = useState(CONTACTS);
   const [activeContactId, setActiveContactId] = useState(CONTACTS[0].id);
   const [inputText, setInputText] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
-  
+  const [hydrated, setHydrated] = useState(false);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Load persisted conversations on mount
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(LS_MESSAGES);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) setContacts(parsed);
+      }
+    } catch { /* ignore */ }
+    setHydrated(true);
+  }, []);
+
+  // Persist conversations whenever they change
+  useEffect(() => {
+    if (!hydrated) return;
+    try { localStorage.setItem(LS_MESSAGES, JSON.stringify(contacts)); } catch { /* ignore */ }
+  }, [contacts, hydrated]);
 
   const activeContact = contacts.find(c => c.id === activeContactId) || contacts[0];
 

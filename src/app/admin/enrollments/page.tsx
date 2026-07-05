@@ -8,10 +8,11 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { SectionHeader } from "@/components/shared";
 import {
-  getEnrollments, approveEnrollment, rejectEnrollment,
+  getEnrollments, approveEnrollment, rejectEnrollment, getClasses,
   type EnrollmentRequest, type EnrollmentStatus,
 } from "@/lib/storage";
 import { MOCK_CLASSES } from "@/lib/mock-data";
+import type { Class } from "@/types";
 import {
   CheckCircle2, XCircle, Clock, User, Mail, Phone, BookOpen,
   Calendar, GraduationCap, Search, RefreshCw, Eye, EyeOff, X,
@@ -40,11 +41,12 @@ type Filter = "all" | EnrollmentStatus;
 
 interface ApproveModalProps {
   enrollment: EnrollmentRequest;
+  classes: Class[];
   onClose: () => void;
   onDone: () => void;
 }
 
-function ApproveModal({ enrollment, onClose, onDone }: ApproveModalProps) {
+function ApproveModal({ enrollment, classes, onClose, onDone }: ApproveModalProps) {
   const defaultUsername = enrollment.email.toLowerCase();
   const defaultPassword = enrollment.email.split("@")[0];
 
@@ -73,8 +75,8 @@ function ApproveModal({ enrollment, onClose, onDone }: ApproveModalProps) {
     }
   };
 
-  const requestedClass = MOCK_CLASSES.find(c => c.id === enrollment.requested_class_id);
-  const assignedClass  = MOCK_CLASSES.find(c => c.id === assignedClassId);
+  const requestedClass = classes.find(c => c.id === enrollment.requested_class_id);
+  const assignedClass  = classes.find(c => c.id === assignedClassId);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
@@ -136,9 +138,9 @@ function ApproveModal({ enrollment, onClose, onDone }: ApproveModalProps) {
               className="w-full h-10 px-3 rounded-lg border border-input bg-background text-sm outline-none focus:ring-2 focus:ring-primary"
             >
               <option value="">Chọn lớp…</option>
-              {MOCK_CLASSES.map(c => (
+              {classes.map(c => (
                 <option key={c.id} value={c.id}>
-                  {c.class_name} — {c.subject} ({(c.student_ids ?? []).length}/{c.max_students} HV)
+                  {c.class_name} — {c.subject} ({((c as any).student_ids ?? []).length}/{c.max_students} HV)
                 </option>
               ))}
             </select>
@@ -205,7 +207,7 @@ function ApproveModal({ enrollment, onClose, onDone }: ApproveModalProps) {
 // Reject modal
 // ─────────────────────────────────────────────────────────────────────────────
 
-function RejectModal({ enrollment, onClose, onDone }: ApproveModalProps) {
+function RejectModal({ enrollment, onClose, onDone }: Omit<ApproveModalProps, "classes">) {
   const [reason, setReason] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -268,6 +270,7 @@ function RejectModal({ enrollment, onClose, onDone }: ApproveModalProps) {
 
 export default function AdminEnrollmentsPage() {
   const [enrollments, setEnrollments] = useState<EnrollmentRequest[]>([]);
+  const [classes, setClasses] = useState<Class[]>(MOCK_CLASSES as unknown as Class[]);
   const [filter, setFilter]           = useState<Filter>("all");
   const [search, setSearch]           = useState("");
   const [approveTarget, setApproveTarget] = useState<EnrollmentRequest | null>(null);
@@ -281,7 +284,10 @@ export default function AdminEnrollmentsPage() {
   });
 
   const reload = () => { getEnrollments().then(setEnrollments); };
-  useEffect(() => { reload(); }, []);
+  useEffect(() => {
+    reload();
+    getClasses().then(setClasses);
+  }, []);
 
   const filtered = enrollments
     .filter(e => filter === "all" || e.status === filter)
@@ -301,7 +307,7 @@ export default function AdminEnrollmentsPage() {
   ];
 
   return (
-    <PortalLayout role="admin" userName="" pageTitle="Đăng ký nhập học">
+    <PortalLayout role="admin" userName="Admin User" pageTitle="Đăng ký nhập học">
       <div className="max-w-5xl mx-auto space-y-6">
         <SectionHeader
           title="Đơn đăng ký nhập học"
@@ -385,8 +391,8 @@ export default function AdminEnrollmentsPage() {
             {filtered.map(enr => {
               const sc = STATUS_CONFIG[enr.status];
               const StatusIcon = sc.icon;
-              const reqClass = MOCK_CLASSES.find(c => c.id === enr.requested_class_id);
-              const asnClass = enr.assigned_class_id ? MOCK_CLASSES.find(c => c.id === enr.assigned_class_id) : null;
+              const reqClass = classes.find(c => c.id === enr.requested_class_id);
+              const asnClass = enr.assigned_class_id ? classes.find(c => c.id === enr.assigned_class_id) : null;
 
               return (
                 <Card key={enr.id} className={enr.status === "pending" ? "border-amber-200 dark:border-amber-800/50" : ""}>
@@ -464,7 +470,7 @@ export default function AdminEnrollmentsPage() {
                             {enr.assigned_class_id && (
                               <div>
                                 <span className="text-muted-foreground">Lớp được phân: </span>
-                                <strong>{MOCK_CLASSES.find(c => c.id === enr.assigned_class_id)?.class_name ?? enr.assigned_class_id}</strong>
+                                <strong>{classes.find(c => c.id === enr.assigned_class_id)?.class_name ?? enr.assigned_class_id}</strong>
                               </div>
                             )}
                           </div>
@@ -509,6 +515,7 @@ export default function AdminEnrollmentsPage() {
       {approveTarget && (
         <ApproveModal
           enrollment={approveTarget}
+          classes={classes}
           onClose={() => setApproveTarget(null)}
           onDone={() => { setApproveTarget(null); reload(); }}
         />

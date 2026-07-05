@@ -161,6 +161,7 @@ export default function MaterialsUploadForm({ classes, onSaved }: Props) {
     setSaveState("saving");
     try {
       const supabase = createClient();
+      const localRecords: any[] = [];
       for (const file of doneFiles) {
         await supabase.from("materials").insert({
           title,
@@ -172,7 +173,23 @@ export default function MaterialsUploadForm({ classes, onSaved }: Props) {
           target_class_ids: selectedClasses.length > 0 ? selectedClasses : null,
           target_student_ids: selectedStudents.length > 0 ? selectedStudents : null,
         });
+        localRecords.push({
+          id: crypto.randomUUID(),
+          title,
+          description,
+          file_url: file.url,
+          file_type: file.type,
+          file_size: file.size,
+          class_id: selectedClasses[0] ?? "all",
+          uploaded_at: new Date().toISOString(),
+        });
       }
+      // Mirror to localStorage so the admin library shows uploads even when Supabase fails
+      try {
+        const key = "tutorhub_admin_materials";
+        const existing = JSON.parse(localStorage.getItem(key) ?? "[]");
+        localStorage.setItem(key, JSON.stringify([...localRecords, ...existing]));
+      } catch { /* ignore quota errors */ }
       setSaveState("success");
       setTitle(""); setDescription("");
       setSelectedGrades([]); setSelectedClasses([]); setSelectedStudents([]);

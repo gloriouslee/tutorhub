@@ -8,7 +8,7 @@ import { SectionHeader, ProgressBar } from "@/components/shared";
 import { MOCK_EXAM_SCORES, MOCK_CLASSES, MOCK_TEACHERS } from "@/lib/mock-data";
 import { GraduationCap, TrendingUp, Trophy, Target, BookOpen, ChevronDown, Pencil, Check, X } from "lucide-react";
 import { useStudentContext } from "@/hooks/useStudentContext";
-import { getExamScoresByStudent, type StoredExamScore } from "@/lib/storage";
+import { getExamScoresByStudent, getCurriculum, type StoredExamScore } from "@/lib/storage";
 import { formatDate } from "@/lib/utils";
 import {
   ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
@@ -16,6 +16,13 @@ import {
 } from "recharts";
 
 const DEFAULT_TARGET = 9.0;
+
+// Normalize a score to the 10-point scale (e.g. 12/15 → 8.0)
+function norm(s: { score: number; max_score: number }): number {
+  return s.max_score && s.max_score !== 10
+    ? Number(((s.score / s.max_score) * 10).toFixed(1))
+    : s.score;
+}
 
 // Vietnamese grade scale (score/10)
 function gradeLabel(pct: number): { label: string; variant: "success" | "info" | "warning" | "default" | "destructive" } {
@@ -46,6 +53,7 @@ export default function StudentScoresPage() {
   const [editingGoal,  setEditingGoal]  = useState(false);
   const [draftTarget,  setDraftTarget]  = useState(DEFAULT_TARGET);
   const [storedScores, setStoredScores] = useState<StoredExamScore[]>([]);
+  const [takenExams,   setTakenExams]   = useState<StoredExamScore[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -54,6 +62,35 @@ export default function StudentScoresPage() {
       if (saved) { const v = parseFloat(saved); if (!isNaN(v)) setGpaTarget(v); }
     } catch {}
     getExamScoresByStudent(studentId).then(setStoredScores);
+
+    // Merge results from exams the student actually took (tutorhub_exam_result_* keys)
+    const prefix = "tutorhub_exam_result_";
+    const suffix = `_${studentId}`;
+    const found: StoredExamScore[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key || !key.startsWith(prefix) || !key.endsWith(suffix)) continue;
+      try {
+        const rec = JSON.parse(localStorage.getItem(key) || "");
+        const middle   = key.slice(prefix.length, key.length - suffix.length);
+        const classId  = middle.split("_")[0];
+        const lessonId = middle.slice(classId.length + 1);
+        const lesson = getCurriculum(classId)
+          .flatMap(ch => ch.sessions)
+          .flatMap(sess => sess.lessons)
+          .find(l => l.id === lessonId);
+        found.push({
+          id:         key,
+          student_id: studentId,
+          class_id:   classId,
+          exam_name:  lesson?.title ?? "Bài kiểm tra trực tuyến",
+          score:      rec.score,
+          max_score:  rec.total,
+          exam_date:  rec.submitted_at,
+        });
+      } catch { /* ignore malformed entries */ }
+    }
+    setTakenExams(found);
   }, [studentId, gpaTarget_KEY]);
 
   function startEdit() {
@@ -74,12 +111,12 @@ export default function StudentScoresPage() {
   // Merge mock scores (demo) + localStorage scores (real), deduplicated by id
   const allScores = useMemo(() => {
     const mockForStudent = MOCK_EXAM_SCORES.filter(s => s.student_id === studentId);
-    const combined = [...mockForStudent, ...storedScores];
+    const combined = [...mockForStudent, ...storedScores, ...takenExams];
     const seen = new Set<string>();
     return combined
       .filter(s => { if (seen.has(s.id)) return false; seen.add(s.id); return true; })
       .sort((a, b) => new Date(b.exam_date).getTime() - new Date(a.exam_date).getTime());
-  }, [studentId, storedScores]);
+  }, [studentId, storedScores, takenExams]);
 
 
   // Filtered list
@@ -89,13 +126,13 @@ export default function StudentScoresPage() {
   );
   const displayed = showAll ? filtered : filtered.slice(0, 6);
 
-  // Overall stats
+  // Overall stats (normalized to a 10-point scale)
   const avgScore = allScores.length
-    ? Number((allScores.reduce((acc, s) => acc + s.score, 0) / allScores.length).toFixed(1))
+    ? Number((allScores.reduce((acc, s) => acc + norm(s), 0) / allScores.length).toFixed(1))
     : 0;
 
-  const highestScore = allScores.length ? Math.max(...allScores.map(s => s.score)) : 0;
-  const lowestScore  = allScores.length ? Math.min(...allScores.map(s => s.score)) : 0;
+  const highestScore = allScores.length ? Math.max(...allScores.map(norm)) : 0;
+  const lowestScore  = allScores.length ? Math.min(...allScores.map(norm)) : 0;
 
   const gapToTarget = Math.max(0, gpaTarget - avgScore);
 
@@ -103,7 +140,7 @@ export default function StudentScoresPage() {
   const radarData = myClasses.map(cls => {
     const clsScores = allScores.filter(s => s.class_id === cls.id);
     const clsAvg    = clsScores.length
-      ? Number((clsScores.reduce((a, s) => a + s.score, 0) / clsScores.length).toFixed(1))
+      ? Number((clsScores.reduce((a, s) => a + norm(s), 0) / clsScores.length).toFixed(1))
       : 0;
     const teacher   = MOCK_TEACHERS.find(t => t.id === cls.tutor_id);
     return { subject: cls.subject.split(" ").slice(0, 2).join(" "), score: clsAvg, fullMark: 10, teacher: teacher?.full_name };
@@ -112,8 +149,8 @@ export default function StudentScoresPage() {
   // Per-class breakdown for sidebar
   const classBreakdown = myClasses.map(cls => {
     const recs   = allScores.filter(s => s.class_id === cls.id);
-    const avg    = recs.length ? Number((recs.reduce((a, s) => a + s.score, 0) / recs.length).toFixed(1)) : 0;
-    const best   = recs.length ? Math.max(...recs.map(s => s.score)) : 0;
+    const avg    = recs.length ? Number((recs.reduce((a, s) => a + norm(s), 0) / recs.length).toFixed(1)) : 0;
+    const best   = recs.length ? Math.max(...recs.map(norm)) : 0;
     const teacher = MOCK_TEACHERS.find(t => t.id === cls.tutor_id);
     return { cls, recs: recs.length, avg, best, teacher };
   });
