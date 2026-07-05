@@ -20,7 +20,7 @@ export const MOCK_STUDENTS = [
     full_name: "Trần Mai Phương",
     email: "phuong.tm@gmail.com",
     dob: "2009-07-22",
-    school: "Lincoln High School",
+    school: "THPT Lê Quý Đôn",
     grade: "Lớp 10",
     learning_type: "online" as const,
     parent_id: "p2",
@@ -33,8 +33,8 @@ export const MOCK_STUDENTS = [
     full_name: "Lê Hoàng Đức",
     email: "duc.lh@gmail.com",
     dob: "2011-01-08",
-    school: "Greenwood Elementary",
-    grade: "Lớp 7",
+    school: "THPT Trần Phú",
+    grade: "Lớp 10",
     learning_type: "offline" as const,
     parent_id: "p3",
     avatar_url: null,
@@ -46,7 +46,7 @@ export const MOCK_STUDENTS = [
     full_name: "Phạm Thảo My",
     email: "my.pt@gmail.com",
     dob: "2010-11-30",
-    school: "Riverside Middle School",
+    school: "THCS Nguyễn Du",
     grade: "Lớp 8",
     learning_type: "hybrid" as const,
     parent_id: "p1",
@@ -59,13 +59,20 @@ export const MOCK_STUDENTS = [
     full_name: "Vũ Nhật Nam",
     email: "nam.vn@gmail.com",
     dob: "2009-05-14",
-    school: "Lincoln High School",
+    school: "THPT Lê Quý Đôn",
     grade: "Lớp 10",
     learning_type: "online" as const,
     parent_id: "p4",
     avatar_url: null,
     created_at: "2024-09-01",
   },
+];
+
+export const MOCK_PARENTS = [
+  { id: "p1", user_id: "pu1", full_name: "Trần Văn Minh",  email: "minh.tv@gmail.com",  phone: "0903111222", avatar_url: null, created_at: "2024-09-01" },
+  { id: "p2", user_id: "pu2", full_name: "Trần Thị Hoa",   email: "hoa.tt@gmail.com",   phone: "0903222333", avatar_url: null, created_at: "2024-09-01" },
+  { id: "p3", user_id: "pu3", full_name: "Lê Quốc Bảo",    email: "bao.lq@gmail.com",   phone: "0903333444", avatar_url: null, created_at: "2024-09-01" },
+  { id: "p4", user_id: "pu4", full_name: "Vũ Thanh Hằng",  email: "hang.vt@gmail.com",  phone: "0903444555", avatar_url: null, created_at: "2024-09-01" },
 ];
 
 export const MOCK_TEACHERS = [

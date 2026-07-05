@@ -51,21 +51,47 @@ async function queryOrFallback<T>(
   }
 }
 
-// localStorage-first getter: admin edits saved locally win over Supabase/mock fallbacks.
+// Supabase-first getter: DB là nguồn dữ liệu chính; localStorage chỉ là cache
+// offline. Bảng rỗng là trạng thái hợp lệ (đã xóa hết) — chỉ fallback khi lỗi.
 async function getEntity<T>(
   key: string,
   query: () => Promise<{ data: T[] | null; error: unknown }>,
   fallback: T[]
 ): Promise<T[]> {
+  try {
+    const { data, error } = await query();
+    if (!error && data) {
+      writeLocal(key, data);
+      return data;
+    }
+  } catch { /* offline hoặc chưa cấu hình — dùng cache */ }
   const local = readLocal<T>(key);
   if (local !== null) return local;
-  return queryOrFallback(query, fallback);
+  return fallback;
 }
 
-async function saveEntity<T>(key: string, table: string, items: T[]): Promise<void> {
+// Supabase-first saver: upsert danh sách mới, xóa các row không còn trong
+// danh sách (admin delete), và mirror vào localStorage làm cache.
+async function saveEntity<T extends { id: string }>(
+  key: string,
+  table: string,
+  items: T[]
+): Promise<void> {
   writeLocal(key, items);
-  const { error } = await supabase.from(table).upsert(items as any);
-  if (error) console.error(`Error saving ${table}:`, error);
+  try {
+    if (items.length > 0) {
+      const { error } = await supabase.from(table).upsert(items as any);
+      if (error) { console.error(`Error saving ${table}:`, error); return; }
+    }
+    const keepIds = items.map((i) => i.id);
+    const del = supabase.from(table).delete();
+    const { error: delError } = keepIds.length > 0
+      ? await del.not("id", "in", `(${keepIds.map((id) => `"${id}"`).join(",")})`)
+      : await del.neq("id", "");
+    if (delError) console.error(`Error pruning ${table}:`, delError);
+  } catch (e) {
+    console.error(`Supabase unreachable while saving ${table}; cached locally.`, e);
+  }
 }
 
 export async function getStudents(): Promise<Student[]> {
@@ -572,12 +598,32 @@ export interface StudentAccount {
 const ENROLL_KEY  = "tutorhub_enrollments";
 const ACCOUNT_KEY = "tutorhub_student_accounts";
 
-export function getEnrollments(): Promise<EnrollmentRequest[]> {
-  if (typeof window === "undefined") return Promise.resolve([]);
+// Đọc/ghi enrollment: Supabase là nguồn chính, localStorage là cache offline.
+async function readEnrollmentsLocal(): Promise<EnrollmentRequest[]> {
+  if (typeof window === "undefined") return [];
   try {
     const raw = localStorage.getItem(ENROLL_KEY);
-    return Promise.resolve(raw ? JSON.parse(raw) : []);
-  } catch { return Promise.resolve([]); }
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+
+function writeEnrollmentsLocal(list: EnrollmentRequest[]): void {
+  if (typeof window === "undefined") return;
+  try { localStorage.setItem(ENROLL_KEY, JSON.stringify(list)); } catch { /* ignore */ }
+}
+
+export async function getEnrollments(): Promise<EnrollmentRequest[]> {
+  try {
+    const { data, error } = await supabase
+      .from("enrollment_requests")
+      .select("*")
+      .order("created_at", { ascending: false });
+    if (!error && data) {
+      writeEnrollmentsLocal(data as EnrollmentRequest[]);
+      return data as EnrollmentRequest[];
+    }
+  } catch { /* offline — dùng cache */ }
+  return readEnrollmentsLocal();
 }
 
 export async function createEnrollment(
@@ -589,8 +635,11 @@ export async function createEnrollment(
     status: "pending",
     created_at: new Date().toISOString(),
   };
-  const existing = await getEnrollments();
-  localStorage.setItem(ENROLL_KEY, JSON.stringify([request, ...existing]));
+  try {
+    const { error } = await supabase.from("enrollment_requests").insert(request);
+    if (error) console.error("Error creating enrollment:", error);
+  } catch { /* offline */ }
+  writeEnrollmentsLocal([request, ...(await readEnrollmentsLocal())]);
   return request;
 }
 
@@ -598,13 +647,18 @@ export async function approveEnrollment(
   id: string,
   opts: { assigned_class_id: string; account_username: string; account_password: string }
 ): Promise<void> {
+  const patch = {
+    status: "approved" as EnrollmentStatus,
+    ...opts,
+    reviewed_at: new Date().toISOString(),
+  };
+  try {
+    const { error } = await supabase.from("enrollment_requests").update(patch).eq("id", id);
+    if (error) console.error("Error approving enrollment:", error);
+  } catch { /* offline */ }
   const all = await getEnrollments();
-  const updated = all.map(e =>
-    e.id === id
-      ? { ...e, status: "approved" as EnrollmentStatus, ...opts, reviewed_at: new Date().toISOString() }
-      : e
-  );
-  localStorage.setItem(ENROLL_KEY, JSON.stringify(updated));
+  const updated = all.map(e => (e.id === id ? { ...e, ...patch } : e));
+  writeEnrollmentsLocal(updated);
 
   const enr = updated.find(e => e.id === id)!;
   const account: StudentAccount = {
@@ -627,21 +681,27 @@ export async function approveEnrollment(
 }
 
 export async function deleteEnrollment(id: string): Promise<void> {
-  const all = await getEnrollments();
-  localStorage.setItem(ENROLL_KEY, JSON.stringify(all.filter(e => e.id !== id)));
+  try {
+    const { error } = await supabase.from("enrollment_requests").delete().eq("id", id);
+    if (error) console.error("Error deleting enrollment:", error);
+  } catch { /* offline */ }
+  writeEnrollmentsLocal((await readEnrollmentsLocal()).filter(e => e.id !== id));
   // Also remove student account if approved
   const accounts = getStudentAccounts();
   localStorage.setItem(ACCOUNT_KEY, JSON.stringify(accounts.filter(a => a.student_id !== `enr_${id}`)));
 }
 
 export async function rejectEnrollment(id: string, reason?: string): Promise<void> {
-  const all = await getEnrollments();
-  const updated = all.map(e =>
-    e.id === id
-      ? { ...e, status: "rejected" as EnrollmentStatus, reject_reason: reason, reviewed_at: new Date().toISOString() }
-      : e
-  );
-  localStorage.setItem(ENROLL_KEY, JSON.stringify(updated));
+  const patch = {
+    status: "rejected" as EnrollmentStatus,
+    reject_reason: reason,
+    reviewed_at: new Date().toISOString(),
+  };
+  try {
+    const { error } = await supabase.from("enrollment_requests").update(patch).eq("id", id);
+    if (error) console.error("Error rejecting enrollment:", error);
+  } catch { /* offline */ }
+  writeEnrollmentsLocal((await readEnrollmentsLocal()).map(e => (e.id === id ? { ...e, ...patch } : e)));
 }
 
 export function getStudentAccounts(): StudentAccount[] {
@@ -663,9 +723,16 @@ export async function changeStudentPassword(
   const enr = all.find(e => e.id === enrollmentId);
   if (!enr || enr.status !== "approved") return "not_found";
   if (enr.account_password !== currentPassword) return "wrong_password";
-  localStorage.setItem(ENROLL_KEY, JSON.stringify(
-    all.map(e => e.id === enrollmentId ? { ...e, account_password: newPassword } : e)
-  ));
+  try {
+    const { error } = await supabase
+      .from("enrollment_requests")
+      .update({ account_password: newPassword })
+      .eq("id", enrollmentId);
+    if (error) console.error("Error changing password:", error);
+  } catch { /* offline */ }
+  writeEnrollmentsLocal(
+    all.map(e => (e.id === enrollmentId ? { ...e, account_password: newPassword } : e))
+  );
   return "ok";
 }
 
