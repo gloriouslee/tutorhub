@@ -45,8 +45,8 @@ const navConfig: Record<UserRole, NavItem[]> = {
   teacher: [
     { label: "Tổng quan",  href: "/teacher",                icon: LayoutDashboard },
     { label: "Lớp của tôi",href: "/teacher/classes",        icon: BookOpen },
-
-
+    { label: "Bài tập",    href: "/teacher/homework",       icon: ClipboardList },
+    { label: "Điểm danh",  href: "/teacher/attendance",     icon: CheckSquare },
     { label: "Bài nộp",    href: "/teacher/submissions",    icon: FileText },
     { label: "Tài liệu",   href: "/teacher/materials",      icon: BookMarked },
     { label: "Học viên",   href: "/teacher/students",       icon: Users },
@@ -58,7 +58,8 @@ const navConfig: Record<UserRole, NavItem[]> = {
     { label: "Học viên",   href: "/admin/students",         icon: GraduationCap },
     { label: "Giáo viên",  href: "/admin/teachers",         icon: Users },
     { label: "Lớp học",    href: "/admin/classes",          icon: BookOpen },
-
+    { label: "Chuyên cần", href: "/admin/attendance",       icon: CheckSquare },
+    { label: "Tài liệu",   href: "/admin/materials",        icon: BookMarked },
     { label: "Đăng ký HV", href: "/admin/enrollments",      icon: GraduationCap },
     { label: "Giao dịch",  href: "/admin/transactions",     icon: CheckSquare },
     { label: "Thanh toán", href: "/admin/payments",         icon: DollarSign },
@@ -84,19 +85,28 @@ function parseSet(key: string): Set<string> {
   try { return new Set(JSON.parse(ls(key) ?? "[]")); } catch { return new Set(); }
 }
 
+function currentStudentId(): string {
+  try {
+    const match = document.cookie.match(/(?:^|;\s*)enrolled_student_id=([^;]+)/);
+    if (match) return decodeURIComponent(match[1]);
+  } catch { /* SSR or cookie access blocked */ }
+  return "s1";
+}
+
 function computeBadges(role: UserRole): Record<string, number> {
   const result: Record<string, number> = {};
 
   if (role === "student") {
     // Bài tập: homework for enrolled classes that hasn't been submitted
+    const sid = currentStudentId();
     const myClassIds = MOCK_CLASSES
-      .filter(c => (c.student_ids ?? []).includes("s1"))
+      .filter(c => (c.student_ids ?? []).includes(sid))
       .map(c => c.id);
     const myHw = MOCK_HOMEWORK.filter(h => myClassIds.includes(h.class_id));
     const subs: { homework_id: string; student_id: string }[] =
       JSON.parse(ls("tutorhub_submissions") ?? "[]");
     const submittedIds = new Set(
-      subs.filter(s => s.student_id === "s1").map(s => s.homework_id)
+      subs.filter(s => s.student_id === sid).map(s => s.homework_id)
     );
     const pending = myHw.filter(h => !submittedIds.has(h.id)).length;
     if (pending > 0) result["/student/homework"] = pending;

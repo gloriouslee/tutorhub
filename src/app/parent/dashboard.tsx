@@ -211,7 +211,7 @@ export default function ParentDashboard() {
           <Card>
             <CardHeader className="pb-3"><CardTitle className="text-sm">Lớp học sắp tới</CardTitle></CardHeader>
             <CardContent className="space-y-2">
-              {MOCK_CLASSES.slice(0, 4).map((cls) => (
+              {MOCK_CLASSES.filter(cls => (cls.student_ids ?? []).some(id => allChildIds.includes(id))).slice(0, 4).map((cls) => (
                 <div key={cls.id} className="flex items-center gap-3 py-1.5">
                   <div className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: cls.color ?? "#6366f1" }} />
                   <div className="flex-1 min-w-0">

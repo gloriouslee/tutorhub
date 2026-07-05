@@ -1,5 +1,7 @@
 "use client";
 
+import { toLocalDateKey } from "@/lib/utils";
+
 import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import PortalLayout from "@/components/layout/PortalLayout";
@@ -148,7 +150,7 @@ export default function TeacherHomeworkPage() {
         title:       fTitle.trim(),
         description: fDesc,
         due_date:    fDue,
-        created_at:  new Date().toISOString().split("T")[0],
+        created_at:  toLocalDateKey(new Date()),
       };
       updated = [newHw, ...homeworks];
     }

@@ -9,14 +9,14 @@ import { CheckSquare, Calendar, Users, Check, X, AlertCircle } from "lucide-reac
 import { useState, useEffect } from "react";
 import { getClasses, getStudents, getAttendance, saveAttendance } from "@/lib/storage";
 import { Class, Student, Attendance } from "@/types";
-import { formatDate } from "@/lib/utils";
+import { formatDate, toLocalDateKey } from "@/lib/utils";
 
 export default function AdminAttendancePage() {
   const [classes, setClasses] = useState<Class[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
   const [attendance, setAttendance] = useState<Attendance[]>([]);
   const [selectedClass, setSelectedClass] = useState<Class | null>(null);
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split("T")[0]);
+  const [selectedDate, setSelectedDate] = useState(toLocalDateKey(new Date()));
 
   useEffect(() => {
     async function loadData() {
@@ -76,7 +76,7 @@ export default function AdminAttendancePage() {
         student_id: studentId,
         attendance_date: selectedDate,
         status,
-        created_at: new Date().toISOString().split("T")[0],
+        created_at: toLocalDateKey(new Date()),
       };
       updated = [newRecord, ...attendance];
     }

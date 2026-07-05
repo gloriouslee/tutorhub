@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -46,8 +47,26 @@ function saveSubmissions(subs: Submission[]) {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const TEACHER_ID = "t1";
+const HW_KEY = "tutorhub_teacher_homework";
 const myClassIds = MOCK_CLASSES.filter(c => c.tutor_id === TEACHER_ID).map(c => c.id);
-const myHomework = MOCK_HOMEWORK.filter(h => myClassIds.includes(h.class_id));
+
+interface HomeworkItem {
+  id: string;
+  class_id: string;
+  title: string;
+  due_date: string;
+  [key: string]: unknown;
+}
+
+const MOCK_MY_HOMEWORK: HomeworkItem[] = MOCK_HOMEWORK.filter(h => myClassIds.includes(h.class_id));
+
+// Merge mock homework with teacher-created homework from localStorage
+function loadMyHomework(): HomeworkItem[] {
+  let stored: HomeworkItem[] = [];
+  try { stored = JSON.parse(localStorage.getItem(HW_KEY) ?? "[]"); } catch {}
+  const storedIds = new Set(stored.map(h => h.id));
+  return [...stored, ...MOCK_MY_HOMEWORK.filter(h => !storedIds.has(h.id))];
+}
 
 function relativeTime(iso: string) {
   const diff = Date.now() - new Date(iso).getTime();
@@ -67,9 +86,13 @@ function scoreColor(score: number) {
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
-export default function TeacherSubmissionsPage() {
+function TeacherSubmissionsPageInner() {
+  const searchParams = useSearchParams();
+  const hwParam = searchParams.get("hw");
+
   const [submissions, setSubmissions] = useState<Submission[]>([]);
-  const [hwFilter,    setHwFilter]    = useState<string>("all");
+  const [myHomework,  setMyHomework]  = useState<HomeworkItem[]>(MOCK_MY_HOMEWORK);
+  const [hwFilter,    setHwFilter]    = useState<string>(hwParam ?? "all");
   const [statusFilter, setStatusFilter] = useState<"all" | "graded" | "ungraded">("all");
   const [search,      setSearch]      = useState("");
   const [grading,       setGrading]       = useState<string | null>(null);
@@ -79,8 +102,10 @@ export default function TeacherSubmissionsPage() {
   const [tfDragOver,    setTfDragOver]    = useState(false);
 
   useEffect(() => {
+    const hwList = loadMyHomework();
+    setMyHomework(hwList);
     // Try Supabase first, fall back to localStorage seed
-    getSubmissionsByHomeworks(myHomework.map(h => h.id)).then(remote => {
+    getSubmissionsByHomeworks(hwList.map(h => h.id)).then(remote => {
       if (remote.length > 0) {
         // Enrich with student_name from MOCK_STUDENTS for display
         const enriched = remote.map(s => ({
@@ -107,7 +132,7 @@ export default function TeacherSubmissionsPage() {
       if (!myHomework.find(h => h.id === s.homework_id)) return false;
       return true;
     }).sort((a, b) => new Date(b.submitted_at).getTime() - new Date(a.submitted_at).getTime());
-  }, [submissions, hwFilter, statusFilter, search]);
+  }, [submissions, hwFilter, statusFilter, search, myHomework]);
 
   // Stats
   const mySubmissions = submissions.filter(s => myHomework.find(h => h.id === s.homework_id));
@@ -129,10 +154,23 @@ export default function TeacherSubmissionsPage() {
     if (isNaN(score) || score < 0 || score > 10) return;
     const feedback = feedbackInput.trim();
 
-    // For demo: use object URL if file selected, else keep existing teacher_file
+    // For demo: persist file as a data URL (blob URLs die on reload), else keep existing teacher_file
     const existing = submissions.find(s => s.id === subId);
-    const teacherFileUrl  = teacherFile ? URL.createObjectURL(teacherFile) : existing?.teacher_file_url;
-    const teacherFileName = teacherFile ? teacherFile.name : existing?.teacher_file_name;
+    let teacherFileUrl  = existing?.teacher_file_url;
+    let teacherFileName = existing?.teacher_file_name;
+    if (teacherFile) {
+      if (teacherFile.size > 2 * 1024 * 1024) {
+        alert("File quá lớn để lưu (tối đa 2MB)");
+        return;
+      }
+      teacherFileUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(teacherFile);
+      });
+      teacherFileName = teacherFile.name;
+    }
 
     const updated = submissions.map(s =>
       s.id === subId
@@ -494,5 +532,13 @@ export default function TeacherSubmissionsPage() {
         </div>
       </div>
     </PortalLayout>
+  );
+}
+
+export default function TeacherSubmissionsPage() {
+  return (
+    <Suspense>
+      <TeacherSubmissionsPageInner />
+    </Suspense>
   );
 }

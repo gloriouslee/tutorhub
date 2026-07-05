@@ -18,6 +18,7 @@ import { getNotifications, getEnrollments } from "@/lib/storage";
 import { getSubmissionsByStudent } from "@/lib/supabase/submissions";
 import Link from "next/link";
 import { formatDate } from "@/lib/utils";
+import { useStudentContext } from "@/hooks/useStudentContext";
 import { AreaChart, Area, Tooltip, ResponsiveContainer } from "recharts";
 
 const DOW_EN = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -25,12 +26,6 @@ const DOW_VI: Record<string, string> = {
   Monday: "Thứ Hai", Tuesday: "Thứ Ba", Wednesday: "Thứ Tư",
   Thursday: "Thứ Năm", Friday: "Thứ Sáu", Saturday: "Thứ Bảy", Sunday: "Chủ Nhật",
 };
-
-function getCookie(name: string): string {
-  if (typeof document === "undefined") return "";
-  const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
-  return match ? decodeURIComponent(match[1]) : "";
-}
 
 function buildWeekSessions(classes: typeof MOCK_CLASSES) {
   const now      = new Date();
@@ -65,52 +60,27 @@ function buildWeekSessions(classes: typeof MOCK_CLASSES) {
 }
 
 export default function StudentDashboard() {
-  const [studentId,   setStudentId]   = useState("s1");
-  const [studentName, setStudentName] = useState("Nguyễn Anh Tuấn");
-  const [myClasses,   setMyClasses]   = useState(() =>
-    MOCK_CLASSES.filter(c => c.student_ids?.includes("s1"))
-  );
+  const { studentId, studentName, myClasses, ready } = useStudentContext();
   const [avgScore,       setAvgScore]       = useState<string | null>(null);
-  const [attendanceRate, setAttendanceRate] = useState(100);
+  const [attendanceRate, setAttendanceRate] = useState<number | null>(null);
   const [unreadCount,    setUnreadCount]    = useState(0);
   const [submittedCount, setSubmittedCount] = useState(0);
 
   useEffect(() => {
-    // Determine if enrolled student or demo
-    const enrolledId   = getCookie("enrolled_student_id");   // e.g. "enr_<uuid>"
-    const enrolledName = getCookie("enrolled_student_name");
-    const enrolledClass = getCookie("enrolled_student_class");
-
-    let sid = "s1";
-    let sname = "Nguyễn Anh Tuấn";
-    let classes = MOCK_CLASSES.filter(c => c.student_ids?.includes("s1"));
-
-    if (enrolledId && enrolledName) {
-      sid   = enrolledId;
-      sname = enrolledName;
-      // Try to find their assigned class in MOCK_CLASSES
-      const assignedClass = enrolledClass
-        ? MOCK_CLASSES.filter(c => c.id === enrolledClass)
-        : [];
-      classes = assignedClass;
-    }
-
-    setStudentId(sid);
-    setStudentName(sname);
-    setMyClasses(classes);
+    if (!ready) return;
 
     // Scores
-    const exams = MOCK_EXAM_SCORES.filter(e => e.student_id === sid);
+    const exams = MOCK_EXAM_SCORES.filter(e => e.student_id === studentId);
     setAvgScore(exams.length > 0
       ? (exams.reduce((acc, e) => acc + (e.score / e.max_score) * 10, 0) / exams.length).toFixed(1)
       : null
     );
 
-    // Attendance
-    const att = MOCK_ATTENDANCE.filter(a => a.student_id === sid);
+    // Attendance — null when there is no record yet (shown as "—")
+    const att = MOCK_ATTENDANCE.filter(a => a.student_id === studentId);
     setAttendanceRate(att.length > 0
       ? Math.round((att.filter(a => a.status === "present" || a.status === "late").length / att.length) * 100)
-      : 100
+      : null
     );
 
     // Notifications
@@ -121,14 +91,14 @@ export default function StudentDashboard() {
     });
 
     // Submissions
-    getSubmissionsByStudent(sid).then(subs => {
-      const classIds = classes.map(c => c.id);
+    getSubmissionsByStudent(studentId).then(subs => {
+      const classIds = myClasses.map(c => c.id);
       const hw = MOCK_HOMEWORK.filter(h => classIds.includes(h.class_id));
       setSubmittedCount(subs.filter(s =>
         hw.find(h => h.id === s.homework_id)
       ).length);
     });
-  }, []);
+  }, [ready, studentId, myClasses]);
 
   const now             = new Date();
   const todayStr        = now.toLocaleDateString("vi-VN", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
@@ -208,7 +178,7 @@ export default function StudentDashboard() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-5">
         {[
           { title: "Lớp đang học",   value: myClasses.length,      icon: BookOpen,    color: "from-blue-500 to-indigo-500",   shadow: "shadow-blue-500/20" },
-          { title: "Chuyên cần",     value: `${attendanceRate}%`,  icon: CheckSquare, color: "from-emerald-400 to-teal-500",  shadow: "shadow-emerald-500/20" },
+          { title: "Chuyên cần",     value: attendanceRate != null ? `${attendanceRate}%` : "—",  icon: CheckSquare, color: "from-emerald-400 to-teal-500",  shadow: "shadow-emerald-500/20" },
           { title: "Bài tập chờ",   value: pendingHomework.length, icon: FileText,    color: "from-amber-400 to-orange-500",  shadow: "shadow-orange-500/20" },
           { title: "Thông báo mới", value: unreadCount,            icon: Bell,        color: "from-fuchsia-500 to-purple-500",shadow: "shadow-fuchsia-500/20" },
         ].map((stat, i) => (
@@ -381,12 +351,18 @@ export default function StudentDashboard() {
                   <div>
                     <p className="text-sm font-medium text-muted-foreground">Chuyên cần</p>
                     <h3 className="text-2xl font-black text-foreground">
-                      {attendanceRate}<span className="text-base font-medium text-muted-foreground ml-1">%</span>
+                      {attendanceRate != null
+                        ? <>{attendanceRate}<span className="text-base font-medium text-muted-foreground ml-1">%</span></>
+                        : "—"}
                     </h3>
                   </div>
-                  <Badge className={`border-0 ${attendanceRate >= 90 ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" : "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"}`}>
-                    {attendanceRate >= 90 ? "Xuất sắc" : attendanceRate >= 75 ? "Khá" : "Cần cải thiện"}
-                  </Badge>
+                  {attendanceRate != null ? (
+                    <Badge className={`border-0 ${attendanceRate >= 90 ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" : "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"}`}>
+                      {attendanceRate >= 90 ? "Xuất sắc" : attendanceRate >= 75 ? "Khá" : "Cần cải thiện"}
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline" className="text-muted-foreground">Chưa có dữ liệu</Badge>
+                  )}
                 </div>
                 <div className="h-[140px] -mx-6 -mb-6">
                   <ResponsiveContainer width="100%" height="100%">

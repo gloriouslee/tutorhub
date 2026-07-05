@@ -1,5 +1,7 @@
 "use client";
 
+import { toLocalDateKey } from "@/lib/utils";
+
 import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -40,7 +42,7 @@ function generateSlots(schedule: ClassSchedule[]): ScheduledSlot[] {
     const diff = (targetDay - cursor.getDay() + 7) % 7;
     cursor.setDate(cursor.getDate() + diff);
     while (cursor <= end) {
-      const dateStr  = cursor.toISOString().split("T")[0];
+      const dateStr  = toLocalDateKey(cursor);
       const dayLabel = cursor.toLocaleDateString("vi-VN", { weekday: "short" });
       const dateLabel = cursor.toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit" });
       slots.push({ date: dateStr, label: `${dayLabel} ${dateLabel} · ${sched.start_time}–${sched.end_time}`, start_time: sched.start_time, end_time: sched.end_time });

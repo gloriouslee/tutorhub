@@ -6,18 +6,28 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 export function formatDate(date: string | Date): string {
-  return new Date(date).toLocaleDateString("en-US", {
+  return new Date(date).toLocaleDateString("vi-VN", {
     year: "numeric",
-    month: "short",
+    month: "numeric",
     day: "numeric",
   });
 }
 
 export function formatTime(date: string | Date): string {
-  return new Date(date).toLocaleTimeString("en-US", {
+  return new Date(date).toLocaleTimeString("vi-VN", {
     hour: "2-digit",
     minute: "2-digit",
+    hour12: false,
   });
+}
+
+// Date key in the machine's local timezone (yyyy-MM-dd). Use instead of
+// toISOString().slice(0,10), which shifts to the previous day for UTC+ timezones.
+export function toLocalDateKey(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
 }
 
 export function formatCurrency(amount: number): string {

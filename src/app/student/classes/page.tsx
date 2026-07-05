@@ -178,14 +178,14 @@ export default function StudentClassesPage() {
 
                       {/* Actions */}
                       <div className="flex items-center gap-2 pt-1 mt-auto border-t border-border/50">
-                        {cls.zoom_link ? (
+                        {(liveLink || cls.zoom_link) ? (
                           <Button
                             size="sm"
                             variant="gradient"
                             className="flex-1 shadow-md shadow-primary/20 text-xs"
                             onClick={e => {
                               e.preventDefault();
-                              window.open(cls.zoom_link, "_blank", "noopener,noreferrer");
+                              window.open(liveLink || cls.zoom_link, "_blank", "noopener,noreferrer");
                             }}
                           >
                             <Video className="h-3.5 w-3.5 mr-1.5" /> Tham gia Online

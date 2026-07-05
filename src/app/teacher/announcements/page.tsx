@@ -17,8 +17,8 @@ import { formatDate } from "@/lib/utils";
 import { MOCK_CLASSES } from "@/lib/mock-data";
 
 const TEACHER_ID   = "t1";
-const TEACHER_NAME = "Tiến sĩ Sarah Mitchell";
-const TEACHER_INITIALS = "SM";
+const TEACHER_NAME = "Thầy Hùng Toán";
+const TEACHER_INITIALS = "HT";
 
 // Classes this teacher teaches
 const MY_CLASSES = MOCK_CLASSES.filter(c => c.tutor_id === TEACHER_ID);

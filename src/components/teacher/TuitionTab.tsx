@@ -6,6 +6,7 @@ import {
   getClassTuition, saveClassTuition, recordTuitionPayment, deleteTuitionPayment,
   type ClassTuitionConfig, type StudentTuitionData, type TuitionPaymentRecord,
 } from "@/lib/storage";
+import { formatCurrency } from "@/lib/utils";
 import {
   Wallet, Plus, Pencil, Check, X,
   Trash2, Clock, AlertCircle, CheckCircle2, Settings,
@@ -14,10 +15,6 @@ import {
 type PackageType = "online" | "advanced" | "offline";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
-
-function fmt(n: number) {
-  return n.toLocaleString("vi-VN") + "đ";
-}
 
 function currentPeriod() {
   const d = new Date();
@@ -198,7 +195,7 @@ function HistoryPanel({
             <div key={p.id} className="flex items-center gap-3 p-3 rounded-xl border border-border bg-background">
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <span className="text-sm font-semibold text-foreground">{fmt(p.amount)}</span>
+                  <span className="text-sm font-semibold text-foreground">{formatCurrency(p.amount)}</span>
                   <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">
                     {p.method === "cash" ? "Tiền mặt" : p.method === "transfer" ? "Chuyển khoản" : "Khác"}
                   </span>
@@ -219,7 +216,7 @@ function HistoryPanel({
         </div>
         <div className="px-5 pb-4 pt-2 border-t border-border shrink-0 flex justify-between text-xs text-muted-foreground">
           <span>{data.payments.length} giao dịch</span>
-          <span className="font-semibold text-foreground">Tổng: {fmt(totalPaid(data))}</span>
+          <span className="font-semibold text-foreground">Tổng: {formatCurrency(totalPaid(data))}</span>
         </div>
       </div>
     </div>
@@ -282,7 +279,7 @@ function StudentRow({
     : debt === 0
     ? { label: "Đã đủ", cls: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400", icon: CheckCircle2 }
     : paid > 0
-    ? { label: `Còn ${fmt(debt)}`, cls: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400", icon: AlertCircle }
+    ? { label: `Còn ${formatCurrency(debt)}`, cls: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400", icon: AlertCircle }
     : { label: "Chưa đóng", cls: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400", icon: Clock };
 
   return (
@@ -327,7 +324,7 @@ function StudentRow({
                 onClick={() => { setFeeInput(fee.toString()); setEditFee(true); }}
                 className="flex items-center gap-1 text-left"
               >
-                <span className="text-sm font-semibold text-foreground">{fmt(fee)}</span>
+                <span className="text-sm font-semibold text-foreground">{formatCurrency(fee)}</span>
                 <Pencil className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
               </button>
               {sData.custom_fee !== undefined ? (
@@ -359,7 +356,7 @@ function StudentRow({
 
         {/* Paid this period */}
         <div className="w-24 shrink-0 text-sm text-foreground font-medium">
-          {fee > 0 ? fmt(paid) : "—"}
+          {fee > 0 ? formatCurrency(paid) : "—"}
         </div>
 
         {/* Notes */}
@@ -532,15 +529,15 @@ export default function TuitionTab({ classId, students }: Props) {
       <div className="grid grid-cols-3 gap-3">
         <div className="p-4 rounded-2xl border border-border bg-card">
           <p className="text-xs text-muted-foreground mb-1">{periodLabel(period)} — Dự kiến</p>
-          <p className="text-xl font-bold text-foreground">{fmt(totalExpected)}</p>
+          <p className="text-xl font-bold text-foreground">{formatCurrency(totalExpected)}</p>
         </div>
         <div className="p-4 rounded-2xl border border-emerald-200 dark:border-emerald-800/40 bg-emerald-50/50 dark:bg-emerald-900/10">
           <p className="text-xs text-emerald-600 dark:text-emerald-400 mb-1">Đã thu được</p>
-          <p className="text-xl font-bold text-emerald-700 dark:text-emerald-300">{fmt(totalCollected)}</p>
+          <p className="text-xl font-bold text-emerald-700 dark:text-emerald-300">{formatCurrency(totalCollected)}</p>
         </div>
         <div className={`p-4 rounded-2xl border ${totalDebt > 0 ? "border-red-200 dark:border-red-800/40 bg-red-50/50 dark:bg-red-900/10" : "border-border bg-card"}`}>
           <p className={`text-xs mb-1 ${totalDebt > 0 ? "text-red-600 dark:text-red-400" : "text-muted-foreground"}`}>Còn chưa thu</p>
-          <p className={`text-xl font-bold ${totalDebt > 0 ? "text-red-700 dark:text-red-300" : "text-foreground"}`}>{fmt(totalDebt)}</p>
+          <p className={`text-xl font-bold ${totalDebt > 0 ? "text-red-700 dark:text-red-300" : "text-foreground"}`}>{formatCurrency(totalDebt)}</p>
         </div>
       </div>
 

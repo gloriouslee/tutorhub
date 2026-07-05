@@ -1,7 +1,9 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-const publicRoutes = ["/login", "/register", "/forgot-password"];
+const publicRoutes = ["/login", "/register", "/forgot-password", "/enroll"];
+// Auth pages redirect logged-in users to their portal; /enroll stays accessible to everyone
+const authPages = ["/login", "/register", "/forgot-password"];
 const roleRoutes: Record<string, string> = {
   student: "/student",
   parent: "/parent",
@@ -50,16 +52,18 @@ export async function middleware(request: NextRequest) {
 
   const { pathname } = request.nextUrl;
 
+  // API routes handle their own auth; never redirect them to an HTML login page
+  if (pathname.startsWith("/api")) {
+    return supabaseResponse;
+  }
+
   // Redirect unauthenticated users to login
   if (!isAuth && !publicRoutes.some((r) => pathname.startsWith(r))) {
-    if (pathname === "/") {
-      return NextResponse.redirect(new URL("/login", request.url));
-    }
     return NextResponse.redirect(new URL("/login", request.url));
   }
 
   // Redirect authenticated users away from auth pages
-  if (isAuth && publicRoutes.some((r) => pathname.startsWith(r))) {
+  if (isAuth && authPages.some((r) => pathname.startsWith(r))) {
     const role = user?.user_metadata?.role ?? demoRole ?? "student";
     return NextResponse.redirect(
       new URL(roleRoutes[role] ?? "/student", request.url)

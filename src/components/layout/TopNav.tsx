@@ -62,7 +62,7 @@ export default function TopNav({
         <Search className="h-4 w-4 text-muted-foreground shrink-0" />
         <input
           type="text"
-          placeholder="Search..."
+          placeholder="Tìm kiếm..."
           onFocus={() => setSearchOpen(true)}
           onBlur={() => setSearchOpen(false)}
           className="bg-transparent text-sm outline-none placeholder:text-muted-foreground text-foreground w-48"

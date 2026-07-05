@@ -10,6 +10,7 @@ import {
   ChevronLeft, Flag, RotateCcw, BookOpen, Circle,
   ChevronRight, LayoutGrid, X,
 } from "lucide-react";
+import { useStudentContext } from "@/hooks/useStudentContext";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -25,13 +26,6 @@ type ExamResult = {
   total: number;
   submitted_at: string;
 };
-
-// Cookie helpers
-function getCookie(name: string): string {
-  if (typeof document === "undefined") return "";
-  const match = document.cookie.match(new RegExp("(?:^|; )" + name + "=([^;]*)"));
-  return match ? decodeURIComponent(match[1]) : "";
-}
 
 // Mark lesson as watched (for curriculum progress)
 function markExamComplete(studentId: string, lessonId: string) {
@@ -536,8 +530,7 @@ export default function ExamPage() {
   const lessonId = params.lessonId as string;
   const router   = useRouter();
 
-  const studentId   = getCookie("enrolled_student_id")   || "s1";
-  const studentName = getCookie("enrolled_student_name") || "Nguyễn Anh Tuấn";
+  const { studentId, studentName } = useStudentContext();
 
   const [lesson,      setLesson]      = useState<CurriculumLesson | null>(null);
   const [questions,   setQuestions]   = useState<ExamQuestion[]>([]);
@@ -577,7 +570,7 @@ export default function ExamPage() {
           return;
         }
       }
-  }, [classId, lessonId]);
+  }, [classId, lessonId, studentId]);
 
   const timeLimit = lesson?.exam_content?.time_limit
     ? lesson.exam_content.time_limit * 60

@@ -10,12 +10,12 @@ const inter = Inter({
 
 export const metadata: Metadata = {
   title: {
-    default: "TutorHub — Hybrid Learning Center",
+    default: "TutorHub — Trung tâm học tập Hybrid",
     template: "%s | TutorHub",
   },
   description:
-    "A modern hybrid learning center platform supporting online and offline students with intelligent scheduling, progress tracking, and seamless collaboration.",
-  keywords: ["tutoring", "education", "learning", "online classes", "student portal"],
+    "Nền tảng trung tâm gia sư hiện đại hỗ trợ học viên online và offline với lịch học thông minh, theo dõi tiến độ và cộng tác liền mạch.",
+  keywords: ["gia sư", "giáo dục", "học tập", "lớp học online", "cổng học viên"],
 };
 
 export default function RootLayout({
@@ -24,7 +24,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="vi" suppressHydrationWarning>
       <head />
       <body className={`${inter.variable} antialiased min-h-screen`}>
         {children}

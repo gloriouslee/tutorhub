@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { AttendanceBadge, LearningModeBadge, SectionHeader } from "@/components/shared";
 import { MOCK_STUDENTS, MOCK_CLASSES, MOCK_ATTENDANCE } from "@/lib/mock-data";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { formatDate } from "@/lib/utils";
+import { formatDate, toLocalDateKey } from "@/lib/utils";
 import {
   CheckSquare, Users, UserCheck, UserX, Clock,
   CalendarDays, ChevronLeft, ChevronRight, Save,
@@ -37,19 +37,40 @@ function persistSaved(list: SavedRecord[]) {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-function today(): string { return new Date().toISOString().split("T")[0]; }
+function today(): string { return toLocalDateKey(new Date()); }
 
 function shiftDate(base: string, days: number): string {
   const d = new Date(base);
   d.setDate(d.getDate() + days);
-  return d.toISOString().split("T")[0];
+  return toLocalDateKey(d);
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
+interface ExtraClass {
+  id: string;
+  class_name: string;
+  student_ids: string[];
+  tutor_id: string;
+  learning_mode: "online" | "offline" | "hybrid";
+  color: string;
+}
+
+function loadExtraClasses(): ExtraClass[] {
+  try { return JSON.parse(localStorage.getItem("tutorhub_teacher_classes") ?? "[]"); } catch { return []; }
+}
+
 export default function TeacherAttendancePage() {
+  const [extraClasses, setExtraClasses] = useState<ExtraClass[]>([]);
+  useEffect(() => {
+    setExtraClasses(loadExtraClasses().filter(c => c.tutor_id === TEACHER_ID));
+  }, []);
+
   const teacherClasses = useMemo(
-    () => MOCK_CLASSES.filter(c => c.tutor_id === TEACHER_ID),
-    []
+    () => [
+      ...MOCK_CLASSES.filter(c => c.tutor_id === TEACHER_ID),
+      ...extraClasses,
+    ],
+    [extraClasses]
   );
 
   const [selectedClassId, setSelectedClassId] = useState(teacherClasses[0]?.id ?? "");

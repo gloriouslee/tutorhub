@@ -9,6 +9,7 @@ import { SectionHeader } from "@/components/shared";
 import { MOCK_STUDENTS, MOCK_CLASSES } from "@/lib/mock-data";
 import { Calendar, Clock, MapPin, Video, ChevronLeft, ChevronRight, Filter, StickyNote, ChevronDown, BookOpen } from "lucide-react";
 import { getCurriculum } from "@/lib/storage";
+import { toLocalDateKey } from "@/lib/utils";
 import type { CurriculumSession } from "@/lib/storage";
 
 const DAYS_OF_WEEK = ["Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy", "Chủ Nhật"];
@@ -21,12 +22,9 @@ const mapDay = (day: string) => {
   return map[day] || day;
 };
 
-// Map children to classes for mock data purposes
-const getClassesForChild = (childId: string) => {
-  if (childId === "s1") return [MOCK_CLASSES[0], MOCK_CLASSES[1]]; // Toán 12, Lý 12
-  if (childId === "s4") return [MOCK_CLASSES[2]]; // Hóa 12
-  return [];
-};
+// Map children to their real classes via enrollment
+const getClassesForChild = (childId: string) =>
+  MOCK_CLASSES.filter(c => (c.student_ids ?? []).includes(childId));
 
 // per-class note + curriculum maps loaded from localStorage
 type NoteMap = Record<string, string>; // dateStr → note text
@@ -191,7 +189,7 @@ export default function ParentSchedulePage() {
                     </div>
                   ) : (
                     classes.map((cls, idx) => {
-                      const dateStr = dateObj.toISOString().slice(0, 10);
+                      const dateStr = toLocalDateKey(dateObj);
                       const cardKey = `${cls.id}-${dateStr}-${idx}`;
                       const note = notesByClass[cls.id]?.[dateStr];
                       const currSession = currByClass[cls.id]?.[dateStr];

@@ -1,5 +1,7 @@
 "use client";
 
+import { toLocalDateKey } from "@/lib/utils";
+
 import PortalLayout from "@/components/layout/PortalLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -87,7 +89,7 @@ export default function AdminTeachersPage() {
         full_name: formData.full_name,
         specialization: formData.specialization,
         bio: formData.bio,
-        created_at: new Date().toISOString().split("T")[0],
+        created_at: toLocalDateKey(new Date()),
       };
       const updated = [...teachers, newTeacher];
       setTeachers(updated);

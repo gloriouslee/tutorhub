@@ -14,8 +14,9 @@ import {
   CheckCircle2, XCircle, Clock, AlertCircle, RefreshCw,
   User, BookOpen, DollarSign, Calendar, Search,
 } from "lucide-react";
+import { formatCurrency } from "@/lib/utils";
 
-function fmt(n: number) { return n.toLocaleString("vi-VN") + "đ"; }
+const fmt = formatCurrency;
 
 function formatDateTime(iso: string) {
   return new Date(iso).toLocaleString("vi-VN", {

@@ -16,7 +16,7 @@ import {
   AlertCircle, ArrowRight, X, QrCode, UploadCloud, BookMarked,
   Info, TrendingDown, Wallet,
 } from "lucide-react";
-import { formatDate } from "@/lib/utils";
+import { formatDate, formatCurrency } from "@/lib/utils";
 import { useStudentContext } from "@/hooks/useStudentContext";
 
 const PACKAGES: Record<string, { id: string; title: string; price: number }> = {
@@ -27,8 +27,7 @@ const PACKAGES: Record<string, { id: string; title: string; price: number }> = {
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-const formatVND = (n: number) =>
-  new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" }).format(n);
+const formatVND = formatCurrency;
 
 const formatDateTime = (iso: string) =>
   new Date(iso).toLocaleString("vi-VN", {
@@ -71,7 +70,7 @@ function PaymentsContent() {
       const pkg = PACKAGES[pkgParam];
       setModalTarget({ kind: "package", pkgId: pkg.id, title: pkg.title, amount: pkg.price });
     }
-  }, [pkgParam]);
+  }, [pkgParam, studentId]);
 
   const reload = () =>
     setPkgTransactions(getTransactions().filter(t => t.student_id === STUDENT.id));
@@ -188,7 +187,7 @@ function PaymentsContent() {
                   disabled={totalPending === 0}
                   onClick={() => setModalTarget({
                     kind: "invoice",
-                    invoice: { id: "ALL", child_id: "s1", title: "Thanh toán tất cả hóa đơn", amount: totalPending, due_date: "", status: "pending" },
+                    invoice: { id: "ALL", child_id: studentId, title: "Thanh toán tất cả hóa đơn", amount: totalPending, due_date: "", status: "pending" },
                   })}
                 >
                   <CreditCard className="h-5 w-5 mr-2" /> Thanh toán tất cả

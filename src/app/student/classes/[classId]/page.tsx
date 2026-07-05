@@ -22,7 +22,7 @@ import {
   ExternalLink, Check, Map, CalendarDays, UserCheck, UserX, Timer, Minus,
   ClipboardList, ChevronDown, Send, XCircle, CheckSquare,
 } from "lucide-react";
-import { formatDate } from "@/lib/utils";
+import { formatDate, toLocalDateKey } from "@/lib/utils";
 import { useStudentContext } from "@/hooks/useStudentContext";
 
 type AttendanceStatus = "present" | "absent" | "late" | "excused";
@@ -61,7 +61,7 @@ function generateSessionDates(
     const dow = cur.getDay();
     for (const s of schedules) {
       if (DAY_INDEX[s.day] === dow) {
-        results.push({ date: cur.toISOString().slice(0, 10), start_time: s.start_time, end_time: s.end_time });
+        results.push({ date: toLocalDateKey(cur), start_time: s.start_time, end_time: s.end_time });
       }
     }
     cur.setDate(cur.getDate() + 1);
@@ -160,6 +160,20 @@ export default function StudentClassDetailPage() {
   const [savedAttendance, setSavedAttendance] = useState<SavedAttendanceRecord[]>([]);
   const [curriculumByDate, setCurriculumByDate] = useState<Record<string, CurriculumSession>>({});
   const [sessionNotes, setSessionNotes] = useState<Record<string, string>>({});
+  const [uploadedMaterials, setUploadedMaterials] = useState<StoredClassMaterial[]>([]);
+  const studentPkg: StudentPackage | undefined = useMemo(
+    () => getStudentPackages(classId)[studentId],
+    [classId, studentId],
+  );
+  useEffect(() => { setUploadedMaterials(getClassMaterials(classId)); }, [classId]);
+  const materials = useMemo(() => {
+    const mockMats = MOCK_CLASS_MATERIALS.filter(m => m.class_id === classId);
+    const realMats = uploadedMaterials.filter(m => {
+      if (!m.packages || m.packages.length === 0) return true;
+      return studentPkg ? m.packages.includes(studentPkg) : false;
+    });
+    return [...mockMats, ...realMats];
+  }, [classId, uploadedMaterials, studentPkg]);
 
   useEffect(() => {
     setWatched(loadWatched(studentId));
@@ -183,7 +197,7 @@ export default function StudentClassDetailPage() {
       const raw = localStorage.getItem(`tutorhub_session_notes_${classId}`);
       if (raw) setSessionNotes(JSON.parse(raw));
     } catch {}
-  }, [classId]);
+  }, [classId, studentId]);
 
   const cls = MOCK_CLASSES.find(c => c.id === classId);
 
@@ -216,21 +230,6 @@ export default function StudentClassDetailPage() {
 
   // ── Data ──────────────────────────────────────────────────────────────────
   const teacher           = MOCK_TEACHERS.find(t => t.id === cls.tutor_id);
-  const [uploadedMaterials, setUploadedMaterials] = useState<StoredClassMaterial[]>([]);
-  const studentPkg: StudentPackage | undefined = useMemo(
-    () => getStudentPackages(classId)[studentId],
-    [classId, studentId],
-  );
-  useEffect(() => { setUploadedMaterials(getClassMaterials(classId)); }, [classId]);
-
-  const materials = useMemo(() => {
-    const mockMats = MOCK_CLASS_MATERIALS.filter(m => m.class_id === classId);
-    const realMats = uploadedMaterials.filter(m => {
-      if (!m.packages || m.packages.length === 0) return true;
-      return studentPkg ? m.packages.includes(studentPkg) : false;
-    });
-    return [...mockMats, ...realMats];
-  }, [classId, uploadedMaterials, studentPkg]);
   const lectures          = MOCK_LECTURES.filter(l => l.class_id === classId);
   const notes             = MOCK_CLASS_NOTES.filter(n => n.class_id === classId);
   const classHomework     = MOCK_HOMEWORK.filter(h => h.class_id === classId);
@@ -266,7 +265,7 @@ export default function StudentClassDetailPage() {
   const sessionTo   = new Date(today); sessionTo.setDate(sessionTo.getDate() + 14);
   const allSessions = generateSessionDates(cls.schedule ?? [], sessionFrom, sessionTo)
     .sort((a, b) => b.date.localeCompare(a.date)); // newest first
-  const todayStr = today.toISOString().slice(0, 10);
+  const todayStr = toLocalDateKey(today);
   const pastSessions     = allSessions.filter(s => s.date <= todayStr);
   const upcomingSessions = allSessions.filter(s => s.date > todayStr);
 

@@ -8,7 +8,6 @@ import { SectionHeader } from "@/components/shared";
 import { MOCK_STUDENTS, MOCK_ATTENDANCE, MOCK_CLASSES } from "@/lib/mock-data";
 import { formatDate } from "@/lib/utils";
 import { CheckCircle2, Clock, XCircle, Calendar, User, BookOpen, AlertCircle } from "lucide-react";
-import Image from "next/image";
 
 // Parent p1 has students s1 and s4
 const PARENT_ID = "p1";
@@ -32,7 +31,7 @@ export default function ParentAttendancePage() {
         const studentClasses = MOCK_CLASSES.filter(c => (c.student_ids ?? []).includes(cId));
         studentClasses.forEach((cls, idx) => {
           for (let i = 1; i <= 4; i++) {
-            const date = new Date(2025, 4, 5 - i * 3); // some past dates
+            const date = new Date(2026, 4, 5 - i * 3); // some past dates
             history.push({
               id: `mock-${cId}-${cls.id}-${i}`,
               class_id: cls.id,
@@ -102,8 +101,8 @@ export default function ParentAttendancePage() {
                   : "bg-card text-muted-foreground border-border hover:border-primary/30"
               }`}
             >
-              <div className="h-6 w-6 rounded-full overflow-hidden bg-muted">
-                <Image src={child.avatar_url || "/avatars/default.png"} alt={child.full_name} width={24} height={24} className="object-cover" />
+              <div className="h-6 w-6 rounded-full bg-muted text-foreground flex items-center justify-center text-[10px] font-bold shrink-0">
+                {child.full_name.charAt(0)}
               </div>
               {child.full_name}
             </button>

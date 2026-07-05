@@ -7,6 +7,36 @@ import {
 
 const supabase = createClient();
 
+// localStorage keys for the six core entity lists (demo-mode persistence)
+const ENTITY_KEYS = {
+  students: "tutorhub_students",
+  teachers: "tutorhub_teachers",
+  classes: "tutorhub_classes",
+  payments: "tutorhub_payments",
+  attendance: "tutorhub_attendance",
+  notifications: "tutorhub_notifications",
+} as const;
+
+function readLocal<T>(key: string): T[] | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw) return JSON.parse(raw) as T[];
+  } catch (e) {
+    console.error(`Error reading ${key} from localStorage`, e);
+  }
+  return null;
+}
+
+function writeLocal<T>(key: string, items: T[]): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(key, JSON.stringify(items));
+  } catch (e) {
+    console.error(`Error writing ${key} to localStorage`, e);
+  }
+}
+
 // Helper: attempt a Supabase query; on any error OR empty result fall back to mock data silently.
 async function queryOrFallback<T>(
   query: () => Promise<{ data: T[] | null; error: unknown }>,
@@ -21,80 +51,103 @@ async function queryOrFallback<T>(
   }
 }
 
+// localStorage-first getter: admin edits saved locally win over Supabase/mock fallbacks.
+async function getEntity<T>(
+  key: string,
+  query: () => Promise<{ data: T[] | null; error: unknown }>,
+  fallback: T[]
+): Promise<T[]> {
+  const local = readLocal<T>(key);
+  if (local !== null) return local;
+  return queryOrFallback(query, fallback);
+}
+
+async function saveEntity<T>(key: string, table: string, items: T[]): Promise<void> {
+  writeLocal(key, items);
+  const { error } = await supabase.from(table).upsert(items as any);
+  if (error) console.error(`Error saving ${table}:`, error);
+}
+
 export async function getStudents(): Promise<Student[]> {
-  return queryOrFallback(
+  return getEntity(
+    ENTITY_KEYS.students,
     () => supabase.from("students").select("*").order("created_at", { ascending: false }) as any,
     MOCK_STUDENTS as unknown as Student[]
   );
 }
 
 export async function saveStudents(students: Student[]): Promise<void> {
-  const { error } = await supabase.from("students").upsert(students);
-  if (error) console.error("Error saving students:", error);
+  return saveEntity(ENTITY_KEYS.students, "students", students);
 }
 
 export async function getTeachers(): Promise<Teacher[]> {
-  return queryOrFallback(
+  return getEntity(
+    ENTITY_KEYS.teachers,
     () => supabase.from("teachers").select("*").order("created_at", { ascending: false }) as any,
     MOCK_TEACHERS as unknown as Teacher[]
   );
 }
 
 export async function saveTeachers(teachers: Teacher[]): Promise<void> {
-  const { error } = await supabase.from("teachers").upsert(teachers);
-  if (error) console.error("Error saving teachers:", error);
+  return saveEntity(ENTITY_KEYS.teachers, "teachers", teachers);
 }
 
 export async function getClasses(): Promise<Class[]> {
-  return queryOrFallback(
+  return getEntity(
+    ENTITY_KEYS.classes,
     () => supabase.from("classes").select("*").order("created_at", { ascending: false }) as any,
     MOCK_CLASSES as unknown as Class[]
   );
 }
 
 export async function saveClasses(classes: Class[]): Promise<void> {
-  const { error } = await supabase.from("classes").upsert(classes);
-  if (error) console.error("Error saving classes:", error);
+  return saveEntity(ENTITY_KEYS.classes, "classes", classes);
 }
 
 export async function getPayments(): Promise<Payment[]> {
-  return queryOrFallback(
+  return getEntity(
+    ENTITY_KEYS.payments,
     () => supabase.from("payments").select("*").order("created_at", { ascending: false }) as any,
     MOCK_PAYMENTS as unknown as Payment[]
   );
 }
 
 export async function savePayments(payments: Payment[]): Promise<void> {
-  const { error } = await supabase.from("payments").upsert(payments);
-  if (error) console.error("Error saving payments:", error);
+  return saveEntity(ENTITY_KEYS.payments, "payments", payments);
 }
 
 export async function getAttendance(): Promise<Attendance[]> {
-  return queryOrFallback(
+  return getEntity(
+    ENTITY_KEYS.attendance,
     () => supabase.from("attendance").select("*").order("attendance_date", { ascending: false }) as any,
     MOCK_ATTENDANCE as unknown as Attendance[]
   );
 }
 
 export async function saveAttendance(attendance: Attendance[]): Promise<void> {
-  const { error } = await supabase.from("attendance").upsert(attendance);
-  if (error) console.error("Error saving attendance:", error);
+  return saveEntity(ENTITY_KEYS.attendance, "attendance", attendance);
 }
 
 export async function getNotifications(): Promise<Notification[]> {
-  return queryOrFallback(
+  return getEntity(
+    ENTITY_KEYS.notifications,
     () => supabase.from("notifications").select("*").order("created_at", { ascending: false }) as any,
     MOCK_NOTIFICATIONS as unknown as Notification[]
   );
 }
 
 export async function saveNotifications(notifications: Notification[]): Promise<void> {
-  const { error } = await supabase.from("notifications").upsert(notifications);
-  if (error) console.error("Error saving notifications:", error);
+  return saveEntity(ENTITY_KEYS.notifications, "notifications", notifications);
 }
 
 export async function resetAllStorage(): Promise<void> {
-  console.log("Reset storage is deprecated; using database.");
+  if (typeof window === "undefined") return;
+  const toRemove: string[] = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (key && key.startsWith("tutorhub_")) toRemove.push(key);
+  }
+  toRemove.forEach((key) => localStorage.removeItem(key));
 }
 
 export async function getStudentComments(studentId: string): Promise<{ text: string; date: string; rating: number }[]> {

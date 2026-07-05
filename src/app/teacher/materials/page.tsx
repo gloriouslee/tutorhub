@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import type { StudentPackage } from "@/lib/storage";
 import { MOCK_CLASSES } from "@/lib/mock-data";
+import { formatCurrency } from "@/lib/utils";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -136,7 +137,6 @@ function saveCourses(courses: Course[]) {
 }
 
 function uid() { return Math.random().toString(36).slice(2, 9); }
-function fmt(n: number) { return n.toLocaleString("vi-VN") + "đ"; }
 
 const LESSON_ICONS: Record<LessonType, React.ElementType> = {
   video: PlayCircle, pdf: FileText, exercise: Pencil,
@@ -680,7 +680,7 @@ function CourseCard({
             <Badge variant="outline" className="text-xs">{course.subject} · Khối {course.grade}</Badge>
             {course.type === "paid_package" ? (
               <span className="inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400">
-                <Zap className="h-2.5 w-2.5" /> Trả phí · {fmt(course.price ?? 0)}
+                <Zap className="h-2.5 w-2.5" /> Trả phí · {formatCurrency(course.price ?? 0)}
               </span>
             ) : (
               <span className="inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">

@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { PaymentBadge, SectionHeader } from "@/components/shared";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { formatDate, formatCurrency } from "@/lib/utils";
+import { formatDate, formatCurrency, toLocalDateKey } from "@/lib/utils";
 import { DollarSign, AlertCircle, CheckCircle2, Plus, X } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import { useState, useEffect } from "react";
@@ -23,7 +23,7 @@ export default function AdminPaymentsPage() {
     student_id: "",
     amount: "",
     description: "Học phí tháng này",
-    due_date: new Date().toISOString().split("T")[0],
+    due_date: toLocalDateKey(new Date()),
   });
 
   useEffect(() => {
@@ -53,7 +53,7 @@ export default function AdminPaymentsPage() {
   const handleMarkPaid = async (id: string) => {
     const updated = payments.map(p =>
       p.id === id
-        ? { ...p, payment_status: "paid" as const, paid_date: new Date().toISOString().split("T")[0] }
+        ? { ...p, payment_status: "paid" as const, paid_date: toLocalDateKey(new Date()) }
         : p
     );
     setPayments(updated);
@@ -66,7 +66,7 @@ export default function AdminPaymentsPage() {
       student_id: defaultStudent,
       amount: "1200000",
       description: "Học phí Tháng 6",
-      due_date: new Date(new Date().getFullYear(), new Date().getMonth() + 1, 1).toISOString().split("T")[0],
+      due_date: toLocalDateKey(new Date(new Date().getFullYear(), new Date().getMonth() + 1, 1)),
     });
     setIsModalOpen(true);
   };
@@ -82,7 +82,7 @@ export default function AdminPaymentsPage() {
       description: formData.description,
       due_date: formData.due_date,
       payment_status: "pending",
-      created_at: new Date().toISOString().split("T")[0],
+      created_at: toLocalDateKey(new Date()),
     };
 
     const updated = [newPayment, ...payments];

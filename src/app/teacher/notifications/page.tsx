@@ -112,7 +112,7 @@ export default function TeacherNotificationsPage() {
   };
 
   return (
-    <PortalLayout role="teacher" userName="Tiến sĩ Sarah Mitchell" pageTitle="Thông báo hệ thống">
+    <PortalLayout role="teacher" userName="Thầy Hùng Toán" pageTitle="Thông báo hệ thống">
       <div className="space-y-6 max-w-3xl mx-auto">
         <SectionHeader
           title="Tất cả thông báo"

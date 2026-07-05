@@ -1,5 +1,7 @@
 "use client";
 
+import { toLocalDateKey } from "@/lib/utils";
+
 import { useState, useEffect, useMemo } from "react";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { Card, CardContent } from "@/components/ui/card";
@@ -105,7 +107,7 @@ function CommentsTab({ studentId }: { studentId: string }) {
   async function handleAdd() {
     if (!text.trim()) return;
     setSaving(true);
-    const today = new Date().toISOString().split("T")[0];
+    const today = toLocalDateKey(new Date());
     const updated = [{ text: text.trim(), date: today, rating }, ...comments];
     await saveStudentComment(studentId, updated);
     setComments(updated);
@@ -186,7 +188,7 @@ function StudentDetailPanel({
   const [gpaTarget, setGpaTarget] = useState<number | null>(null);
   const [storedScores, setStoredScores] = useState<StoredExamScore[]>([]);
   const [showScoreForm, setShowScoreForm] = useState(false);
-  const [scoreForm, setScoreForm] = useState({ exam_name: "", score: "", max_score: "10", exam_date: new Date().toISOString().slice(0, 10), class_id: "" });
+  const [scoreForm, setScoreForm] = useState({ exam_name: "", score: "", max_score: "10", exam_date: toLocalDateKey(new Date()), class_id: "" });
 
   const studentClassIds = studentClasses.map(c => c.id);
   const classNameMap = Object.fromEntries(studentClasses.map(c => [c.id, c.class_name]));
@@ -737,7 +739,7 @@ function CommentModal({
   async function handleAdd() {
     if (!text.trim()) return;
     setSaving(true);
-    const today = new Date().toISOString().split("T")[0];
+    const today = toLocalDateKey(new Date());
     const updated = [{ text: text.trim(), date: today, rating }, ...comments];
     await saveStudentComment(student.id, updated);
     setComments(updated);

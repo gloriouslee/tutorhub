@@ -9,6 +9,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { getGrantedPackages, getStudentPackages, getCourseRating, submitCourseReview, getCourseReviews, type CourseReview } from "@/lib/storage";
 import { useStudentContext } from "@/hooks/useStudentContext";
+import { formatCurrency } from "@/lib/utils";
 import type { StudentPackage } from "@/lib/storage";
 import {
   PlayCircle, FileText, Pencil, Download, CheckCircle2,
@@ -289,7 +290,7 @@ const PKG_META: Record<StudentPackage, { label: string; icon: React.ElementType;
   offline:  { label: "Offline",  icon: School, color: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300" },
 };
 
-function fmt(n: number) { return n.toLocaleString("vi-VN") + "đ"; }
+const fmt = formatCurrency;
 
 function LessonIcon({ type, className }: { type: LessonType; className?: string }) {
   if (type === "video") return <PlayCircle className={className ?? "h-4 w-4"} />;
@@ -946,8 +947,6 @@ function BrowseView({ onSelectCourse }: { onSelectCourse: (c: OwnedCourse, isLoc
 
 function PlayerView({ course, isPackageLocked, onBack }: { course: OwnedCourse; isPackageLocked: boolean; onBack: () => void }) {
   const allLessons = course.chapters.flatMap(ch => ch.lessons);
-  const doneCount = allLessons.filter(l => l.status === "done").length;
-  const progress = Math.round((doneCount / allLessons.length) * 100);
 
   // If package-locked, only preview lessons are accessible
   const effectiveLessons = allLessons.map(l =>
@@ -976,6 +975,9 @@ function PlayerView({ course, isPackageLocked, onBack }: { course: OwnedCourse; 
   };
 
   const isDone = (id: string) => completedIds.includes(id);
+
+  const doneCount = allLessons.filter(l => completedIds.includes(l.id)).length;
+  const progress = allLessons.length > 0 ? Math.round((doneCount / allLessons.length) * 100) : 0;
 
   return (
     <div className="space-y-4">

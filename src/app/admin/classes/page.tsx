@@ -1,5 +1,7 @@
 "use client";
 
+import { toLocalDateKey } from "@/lib/utils";
+
 import PortalLayout from "@/components/layout/PortalLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -149,7 +151,7 @@ function AdminClassesPageInner() {
         description: formData.description,
         max_students: Number(formData.max_students),
         color: `#${Math.floor(Math.random() * 16777215).toString(16)}`,
-        created_at: new Date().toISOString().split("T")[0],
+        created_at: toLocalDateKey(new Date()),
       };
       const updated = [...classes, newClass];
       setClasses(updated);

@@ -24,6 +24,7 @@ import {
   saveHomeworkAttachment, type HomeworkAttachment,
 } from "@/lib/storage";
 import { uploadClassFile } from "@/lib/upload";
+import { toLocalDateKey } from "@/lib/utils";
 import { ClassSchedule } from "@/types";
 import {
   BookOpen, Clock, Video, Users, ArrowLeft, FileText, Download,
@@ -114,7 +115,7 @@ function generateSessions(schedule: ClassSchedule[]): Session[] {
     cursor.setDate(cursor.getDate() + diff);
 
     while (cursor <= endDate) {
-      const dateStr = cursor.toISOString().split("T")[0];
+      const dateStr = toLocalDateKey(cursor);
       const cursorCopy = new Date(cursor);
       cursorCopy.setHours(0, 0, 0, 0);
       const isToday = cursorCopy.getTime() === today.getTime();
@@ -1112,7 +1113,7 @@ function FeedbackModal({ student, commentsList, onSave, onClose }: {
   onClose: () => void;
 }) {
   const [text, setText] = useState("");
-  const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
+  const [date, setDate] = useState(toLocalDateKey(new Date()));
   const [rating, setRating] = useState(5);
 
   return (
@@ -1334,6 +1335,23 @@ export default function TeacherClassDetailPage() {
     setStudentPackages(getStudentPackages(classId));
   }, [classId]);
 
+  // Load student comments (must run before any early return so hook order is stable)
+  useEffect(() => {
+    if (!cls) return;
+    const ids = [...new Set([
+      ...(cls.student_ids ?? []),
+      ...extraStudentIds,
+      ...approvedEnrollments.map(e => e.id),
+    ])];
+    async function loadComments() {
+      const loaded: Record<string, any[]> = {};
+      for (const id of ids) {
+        loaded[id] = await getStudentComments(id);
+      }
+      setComments(loaded);
+    }
+    loadComments();
+  }, [cls, extraStudentIds, approvedEnrollments]);
 
   function handleSaveOnlineLink() {
     saveOnlineLink(classId, onlineLinkDraft);
@@ -1399,7 +1417,7 @@ export default function TeacherClassDetailPage() {
       dob: "", school: e.school, grade: e.grade, learning_type: "online" as const,
       parent_id: undefined, avatar_url: undefined, created_at: "",
       package: (studentPackages[e.id] ?? "online") as StudentPackage,
-      join_date: new Date().toISOString().slice(0, 10),
+      join_date: toLocalDateKey(new Date()),
       progress: [72, 85, 61, 90, 78][idx] ?? 70,
     }));
   const classStudents = [...mockClassStudents, ...enrolledClassStudents];
@@ -1409,17 +1427,6 @@ export default function TeacherClassDetailPage() {
     setStudentPackages(updated);
     saveStudentPackages(classId, updated);
   }
-
-  useEffect(() => {
-    async function loadComments() {
-      const loaded: Record<string, any[]> = {};
-      for (const s of classStudents) {
-        loaded[s.id] = await getStudentComments(s.id);
-      }
-      setComments(loaded);
-    }
-    loadComments();
-  }, []);
 
   const handleSaveComment = async (studentId: string, text: string, date: string, rating: number) => {
     const updated = [{ text, date, rating }, ...(comments[studentId] || [])];

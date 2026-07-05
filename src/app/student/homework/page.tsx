@@ -62,7 +62,7 @@ export default function StudentHomeworkPage() {
         setSubmissions(loadLocalSubs().filter(s => s.student_id === STUDENT_ID));
       }
     });
-  }, []);
+  }, [STUDENT_ID]);
 
   // Per-homework submission lookup
   function getSub(hwId: string) {

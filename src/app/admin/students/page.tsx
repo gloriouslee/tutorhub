@@ -1,5 +1,7 @@
 "use client";
 
+import { toLocalDateKey } from "@/lib/utils";
+
 import PortalLayout from "@/components/layout/PortalLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -96,7 +98,7 @@ export default function AdminStudentsPage() {
         grade: formData.grade,
         school: formData.school,
         learning_type: formData.learning_type,
-        created_at: new Date().toISOString().split("T")[0],
+        created_at: toLocalDateKey(new Date()),
       } as any;
       const updated = [...students, newStudent];
       setStudents(updated);
@@ -169,7 +171,7 @@ export default function AdminStudentsPage() {
                 <tbody className="divide-y divide-border">
                   {filtered.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="p-8 text-center text-muted-foreground text-sm">
+                      <td colSpan={7} className="p-8 text-center text-muted-foreground text-sm">
                         Không tìm thấy học viên nào.
                       </td>
                     </tr>
