@@ -65,7 +65,8 @@ export function useStudentContext(): StudentContext {
         if (meta.role === "student") {
           const assignedClassId: string = meta.assigned_class_id ?? "";
           setCtx({
-            studentId:       user.id,
+            // Giữ định dạng enr_<enrollment_id> để khớp submissions/điểm đã lưu
+            studentId:       meta.enrollment_id ? `enr_${meta.enrollment_id}` : user.id,
             studentName:     meta.full_name ?? user.email ?? "Học viên",
             myClasses:       assignedClassId
               ? MOCK_CLASSES.filter(c => c.id === assignedClassId)

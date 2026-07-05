@@ -661,6 +661,30 @@ export async function approveEnrollment(
   writeEnrollmentsLocal(updated);
 
   const enr = updated.find(e => e.id === id)!;
+
+  // Tạo tài khoản Supabase Auth thật (server route dùng service role key).
+  // Nếu key chưa cấu hình (501) hoặc offline, đăng nhập vẫn hoạt động qua
+  // fallback so khớp enrollment_requests — không chặn luồng duyệt.
+  try {
+    const res = await fetch("/api/admin/create-student-account", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email: opts.account_username,
+        password: opts.account_password,
+        full_name: enr.full_name,
+        enrollment_id: id,
+        assigned_class_id: opts.assigned_class_id,
+      }),
+    });
+    if (res.ok) {
+      const { user_id } = await res.json();
+      await supabase.from("enrollment_requests").update({ supabase_user_id: user_id }).eq("id", id);
+    } else if (res.status !== 501) {
+      console.error("Không tạo được tài khoản auth:", await res.text());
+    }
+  } catch { /* offline */ }
+
   const account: StudentAccount = {
     student_id:        `enr_${id}`,
     full_name:         enr.full_name,

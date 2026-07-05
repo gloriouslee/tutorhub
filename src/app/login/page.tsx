@@ -62,7 +62,24 @@ export default function LoginPage() {
       return;
     }
 
-    // 2. localStorage enrolled student accounts
+    // 2. Real Supabase auth (tài khoản học viên được duyệt / admin / teacher)
+    const KNOWN_ROLES = ["student", "parent", "teacher", "admin"];
+    try {
+      const supabase = createClient();
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      if (!error && data.user) {
+        const metaRole = data.user.user_metadata?.role as string | undefined;
+        let role = metaRole;
+        if (!role) {
+          const { data: profile } = await supabase.from("profiles").select("role").eq("id", data.user.id).single();
+          role = profile?.role;
+        }
+        router.push(KNOWN_ROLES.includes(role ?? "") ? `/${role}` : "/student");
+        return;
+      }
+    } catch { /* tiếp tục thử fallback */ }
+
+    // 3. Fallback: tài khoản enrollment cũ (được duyệt trước khi có Supabase Auth)
     const enrollments = await getEnrollments();
     const matched = enrollments.find(
       enr => enr.status === "approved" &&
@@ -78,23 +95,8 @@ export default function LoginPage() {
       return;
     }
 
-    // 3. Real Supabase auth (admin/teacher accounts)
-    try {
-      const supabase = createClient();
-      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) {
-        setLoginError("Email hoặc mật khẩu không đúng.");
-        setLoginLoading(false);
-        return;
-      }
-      const role = data.user.user_metadata?.role as string | undefined;
-      if (role) { router.push(`/${role}`); return; }
-      const { data: profile } = await supabase.from("profiles").select("role").eq("id", data.user.id).single();
-      router.push(`/${profile?.role ?? "student"}`);
-    } catch {
-      setLoginError("Đã có lỗi xảy ra. Vui lòng thử lại.");
-      setLoginLoading(false);
-    }
+    setLoginError("Email hoặc mật khẩu không đúng.");
+    setLoginLoading(false);
   };
 
   const handleRegisterSubmit = async (e: React.FormEvent) => {
@@ -308,9 +310,9 @@ export default function LoginPage() {
 
           <form onSubmit={handleLoginSubmit} className="space-y-5">
             <div className="space-y-1.5">
-              <label className="text-sm font-medium text-foreground">Email đăng nhập</label>
+              <label className="text-sm font-medium text-foreground">Email / Tên đăng nhập</label>
               <Input
-                type="email"
+                type="text"
                 placeholder="ban@tutorhub.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
