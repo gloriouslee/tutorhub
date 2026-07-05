@@ -11,6 +11,7 @@ import { SectionHeader } from "@/components/shared";
 import { MOCK_STUDENTS, MOCK_CLASSES, MOCK_TEACHERS } from "@/lib/mock-data";
 import { getStudentAccounts, changeStudentPassword, type StudentAccount } from "@/lib/storage";
 import { useStudentContext } from "@/hooks/useStudentContext";
+import { createClient } from "@/lib/supabase/client";
 import {
   User, Mail, Phone, BookOpen, Shield, Key, Camera,
   GraduationCap, Calendar, CheckCircle2, Save, RotateCcw,
@@ -96,6 +97,9 @@ export default function StudentProfilePage() {
     setAccount(acc);
     const base = buildProfile(acc);
     setForm(loadSavedProfile(base, studentId));
+    try {
+      setAvatarUrl(localStorage.getItem(`tutorhub_avatar_${studentId}`));
+    } catch { /* ignore */ }
     setLoaded(true);
   }, [studentId]);
 
@@ -165,11 +169,23 @@ export default function StudentProfilePage() {
     setTimeout(() => setPwdMsg(null), 4000);
   }
 
-  function handleAvatarPick(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handleAvatarPick(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-    const url = URL.createObjectURL(file);
-    setAvatarUrl(url);
+    // Hiển thị ngay bằng blob tạm, upload lên bucket avatars phía sau
+    setAvatarUrl(URL.createObjectURL(file));
+    try {
+      const supabase = createClient();
+      const ext = file.name.split(".").pop() ?? "png";
+      const path = `${studentId}/${Date.now()}.${ext}`;
+      const { data, error } = await supabase.storage
+        .from("avatars")
+        .upload(path, file, { upsert: true, contentType: file.type });
+      if (error || !data) return;
+      const { data: { publicUrl } } = supabase.storage.from("avatars").getPublicUrl(data.path);
+      setAvatarUrl(publicUrl);
+      localStorage.setItem(`tutorhub_avatar_${studentId}`, publicUrl);
+    } catch { /* offline — giữ blob tạm cho phiên hiện tại */ }
   }
 
   return (
