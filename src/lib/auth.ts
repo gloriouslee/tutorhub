@@ -6,6 +6,10 @@ export async function getCurrentUserName(): Promise<string> {
   const enrolledName = cookieStore.get("enrolled_student_name")?.value;
   if (enrolledName) return decodeURIComponent(enrolledName);
   const demoRole = cookieStore.get("demo_role")?.value;
+  if (demoRole === "student") return "Nguyễn Anh Tuấn";
+  if (demoRole === "parent")  return "Trần Văn Minh";
+  if (demoRole === "teacher") return "Thầy Hùng Toán";
+  if (demoRole === "admin")   return "Admin User";
   if (demoRole) return "Demo User";
 
   try {

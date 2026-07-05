@@ -5,12 +5,19 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { SectionHeader } from "@/components/shared";
-import { MOCK_STUDENTS, MOCK_CLASSES } from "@/lib/mock-data";
+import { MOCK_STUDENTS, MOCK_CLASSES, MOCK_EXAM_SCORES, MOCK_ATTENDANCE } from "@/lib/mock-data";
 import { 
   GraduationCap, Building2, BookOpen, 
   Activity, Target, ChevronRight, CalendarDays, Award
 } from "lucide-react";
 import Link from "next/link";
+
+const GRADIENTS = [
+  "from-indigo-500 to-purple-600",
+  "from-teal-500 to-emerald-600",
+  "from-amber-500 to-orange-600",
+  "from-rose-500 to-pink-600",
+];
 
 export default function ParentChildrenPage() {
   // Simulate parent "p1" who has 2 children (s1 and s4)
@@ -36,13 +43,16 @@ export default function ParentChildrenPage() {
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           {children.map((child, index) => {
-            // Mock data for each child to show in the card
-            const enrolledClasses = index === 0 ? MOCK_CLASSES.slice(0, 2) : [MOCK_CLASSES[2]];
-            const avgScore = index === 0 ? 8.8 : 9.2;
-            const attendance = index === 0 ? 95 : 100;
-            const bgGradient = index === 0 
-              ? "from-indigo-500 to-purple-600" 
-              : "from-teal-500 to-emerald-600";
+            const enrolledClasses = MOCK_CLASSES.filter(c => (c.student_ids ?? []).includes(child.id));
+            const scores = MOCK_EXAM_SCORES.filter(e => e.student_id === child.id);
+            const avgScore = scores.length > 0
+              ? (scores.reduce((s, e) => s + e.score, 0) / scores.length).toFixed(1)
+              : "—";
+            const attRecords = MOCK_ATTENDANCE.filter(a => a.student_id === child.id);
+            const attendance = attRecords.length > 0
+              ? Math.round(attRecords.filter(a => a.status === "present").length / attRecords.length * 100)
+              : null;
+            const bgGradient = GRADIENTS[index % GRADIENTS.length];
 
             return (
               <Card key={child.id} className="border-0 shadow-lg overflow-hidden group hover:shadow-xl transition-all duration-300">
@@ -79,7 +89,7 @@ export default function ParentChildrenPage() {
                     </span>
                   </div>
                   <div className="p-4 flex flex-col items-center justify-center text-center">
-                    <span className="text-2xl font-black text-foreground">{attendance}%</span>
+                    <span className="text-2xl font-black text-foreground">{attendance !== null ? `${attendance}%` : "—"}</span>
                     <span className="text-[10px] uppercase font-bold text-muted-foreground flex items-center gap-1 mt-1">
                       <Activity className="h-3 w-3" /> Chuyên cần
                     </span>

@@ -29,7 +29,7 @@ export default function ParentAttendancePage() {
     const history = [...baseAttendance];
     if (history.length < 15) {
       childIds.forEach(cId => {
-        const studentClasses = MOCK_CLASSES.filter(c => ["c1", "c2", "c4"].includes(c.id)); // mock enrolled classes
+        const studentClasses = MOCK_CLASSES.filter(c => (c.student_ids ?? []).includes(cId));
         studentClasses.forEach((cls, idx) => {
           for (let i = 1; i <= 4; i++) {
             const date = new Date(2025, 4, 5 - i * 3); // some past dates
@@ -65,13 +65,15 @@ export default function ParentAttendancePage() {
         return { label: "Đi muộn", icon: Clock, color: "text-amber-600", bg: "bg-amber-100", border: "border-amber-200" };
       case "absent":
         return { label: "Vắng mặt", icon: XCircle, color: "text-red-600", bg: "bg-red-100", border: "border-red-200" };
+      case "excused":
+        return { label: "Có phép", icon: AlertCircle, color: "text-blue-600", bg: "bg-blue-100", border: "border-blue-200" };
       default:
         return { label: "Chưa rõ", icon: AlertCircle, color: "text-slate-600", bg: "bg-slate-100", border: "border-slate-200" };
     }
   };
 
   return (
-    <PortalLayout role="parent" userName="Robert Thompson" pageTitle="Chuyên cần">
+    <PortalLayout role="parent" userName="Trần Văn Minh" pageTitle="Chuyên cần">
       <div className="space-y-6 max-w-6xl mx-auto pb-10">
         <SectionHeader 
           title="Theo dõi chuyên cần" 

@@ -10,6 +10,7 @@ import {
   getInvoices, updateInvoiceStatus, type TuitionInvoice,
 } from "@/lib/storage";
 import { MOCK_STUDENTS } from "@/lib/mock-data";
+import { formatCurrency } from "@/lib/utils";
 import {
   DollarSign, CreditCard, Receipt, Clock, CheckCircle2,
   AlertCircle, ArrowRight, X, QrCode, UploadCloud, Users,
@@ -17,8 +18,6 @@ import {
 
 const PARENT_ID = "p1";
 
-const formatVND = (n: number) =>
-  new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" }).format(n);
 
 export default function ParentPaymentsPage() {
   const children = MOCK_STUDENTS.filter(s => s.parent_id === PARENT_ID);
@@ -113,7 +112,7 @@ export default function ParentPaymentsPage() {
               <CardContent className="p-8 relative z-10 text-white">
                 <p className="text-indigo-100 font-medium mb-1">Tổng học phí cần thanh toán</p>
                 <h2 className="text-4xl sm:text-5xl font-black tracking-tight drop-shadow-sm mb-6">
-                  {formatVND(totalPending)}
+                  {formatCurrency(totalPending)}
                 </h2>
                 <div className="flex flex-wrap items-center gap-3">
                   <Button
@@ -155,7 +154,7 @@ export default function ParentPaymentsPage() {
                           </p>
                         </div>
                         <div className="flex flex-row sm:flex-col items-center sm:items-end justify-between gap-3 shrink-0 border-t border-border sm:border-0 pt-4 sm:pt-0">
-                          <span className="text-xl font-black">{formatVND(inv.amount)}</span>
+                          <span className="text-xl font-black">{formatCurrency(inv.amount)}</span>
                           <Button size="sm" variant="gradient" className="w-full sm:w-auto font-bold" onClick={() => openModal(inv)}>
                             Thanh toán <ArrowRight className="h-3.5 w-3.5 ml-1.5" />
                           </Button>
@@ -204,7 +203,7 @@ export default function ParentPaymentsPage() {
                             </div>
                           </div>
                           <div className="text-right shrink-0">
-                            <p className="font-bold text-sm">{formatVND(inv.amount)}</p>
+                            <p className="font-bold text-sm">{formatCurrency(inv.amount)}</p>
                             {isPending
                               ? <p className="text-[10px] text-amber-600 font-medium mt-0.5">Chờ xác nhận</p>
                               : <Badge variant="outline" className="mt-1 text-[9px] bg-emerald-50 text-emerald-600 border-emerald-200 dark:bg-emerald-900/20 dark:border-emerald-800">Đã thanh toán</Badge>
@@ -282,7 +281,7 @@ export default function ParentPaymentsPage() {
               {/* Amount */}
               <div className="w-full text-center bg-primary/5 p-4 rounded-xl border border-primary/20 space-y-1">
                 <p className="text-sm text-muted-foreground">Số tiền cần thanh toán:</p>
-                <p className="text-3xl font-black text-primary">{formatVND(modalInvoice.amount)}</p>
+                <p className="text-3xl font-black text-primary">{formatCurrency(modalInvoice.amount)}</p>
                 <p className="text-xs font-medium text-foreground px-4 line-clamp-2">{modalInvoice.title}</p>
                 {modalInvoice.child_id !== "ALL" && (
                   <p className="text-xs text-primary font-semibold flex items-center justify-center gap-1">
