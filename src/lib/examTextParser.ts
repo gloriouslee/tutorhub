@@ -177,34 +177,104 @@ function esc(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-// Token ảnh theo quy ước: [img:<url>] — trên dòng riêng hoặc nằm giữa văn bản.
-const IMG_TOKEN_RE = /\[img:([^\]\s]+)\]/g;
+// ── Registry tài nguyên (kiểu Azota) ─────────────────────────────────────────
+// Văn bản thô giữ token ngắn [m:N] (công thức) / [img:N] (ảnh); nội dung đầy đủ
+// (LaTeX dài, URL dài) nằm trong registry — chỉ tồn tại lúc soạn thảo.
+// Token là văn bản thuần nên parser/serializer không cần biết đến registry.
+
+export type ExamAssetRegistry = Record<
+  string,
+  { kind: "math"; tex: string } | { kind: "img"; url: string }
+>;
+
+// Token tổng quát: [m:<id>] hoặc [img:<id|url>]
+const ANY_TOKEN_RE = /\[(m|img):([^\]\s]+)\]/g;
+// Token công thức registry (id là số)
+export const MATH_TOKEN_RE = /\[m:(\d+)\]/g;
 
 /** Chỉ cho phép http(s) và data:image — tránh javascript:, file:… */
 function sanitizeImgUrl(url: string): string | null {
   return /^(https?:\/\/|data:image\/)/i.test(url) ? url : null;
 }
 
-/** Một dòng văn bản → HTML: escape text, [img:url] → <img>. */
-function lineToHtml(line: string): string {
-  IMG_TOKEN_RE.lastIndex = 0;
+function imgTag(url: string): string {
+  return `<img src="${esc(url).replace(/"/g, "&quot;")}" alt="hình" />`;
+}
+
+/**
+ * Một dòng văn bản → HTML: escape text, [img:url] → <img>.
+ * Với registry: [m:N] → $tex$ (mathRender sẽ dựng KaTeX), [img:N] → <img src=url>.
+ * Token không tra được → giữ nguyên dạng text hiển thị.
+ */
+function lineToHtml(line: string, registry?: ExamAssetRegistry): string {
+  ANY_TOKEN_RE.lastIndex = 0;
   let out = "";
   let last = 0;
   let m: RegExpExecArray | null;
-  while ((m = IMG_TOKEN_RE.exec(line)) !== null) {
+  while ((m = ANY_TOKEN_RE.exec(line)) !== null) {
     out += esc(line.slice(last, m.index));
-    const url = sanitizeImgUrl(m[1]);
-    out += url
-      ? `<img src="${esc(url).replace(/"/g, "&quot;")}" alt="hình" />`
-      : esc(m[0]); // URL không hợp lệ → giữ nguyên dạng text
-    last = m.index + m[0].length;
+    const [tok, kind, id] = m;
+    const entry = registry?.[id];
+    if (kind === "m") {
+      out += entry?.kind === "math" ? esc(`$${entry.tex}$`) : esc(tok);
+    } else {
+      const url = entry?.kind === "img" ? entry.url : sanitizeImgUrl(id);
+      out += url ? imgTag(url) : esc(tok);
+    }
+    last = m.index + tok.length;
   }
   out += esc(line.slice(last));
   return out;
 }
 
-function toHtml(s: string): string {
-  return s.split("\n").filter(l => l.trim()).map(l => `<p>${lineToHtml(l.trim())}</p>`).join("");
+function toHtml(s: string, registry?: ExamAssetRegistry): string {
+  return s.split("\n").filter(l => l.trim()).map(l => `<p>${lineToHtml(l.trim(), registry)}</p>`).join("");
+}
+
+/**
+ * Thay token registry trong TEXT THUẦN: [m:N] → $tex$;
+ * [img:N] → [img:url] (imgMode "token") hoặc thẻ <img> (imgMode "html").
+ * Token không tra được giữ nguyên. Dùng cho options/statements & preview.
+ */
+export function resolveRegistryTokens(
+  text: string,
+  registry?: ExamAssetRegistry,
+  imgMode: "token" | "html" = "token"
+): string {
+  if (!registry) return text;
+  return text.replace(ANY_TOKEN_RE, (tok, kind: string, id: string) => {
+    const entry = registry[id];
+    if (kind === "m") return entry?.kind === "math" ? `$${entry.tex}$` : tok;
+    if (entry?.kind === "img") return imgMode === "html" ? imgTag(entry.url) : `[img:${entry.url}]`;
+    return tok;
+  });
+}
+
+/** Độ dài LaTeX tối đa vẫn giữ inline khi token hoá (công thức ngắn dễ đọc). */
+const INLINE_TEX_MAX = 12;
+
+/**
+ * Token hoá văn bản quy ước (thường là kết quả import Word):
+ * mọi $LaTeX$ dài hơn INLINE_TEX_MAX ký tự → [m:N], mọi [img:http(s)/data-url] → [img:N],
+ * nội dung đầy đủ đưa vào registry với id tuần tự.
+ */
+export function tokenizeConventionText(raw: string): { text: string; registry: ExamAssetRegistry } {
+  const registry: ExamAssetRegistry = {};
+  let n = 0;
+  let text = raw.replace(/\$([^$\n]+)\$/g, (m0, tex: string) => {
+    const t = tex.trim();
+    if (t.length <= INLINE_TEX_MAX) return m0;
+    n += 1;
+    registry[String(n)] = { kind: "math", tex: t };
+    return `[m:${n}]`;
+  });
+  text = text.replace(/\[img:([^\]\s]+)\]/g, (m0, url: string) => {
+    if (!sanitizeImgUrl(url)) return m0; // đã là id hoặc không hợp lệ → giữ nguyên
+    n += 1;
+    registry[String(n)] = { kind: "img", url };
+    return `[img:${n}]`;
+  });
+  return { text, registry };
 }
 
 // ── Serializer: ParsedQuestion[] → văn bản theo quy ước ──────────────────────
@@ -242,26 +312,28 @@ export function parsedToText(questions: ParsedQuestion[]): string {
   return blocks.join("\n\n");
 }
 
-export function parsedToExamQuestions(parsed: ParsedQuestion[]): ExamQuestion[] {
+export function parsedToExamQuestions(parsed: ParsedQuestion[], registry?: ExamAssetRegistry): ExamQuestion[] {
   return parsed.map((p, i) => {
     const base = {
       id: `q_${Date.now()}_${i}`,
       order: i,
-      content_html: toHtml(p.content),
-      explanation_html: p.solution ? toHtml(p.solution) : undefined,
+      content_html: toHtml(p.content, registry),
+      explanation_html: p.solution ? toHtml(p.solution, registry) : undefined,
       score: 1,
     };
     switch (p.type) {
       case "multiple_choice":
         return {
           ...base, type: "multiple_choice" as const,
-          options: p.options ?? [],
+          // options được render như HTML (TipTap/preview) → ảnh resolve thành <img>
+          options: (p.options ?? []).map(o => resolveRegistryTokens(o, registry, "html")),
           correct_option: p.correctOption ?? 0,
         };
       case "true_false":
         return {
           ...base, type: "true_false" as const,
-          statements: p.statements,
+          // statements là text thuần → math inline $tex$, ảnh giữ dạng [img:url]
+          statements: p.statements?.map(st => ({ ...st, text: resolveRegistryTokens(st.text, registry, "token") })),
         };
       case "fill_blank":
         return {
@@ -271,7 +343,7 @@ export function parsedToExamQuestions(parsed: ParsedQuestion[]): ExamQuestion[] 
       default:
         return {
           ...base, type: "essay" as const,
-          answer_html: p.solution ? toHtml(p.solution) : undefined,
+          answer_html: p.solution ? toHtml(p.solution, registry) : undefined,
         };
     }
   });

@@ -12,7 +12,7 @@ import "katex/dist/katex.min.css";
 import { Button } from "@/components/ui/button";
 import type { ExamContent, ExamQuestion, CurriculumLesson } from "@/lib/storage";
 import { uploadClassFile } from "@/lib/upload";
-import { parseExamText, parsedToText, parsedToExamQuestions, type ParseResult, type ParsedQuestion } from "@/lib/examTextParser";
+import { parseExamText, parsedToText, parsedToExamQuestions, tokenizeConventionText, resolveRegistryTokens, MATH_TOKEN_RE, type ParseResult, type ParsedQuestion, type ExamAssetRegistry } from "@/lib/examTextParser";
 import { renderMathInHtml, hasMath } from "@/lib/mathRender";
 import { docxHtmlToConventionText, FORMULA_PLACEHOLDER_SRC, FORMULA_MARKER } from "@/lib/docxToText";
 import {
@@ -576,16 +576,19 @@ function FormatGuide({ open, onToggle }: { open: boolean; onToggle: () => void }
           <p>• Dòng <code className="bg-muted px-1 rounded font-mono">Phần …</code> trước câu hỏi được coi là tiêu đề nhóm.</p>
           <p>• <strong className="text-foreground">Công thức toán:</strong> gõ LaTeX giữa hai dấu <code className="bg-muted px-1 rounded font-mono">$…$</code> (VD: <code className="bg-muted px-1 rounded font-mono">{"$\\frac{1}{2}$"}</code>). Dùng <code className="bg-muted px-1 rounded font-mono">$$…$$</code> cho công thức trên dòng riêng.</p>
           <p>• <strong className="text-foreground">Hình ảnh:</strong> chèn <code className="bg-muted px-1 rounded font-mono">[img:url]</code> (tự động chèn khi nhập từ file Word).</p>
+          <p>• <strong className="text-foreground">Token rút gọn:</strong> khi nhập từ Word, công thức dài và ảnh được thay bằng token ngắn <code className="bg-muted px-1 rounded font-mono">[m:1]</code>, <code className="bg-muted px-1 rounded font-mono">[img:2]</code>… để văn bản gọn gàng. Nội dung đầy đủ vẫn hiển thị ở thẻ câu hỏi bên trái — nhấn nút sửa cạnh công thức trong mục &ldquo;Công thức trong câu này&rdquo; để chỉnh LaTeX.</p>
         </div>
       )}
     </div>
   );
 }
 
-// Preview KaTeX nhỏ dưới ô nhập: hiện khi text chứa $...$, giữ ô nhập là LaTeX thô.
-function MathHint({ text, className = "" }: { text: string; className?: string }) {
-  if (!text || !hasMath(text)) return null;
-  const escaped = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+// Preview KaTeX nhỏ dưới ô nhập: hiện khi text chứa $...$ hoặc token [m:N],
+// giữ ô nhập là LaTeX thô / token ngắn.
+function MathHint({ text, registry, className = "" }: { text: string; registry?: ExamAssetRegistry; className?: string }) {
+  const resolved = registry ? resolveRegistryTokens(text || "", registry) : (text || "");
+  if (!resolved || !hasMath(resolved)) return null;
+  const escaped = resolved.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   return (
     <div
       className={`px-2 py-1 rounded-md bg-muted/40 text-xs text-foreground overflow-x-auto ${className}`}
@@ -617,10 +620,88 @@ function AutoGrowTextarea({ value, onChange, placeholder, className }: {
   );
 }
 
+// Thu thập id token [m:N] xuất hiện trong một câu (đề, phương án, mệnh đề, lời giải)
+function collectMathTokenIds(q: ParsedQuestion): string[] {
+  const parts = [q.content, ...(q.options ?? []), ...(q.statements ?? []).map(s => s.text), q.solution ?? ""];
+  const ids: string[] = [];
+  for (const p of parts) {
+    MATH_TOKEN_RE.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = MATH_TOKEN_RE.exec(p)) !== null) {
+      if (!ids.includes(m[1])) ids.push(m[1]);
+    }
+  }
+  return ids;
+}
+
+function renderTexPreview(tex: string): string {
+  const escaped = `$${tex}$`.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return renderMathInHtml(escaped);
+}
+
+// Danh sách "Công thức trong câu này": mỗi token [m:N] = chip KaTeX đã render,
+// nhấn nút sửa → textarea LaTeX + preview trực tiếp, thay đổi ghi thẳng vào registry.
+function TokenFormulaList({ ids, registry, onUpdateTex }: {
+  ids: string[];
+  registry: ExamAssetRegistry;
+  onUpdateTex: (id: string, tex: string) => void;
+}) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+  if (ids.length === 0) return null;
+  return (
+    <div className="rounded-lg border border-border/60 bg-muted/20 px-2 py-1.5 space-y-1">
+      <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Công thức trong câu này</p>
+      {ids.map(id => {
+        const entry = registry[id];
+        const tex = entry?.kind === "math" ? entry.tex : "";
+        const editing = editingId === id;
+        return (
+          <div key={id} className="space-y-1">
+            <div className="flex items-center gap-2">
+              <code className="text-[10px] font-mono text-muted-foreground shrink-0 bg-muted px-1 rounded">[m:{id}]</code>
+              {entry?.kind === "math" ? (
+                <button
+                  onClick={() => setEditingId(editing ? null : id)}
+                  title="Nhấn để sửa LaTeX"
+                  className={`flex-1 min-w-0 text-left px-2 py-0.5 rounded-md text-sm text-foreground overflow-x-auto border transition-colors ${editing ? "border-primary bg-primary/5" : "border-transparent hover:border-border hover:bg-background"}`}
+                  dangerouslySetInnerHTML={{ __html: renderTexPreview(tex) }}
+                />
+              ) : (
+                <span className="text-[11px] text-amber-600 dark:text-amber-400">Không tìm thấy công thức trong registry</span>
+              )}
+              {entry?.kind === "math" && (
+                <button
+                  onClick={() => setEditingId(editing ? null : id)}
+                  className={`p-1 rounded shrink-0 transition-colors ${editing ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
+                  title="Sửa LaTeX"
+                >
+                  <PencilLine className="h-3 w-3" />
+                </button>
+              )}
+            </div>
+            {editing && entry?.kind === "math" && (
+              <textarea
+                value={tex}
+                onChange={e => onUpdateTex(id, e.target.value)}
+                rows={2}
+                spellCheck={false}
+                placeholder="LaTeX…"
+                className="w-full resize-y rounded-md border border-border bg-background px-2 py-1 font-mono text-xs text-foreground outline-none focus:ring-2 focus:ring-primary/40"
+              />
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // Một thẻ câu hỏi có thể chỉnh sửa trực tiếp (kiểu Azota)
-function ParsedQuestionCard({ q, num, update }: {
+function ParsedQuestionCard({ q, num, update, registry, onUpdateTex }: {
   q: ParsedQuestion; num: number;
   update: (patch: Partial<ParsedQuestion>) => void;
+  registry: ExamAssetRegistry;
+  onUpdateTex: (id: string, tex: string) => void;
 }) {
   const meta = PARSED_TYPE_META[q.type];
   const [solutionOpen, setSolutionOpen] = useState(false);
@@ -645,7 +726,7 @@ function ParsedQuestionCard({ q, num, update }: {
         placeholder="Nội dung câu hỏi…"
         className="font-medium"
       />
-      <MathHint text={q.content} />
+      <MathHint text={q.content} registry={registry} />
 
       {/* Trắc nghiệm A-D */}
       {q.type === "multiple_choice" && q.options && (
@@ -673,7 +754,7 @@ function ParsedQuestionCard({ q, num, update }: {
                   className="flex-1 min-w-0 h-7 px-1.5 rounded-md border border-transparent bg-transparent text-sm outline-none focus:border-border focus:bg-background text-foreground"
                 />
               </div>
-              <MathHint text={opt} className="mt-0.5 ml-8" />
+              <MathHint text={opt} registry={registry} className="mt-0.5 ml-8" />
               </div>
             );
           })}
@@ -704,7 +785,7 @@ function ParsedQuestionCard({ q, num, update }: {
                 >S</button>
               </div>
             </div>
-            <MathHint text={st.text} className="mt-0.5 ml-8" />
+            <MathHint text={st.text} registry={registry} className="mt-0.5 ml-8" />
             </div>
           ))}
         </div>
@@ -740,19 +821,24 @@ function ParsedQuestionCard({ q, num, update }: {
               placeholder="Lời giải / giải thích…"
               className="mt-1 text-xs"
             />
-            <MathHint text={q.solution ?? ""} className="mt-0.5" />
+            <MathHint text={q.solution ?? ""} registry={registry} className="mt-0.5" />
           </>
         ) : q.solution ? (
           <p className="text-[11px] text-muted-foreground truncate mt-0.5 px-2">💡 {q.solution}</p>
         ) : null}
       </div>
+
+      {/* Công thức token hoá [m:N] trong câu — nhấn để sửa LaTeX */}
+      <TokenFormulaList ids={collectMathTokenIds(q)} registry={registry} onUpdateTex={onUpdateTex} />
     </div>
   );
 }
 
-function TextImportPanel({ text, setText, onAppend, onReplace, classId }: {
+function TextImportPanel({ text, setText, registry, setRegistry, onAppend, onReplace, classId }: {
   text: string;
   setText: (t: string) => void;
+  registry: ExamAssetRegistry;
+  setRegistry: React.Dispatch<React.SetStateAction<ExamAssetRegistry>>;
   onAppend: (qs: ExamQuestion[]) => void;
   onReplace: (qs: ExamQuestion[]) => void;
   classId: string;
@@ -826,7 +912,10 @@ function TextImportPanel({ text, setText, onAppend, onReplace, classId }: {
       const { value } = await mammoth.convertToHtml({ arrayBuffer }, { convertImage });
       const converted = docxHtmlToConventionText(value);
       setFormulaCount(converted.split(FORMULA_MARKER).length - 1);
-      setText(converted);
+      // Token hoá: $LaTeX$ dài → [m:N], [img:url] → [img:N]; nội dung đầy đủ vào registry
+      const tokenized = tokenizeConventionText(converted);
+      setRegistry(tokenized.registry);
+      setText(tokenized.text);
     } catch {
       alert("Không đọc được file Word. Vui lòng kiểm tra file .docx.");
     } finally {
@@ -843,7 +932,10 @@ function TextImportPanel({ text, setText, onAppend, onReplace, classId }: {
     return acc;
   }, {});
 
-  const convert = () => parsedToExamQuestions(questions);
+  const convert = () => parsedToExamQuestions(questions, registry);
+
+  const updateTex = (id: string, tex: string) =>
+    setRegistry(r => ({ ...r, [id]: { kind: "math", tex } }));
 
   return (
     <div className="flex flex-col h-full min-h-0">
@@ -877,7 +969,7 @@ function TextImportPanel({ text, setText, onAppend, onReplace, classId }: {
               </p>
             )}
             {questions.map((pq, i) => (
-              <ParsedQuestionCard key={i} q={pq} num={i + 1} update={patch => updateQuestion(i, patch)} />
+              <ParsedQuestionCard key={i} q={pq} num={i + 1} update={patch => updateQuestion(i, patch)} registry={registry} onUpdateTex={updateTex} />
             ))}
           </div>
 
@@ -979,6 +1071,8 @@ export default function ExamEditorModal({
   const [mode,       setMode]       = useState<"manual" | "text">("manual");
   // Văn bản thô của chế độ "Soạn từ văn bản" — giữ ở đây để không mất khi chuyển qua lại giữa 2 chế độ
   const [importText, setImportText] = useState("");
+  // Registry công thức/ảnh của các token [m:N]/[img:N] — giữ cùng chỗ với importText
+  const [importRegistry, setImportRegistry] = useState<ExamAssetRegistry>({});
 
   // Nếu đề chỉ có 1 câu trống mặc định thì bỏ nó khi thêm câu từ văn bản
   const isPlaceholderOnly = (qs: ExamQuestion[]) =>
@@ -1113,7 +1207,7 @@ export default function ExamEditorModal({
 
       {mode === "text" ? (
         <div className="flex-1 min-h-0">
-          <TextImportPanel text={importText} setText={setImportText} onAppend={appendParsed} onReplace={replaceParsed} classId={classId} />
+          <TextImportPanel text={importText} setText={setImportText} registry={importRegistry} setRegistry={setImportRegistry} onAppend={appendParsed} onReplace={replaceParsed} classId={classId} />
         </div>
       ) : (
       /* ── Body: sidebar + editor ── */
