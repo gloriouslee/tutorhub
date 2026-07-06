@@ -92,8 +92,17 @@ function MathText({ text, className = "" }: { text: string; className?: string }
   return <span className={className} dangerouslySetInnerHTML={{ __html: renderMathInHtml(escaped) }} />;
 }
 
+// Dòng tóm tắt câu hỏi trong "Chi tiết từng câu": bỏ thẻ HTML nhưng vẫn
+// render $LaTeX$ (KaTeX), cắt bằng CSS thay vì cắt chuỗi (tránh đứt công thức)
 function RawText({ html }: { html: string }) {
-  return <span>{html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 60)}</span>;
+  const text = html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+  const escaped = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return (
+    <span
+      className="[&_.katex-display]:inline-block [&_.katex-display]:my-0"
+      dangerouslySetInnerHTML={{ __html: renderMathInHtml(escaped) }}
+    />
+  );
 }
 
 // ── Timer ─────────────────────────────────────────────────────────────────────
@@ -477,12 +486,13 @@ function EssayInput({ answer, onAnswer, classId }: { answer: StudentAnswer; onAn
 
 // ── Result view ───────────────────────────────────────────────────────────────
 
-function ResultView({ questions, result, onRetry, examTitle, showSolution }: {
+function ResultView({ questions, result, onRetry, examTitle, showSolution, allowRetry }: {
   questions: ExamQuestion[];
   result: ExamResult;
   onRetry: () => void;
   examTitle: string;
   showSolution: boolean;
+  allowRetry: boolean;
 }) {
   const router = useRouter();
   const manualScores = result.manual_scores ?? {};
@@ -740,9 +750,11 @@ function ResultView({ questions, result, onRetry, examTitle, showSolution }: {
 
         {/* Actions */}
         <div className="flex gap-3 pb-8">
-          <Button variant="outline" className="flex-1 gap-2" onClick={onRetry}>
-            <RotateCcw className="h-4 w-4" />Làm lại
-          </Button>
+          {allowRetry && (
+            <Button variant="outline" className="flex-1 gap-2" onClick={onRetry}>
+              <RotateCcw className="h-4 w-4" />Làm lại
+            </Button>
+          )}
           <Button variant="gradient" className="flex-1 gap-2" onClick={() => router.back()}>
             <ChevronLeft className="h-4 w-4" />Quay lại lộ trình
           </Button>
@@ -848,6 +860,7 @@ export default function ExamPage() {
             questions: data.questions ?? [],
             time_limit: data.time_limit ?? undefined,
             show_solution_after_submit: data.show_solution_after_submit,
+            allow_retry: data.allow_retry,
           },
         });
         setQuestions((data.questions ?? []) as ExamQuestion[]);
@@ -1020,6 +1033,7 @@ export default function ExamPage() {
       questions={questions}
       result={result}
       onRetry={retry}
+      allowRetry={lesson.exam_content?.allow_retry !== false}
       examTitle={lesson.title}
       showSolution={lesson.exam_content?.show_solution_after_submit !== false}
     />

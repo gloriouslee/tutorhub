@@ -59,6 +59,16 @@ export async function POST(
       return NextResponse.json({ error: "already_submitted" }, { status: 409 });
     }
 
+    // Giáo viên tắt "Cho làm lại": registry bài nộp còn ghi vết dù kết quả
+    // đã bị xóa client-side → chặn nộp lần 2 tại server (không lách được).
+    if (lesson.exam_content?.allow_retry === false) {
+      const subsIdCheck = examSubmissionsId(classId, lessonId);
+      const submittedIds = (await kvGetServer<string[]>(admin, "kv_exam_submissions", subsIdCheck)) ?? [];
+      if (submittedIds.includes(studentId)) {
+        return NextResponse.json({ error: "retry_not_allowed" }, { status: 409 });
+      }
+    }
+
     const questions = lesson.exam_content?.questions ?? [];
     const score = calcScoreServer(questions, answers);
     const total = questions.reduce((s, q) => s + q.score, 0);

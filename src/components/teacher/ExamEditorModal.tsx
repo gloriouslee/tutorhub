@@ -12,7 +12,7 @@ import { docxHtmlToConventionText, stripExamBoilerplate, FORMULA_PLACEHOLDER_SRC
 import ConventionEditor from "@/components/teacher/ConventionEditor";
 import {
   X, Check, Clock, Eye, EyeOff,
-  FileUp, ChevronDown, AlertTriangle, PencilLine, Lightbulb,
+  FileUp, ChevronDown, AlertTriangle, PencilLine, Lightbulb, RotateCcw,
 } from "lucide-react";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -582,6 +582,8 @@ export default function ExamEditorModal({
   const [published, setPublished] = useState(initial?.is_published ?? true);
   // Cho học sinh xem lời giải sau khi nộp bài (mặc định: bật)
   const [showSolution, setShowSolution] = useState(initial?.exam_content?.show_solution_after_submit ?? true);
+  // Cho học sinh làm lại bài sau khi nộp (mặc định: bật)
+  const [allowRetry, setAllowRetry] = useState(initial?.exam_content?.allow_retry ?? true);
 
   // Đề đã lưu → văn bản quy ước + registry token (chỉ tính một lần khi mở modal)
   const [initialText] = useState(() => {
@@ -620,6 +622,7 @@ export default function ExamEditorModal({
           })),
           time_limit: timeLimit ? parseInt(timeLimit) : undefined,
           show_solution_after_submit: showSolution,
+          allow_retry: allowRetry,
         },
       });
       onClose();
@@ -681,6 +684,17 @@ export default function ExamEditorModal({
             <span className="hidden lg:inline">Cho xem lời giải sau khi nộp</span>
             <span className={`inline-block h-3.5 w-6 rounded-full relative transition-colors ${showSolution ? "bg-amber-500" : "bg-muted-foreground/30"}`}>
               <span className={`absolute top-0.5 h-2.5 w-2.5 rounded-full bg-white transition-all ${showSolution ? "left-3" : "left-0.5"}`} />
+            </span>
+          </button>
+          <button
+            onClick={() => setAllowRetry(r => !r)}
+            title="Cho học sinh làm lại bài sau khi nộp"
+            className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border transition-colors ${allowRetry ? "border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-700 dark:bg-blue-900/20 dark:text-blue-400" : "border-border text-muted-foreground hover:bg-muted"}`}
+          >
+            <RotateCcw className="h-3.5 w-3.5" />
+            <span className="hidden lg:inline">Cho làm lại</span>
+            <span className={`inline-block h-3.5 w-6 rounded-full relative transition-colors ${allowRetry ? "bg-blue-500" : "bg-muted-foreground/30"}`}>
+              <span className={`absolute top-0.5 h-2.5 w-2.5 rounded-full bg-white transition-all ${allowRetry ? "left-3" : "left-0.5"}`} />
             </span>
           </button>
           <button

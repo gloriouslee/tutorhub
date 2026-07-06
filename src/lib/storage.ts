@@ -517,6 +517,8 @@ export interface ExamContent {
   time_limit?: number; // phút
   // Cho học sinh xem "Lời giải" (explanation_html) sau khi nộp bài. Mặc định: true.
   show_solution_after_submit?: boolean;
+  // Cho học sinh làm lại sau khi nộp. Mặc định: true.
+  allow_retry?: boolean;
 }
 
 export interface CurriculumLesson {

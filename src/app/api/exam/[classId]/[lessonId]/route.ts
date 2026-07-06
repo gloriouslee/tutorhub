@@ -55,6 +55,7 @@ export async function GET(
     title: lesson.title,
     time_limit: lesson.exam_content?.time_limit ?? null,
     show_solution_after_submit: showSolution,
+    allow_retry: lesson.exam_content?.allow_retry !== false,
   };
 
   if (result) {
