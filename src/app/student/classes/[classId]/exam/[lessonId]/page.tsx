@@ -6,6 +6,7 @@ import { getCurriculum, getClasses, saveExamResult, getExamResult, kvUpdate, kvD
 import { MOCK_CLASSES } from "@/lib/mock-data";
 import { Button } from "@/components/ui/button";
 import "katex/dist/katex.min.css";
+import { renderMathInHtml } from "@/lib/mathRender";
 import {
   Clock, CheckCircle2, XCircle, AlertTriangle, Check,
   ChevronLeft, Flag, RotateCcw, BookOpen, Circle,
@@ -72,7 +73,7 @@ function RichContent({ html, className = "" }: { html: string; className?: strin
         [&_strong]:font-bold [&_em]:italic
         [&_.math-node]:inline-block
         ${className}`}
-      dangerouslySetInnerHTML={{ __html: html || "" }}
+      dangerouslySetInnerHTML={{ __html: renderMathInHtml(html || "") }}
     />
   );
 }

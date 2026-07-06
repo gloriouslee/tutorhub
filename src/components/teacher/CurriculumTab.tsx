@@ -11,6 +11,8 @@ import {
   type CurriculumChapter, type CurriculumSession, type CurriculumLesson, type StoredExamResult,
 } from "@/lib/storage";
 import { uploadClassFile } from "@/lib/upload";
+import { renderMathInHtml } from "@/lib/mathRender";
+import "katex/dist/katex.min.css";
 import ExamEditorModal from "@/components/teacher/ExamEditorModal";
 import {
   Plus, ChevronDown, ChevronRight, Trash2, Edit2, X, Check,
@@ -942,7 +944,10 @@ export default function CurriculumTab({ classId, schedule }: { classId: string; 
                             </span>
                             <div className="flex-1 min-w-0">
                               <p className="text-xs font-semibold text-muted-foreground mb-0.5">Câu {idx + 1} · {q.score}đ</p>
-                              <p className="text-sm text-foreground leading-snug">{stripHtml(q.content_html)}</p>
+                              <div
+                                className="text-sm text-foreground leading-snug [&_p]:my-0.5 [&_img]:max-w-full [&_img]:rounded-lg [&_img]:my-1"
+                                dangerouslySetInnerHTML={{ __html: renderMathInHtml(q.content_html) }}
+                              />
                             </div>
                           </div>
 
@@ -956,7 +961,10 @@ export default function CurriculumTab({ classId, schedule }: { classId: string; 
                                 return (
                                   <div key={i} className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs ${isCorrectOpt ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400" : "bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-400"}`}>
                                     <span className={`h-4 w-4 rounded-full flex items-center justify-center text-[9px] font-bold shrink-0 ${isCorrectOpt ? "bg-emerald-500 text-white" : "bg-red-500 text-white"}`}>{OPTS[i]}</span>
-                                    <span className="flex-1 truncate">{stripHtml(opt)}</span>
+                                    <span
+                                      className="flex-1 truncate [&_p]:inline [&_img]:hidden"
+                                      dangerouslySetInnerHTML={{ __html: renderMathInHtml(opt) }}
+                                    />
                                     <span className="font-semibold shrink-0">{isCorrectOpt ? "Đáp án" : "Bạn chọn"}</span>
                                   </div>
                                 );

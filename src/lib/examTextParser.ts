@@ -177,8 +177,34 @@ function esc(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+// Token ảnh theo quy ước: [img:<url>] — trên dòng riêng hoặc nằm giữa văn bản.
+const IMG_TOKEN_RE = /\[img:([^\]\s]+)\]/g;
+
+/** Chỉ cho phép http(s) và data:image — tránh javascript:, file:… */
+function sanitizeImgUrl(url: string): string | null {
+  return /^(https?:\/\/|data:image\/)/i.test(url) ? url : null;
+}
+
+/** Một dòng văn bản → HTML: escape text, [img:url] → <img>. */
+function lineToHtml(line: string): string {
+  IMG_TOKEN_RE.lastIndex = 0;
+  let out = "";
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = IMG_TOKEN_RE.exec(line)) !== null) {
+    out += esc(line.slice(last, m.index));
+    const url = sanitizeImgUrl(m[1]);
+    out += url
+      ? `<img src="${esc(url).replace(/"/g, "&quot;")}" alt="hình" />`
+      : esc(m[0]); // URL không hợp lệ → giữ nguyên dạng text
+    last = m.index + m[0].length;
+  }
+  out += esc(line.slice(last));
+  return out;
+}
+
 function toHtml(s: string): string {
-  return s.split("\n").filter(l => l.trim()).map(l => `<p>${esc(l.trim())}</p>`).join("");
+  return s.split("\n").filter(l => l.trim()).map(l => `<p>${lineToHtml(l.trim())}</p>`).join("");
 }
 
 // ── Serializer: ParsedQuestion[] → văn bản theo quy ước ──────────────────────

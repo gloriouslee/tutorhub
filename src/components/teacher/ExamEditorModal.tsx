@@ -13,6 +13,8 @@ import { Button } from "@/components/ui/button";
 import type { ExamContent, ExamQuestion, CurriculumLesson } from "@/lib/storage";
 import { uploadClassFile } from "@/lib/upload";
 import { parseExamText, parsedToText, parsedToExamQuestions, type ParseResult, type ParsedQuestion } from "@/lib/examTextParser";
+import { renderMathInHtml, hasMath } from "@/lib/mathRender";
+import { docxHtmlToConventionText, FORMULA_PLACEHOLDER_SRC, FORMULA_MARKER } from "@/lib/docxToText";
 import {
   X, Check, Clock, Eye, EyeOff, Plus, Trash2,
   Bold, Italic, List, ListOrdered, AlignLeft, AlignCenter,
@@ -572,9 +574,23 @@ function FormatGuide({ open, onToggle }: { open: boolean; onToggle: () => void }
           <p>• <strong className="text-foreground">Trả lời ngắn:</strong> sau dòng <code className="bg-muted px-1 rounded font-mono">Lời giải</code> có dòng <code className="bg-muted px-1 rounded font-mono">Đáp án: &lt;con số&gt;</code>.</p>
           <p>• Câu không khớp định dạng nào → <strong className="text-foreground">tự luận</strong>.</p>
           <p>• Dòng <code className="bg-muted px-1 rounded font-mono">Phần …</code> trước câu hỏi được coi là tiêu đề nhóm.</p>
+          <p>• <strong className="text-foreground">Công thức toán:</strong> gõ LaTeX giữa hai dấu <code className="bg-muted px-1 rounded font-mono">$…$</code> (VD: <code className="bg-muted px-1 rounded font-mono">{"$\\frac{1}{2}$"}</code>). Dùng <code className="bg-muted px-1 rounded font-mono">$$…$$</code> cho công thức trên dòng riêng.</p>
+          <p>• <strong className="text-foreground">Hình ảnh:</strong> chèn <code className="bg-muted px-1 rounded font-mono">[img:url]</code> (tự động chèn khi nhập từ file Word).</p>
         </div>
       )}
     </div>
+  );
+}
+
+// Preview KaTeX nhỏ dưới ô nhập: hiện khi text chứa $...$, giữ ô nhập là LaTeX thô.
+function MathHint({ text, className = "" }: { text: string; className?: string }) {
+  if (!text || !hasMath(text)) return null;
+  const escaped = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return (
+    <div
+      className={`px-2 py-1 rounded-md bg-muted/40 text-xs text-foreground overflow-x-auto ${className}`}
+      dangerouslySetInnerHTML={{ __html: renderMathInHtml(escaped) }}
+    />
   );
 }
 
@@ -629,6 +645,7 @@ function ParsedQuestionCard({ q, num, update }: {
         placeholder="Nội dung câu hỏi…"
         className="font-medium"
       />
+      <MathHint text={q.content} />
 
       {/* Trắc nghiệm A-D */}
       {q.type === "multiple_choice" && q.options && (
@@ -636,7 +653,8 @@ function ParsedQuestionCard({ q, num, update }: {
           {q.options.map((opt, oi) => {
             const correct = q.correctOption === oi;
             return (
-              <div key={oi} className={`flex items-center gap-2 px-2 py-1 rounded-lg border transition-colors ${correct ? "border-emerald-400 bg-emerald-50 dark:bg-emerald-900/20" : "border-border bg-background"}`}>
+              <div key={oi}>
+              <div className={`flex items-center gap-2 px-2 py-1 rounded-lg border transition-colors ${correct ? "border-emerald-400 bg-emerald-50 dark:bg-emerald-900/20" : "border-border bg-background"}`}>
                 <button
                   onClick={() => update({ correctOption: oi })}
                   title="Nhấn để chọn đáp án đúng"
@@ -655,6 +673,8 @@ function ParsedQuestionCard({ q, num, update }: {
                   className="flex-1 min-w-0 h-7 px-1.5 rounded-md border border-transparent bg-transparent text-sm outline-none focus:border-border focus:bg-background text-foreground"
                 />
               </div>
+              <MathHint text={opt} className="mt-0.5 ml-8" />
+              </div>
             );
           })}
         </div>
@@ -664,7 +684,8 @@ function ParsedQuestionCard({ q, num, update }: {
       {q.type === "true_false" && q.statements && (
         <div className="space-y-1">
           {q.statements.map((st, si) => (
-            <div key={si} className={`flex items-center gap-2 px-2 py-1 rounded-lg border transition-colors ${st.correct ? "border-emerald-400 bg-emerald-50 dark:bg-emerald-900/20" : "border-border bg-background"}`}>
+            <div key={si}>
+            <div className={`flex items-center gap-2 px-2 py-1 rounded-lg border transition-colors ${st.correct ? "border-emerald-400 bg-emerald-50 dark:bg-emerald-900/20" : "border-border bg-background"}`}>
               <span className="text-xs font-bold text-muted-foreground w-4 shrink-0">{String.fromCharCode(97 + si)})</span>
               <input
                 value={st.text}
@@ -682,6 +703,8 @@ function ParsedQuestionCard({ q, num, update }: {
                   className={`px-2 h-6 rounded-full text-[11px] font-semibold border transition-colors ${!st.correct ? "border-red-500 bg-red-500 text-white" : "border-border text-muted-foreground hover:border-red-400"}`}
                 >S</button>
               </div>
+            </div>
+            <MathHint text={st.text} className="mt-0.5 ml-8" />
             </div>
           ))}
         </div>
@@ -710,12 +733,15 @@ function ParsedQuestionCard({ q, num, update }: {
           Lời giải{q.solution ? "" : " (trống)"}
         </button>
         {solutionOpen ? (
-          <AutoGrowTextarea
-            value={q.solution ?? ""}
-            onChange={v => update({ solution: v || undefined })}
-            placeholder="Lời giải / giải thích…"
-            className="mt-1 text-xs"
-          />
+          <>
+            <AutoGrowTextarea
+              value={q.solution ?? ""}
+              onChange={v => update({ solution: v || undefined })}
+              placeholder="Lời giải / giải thích…"
+              className="mt-1 text-xs"
+            />
+            <MathHint text={q.solution ?? ""} className="mt-0.5" />
+          </>
         ) : q.solution ? (
           <p className="text-[11px] text-muted-foreground truncate mt-0.5 px-2">💡 {q.solution}</p>
         ) : null}
@@ -724,15 +750,18 @@ function ParsedQuestionCard({ q, num, update }: {
   );
 }
 
-function TextImportPanel({ text, setText, onAppend, onReplace }: {
+function TextImportPanel({ text, setText, onAppend, onReplace, classId }: {
   text: string;
   setText: (t: string) => void;
   onAppend: (qs: ExamQuestion[]) => void;
   onReplace: (qs: ExamQuestion[]) => void;
+  classId: string;
 }) {
   const [parsed,    setParsed]    = useState<ParseResult | null>(() => text.trim() ? parseExamText(text) : null);
   const [importing, setImporting] = useState(false);
   const [guideOpen, setGuideOpen] = useState(false);
+  // Số công thức dạng ảnh (MathType/WMF) không tự chuyển được trong lần import gần nhất
+  const [formulaCount, setFormulaCount] = useState(0);
   const fileRef = useRef<HTMLInputElement>(null);
   // Nguồn thay đổi gần nhất: "text" (gõ bên phải) hay "cards" (sửa thẻ bên trái).
   // Khi sửa từ thẻ, text đã được serialize từ parsed → bỏ qua lượt parse kế tiếp để tránh vòng lặp.
@@ -762,11 +791,34 @@ function TextImportPanel({ text, setText, onAppend, onReplace }: {
 
   const handleDocx = async (file: File) => {
     setImporting(true);
+    setFormulaCount(0);
     try {
       const arrayBuffer = await file.arrayBuffer();
       const mammoth = await import("mammoth");
-      const { value } = await mammoth.extractRawText({ arrayBuffer });
-      setText(value);
+      // Ảnh PNG/JPEG/GIF/WebP → upload lên storage, trả về URL công khai.
+      // WMF/EMF (công thức MathType) hoặc upload lỗi → placeholder để đánh dấu.
+      const convertImage = mammoth.images.imgElement(async img => {
+        const ct = (img.contentType || "").toLowerCase();
+        if (/^image\/(png|jpe?g|gif|webp)$/.test(ct)) {
+          try {
+            const b64 = await img.readAsBase64String();
+            const bin = atob(b64);
+            const bytes = new Uint8Array(bin.length);
+            for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+            const ext = ct.split("/")[1].replace("jpeg", "jpg");
+            const f = new File([bytes], `docx_img_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.${ext}`, { type: ct });
+            const up = await uploadClassFile(f, classId, "materials");
+            return { src: up.url };
+          } catch {
+            return { src: FORMULA_PLACEHOLDER_SRC };
+          }
+        }
+        return { src: FORMULA_PLACEHOLDER_SRC };
+      });
+      const { value } = await mammoth.convertToHtml({ arrayBuffer }, { convertImage });
+      const converted = docxHtmlToConventionText(value);
+      setFormulaCount(converted.split(FORMULA_MARKER).length - 1);
+      setText(converted);
     } catch {
       alert("Không đọc được file Word. Vui lòng kiểm tra file .docx.");
     } finally {
@@ -865,6 +917,18 @@ function TextImportPanel({ text, setText, onAppend, onReplace }: {
           {guideOpen && (
             <div className="absolute top-12 left-3 right-3 z-10">
               <FormatGuide open onToggle={() => setGuideOpen(false)} />
+            </div>
+          )}
+
+          {formulaCount > 0 && (
+            <div className="flex items-start gap-2 mx-3 mt-2 px-3 py-2 rounded-xl border border-amber-300 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-700/50 text-xs text-amber-700 dark:text-amber-400 shrink-0">
+              <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+              <span>
+                File chứa {formulaCount} công thức dạng ảnh (MathType) không thể tự chuyển — hãy gõ lại bằng $LaTeX$ tại các vị trí đánh dấu.
+              </span>
+              <button onClick={() => setFormulaCount(0)} className="ml-auto shrink-0 p-0.5 rounded hover:bg-amber-100 dark:hover:bg-amber-900/40">
+                <X className="h-3 w-3" />
+              </button>
             </div>
           )}
 
@@ -1041,7 +1105,7 @@ export default function ExamEditorModal({
 
       {mode === "text" ? (
         <div className="flex-1 min-h-0">
-          <TextImportPanel text={importText} setText={setImportText} onAppend={appendParsed} onReplace={replaceParsed} />
+          <TextImportPanel text={importText} setText={setImportText} onAppend={appendParsed} onReplace={replaceParsed} classId={classId} />
         </div>
       ) : (
       /* ── Body: sidebar + editor ── */
