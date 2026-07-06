@@ -14,6 +14,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { UserRole } from "@/types";
 import { MOCK_CLASSES, MOCK_HOMEWORK, MOCK_NOTIFICATIONS } from "@/lib/mock-data";
 import { kvGet } from "@/lib/storage";
+import { useStudentContext } from "@/hooks/useStudentContext";
 
 // ── Nav config (no static badges) ────────────────────────────────────────────
 interface NavItem {
@@ -84,22 +85,11 @@ function parseSet(key: string): Set<string> {
   try { return new Set(JSON.parse(ls(key) ?? "[]")); } catch { return new Set(); }
 }
 
-function currentStudentId(): string {
-  try {
-    const match = document.cookie.match(/(?:^|;\s*)enrolled_student_id=([^;]+)/);
-    if (match) return decodeURIComponent(match[1]);
-  } catch { /* SSR or cookie access blocked */ }
-  // TODO: học viên đăng nhập bằng Supabase session (không có cookie enrolled_student_id)
-  // sẽ rơi về "s1" — cần đọc id từ session/useStudentContext để chính xác.
-  return "s1";
-}
-
-async function computeBadges(role: UserRole): Promise<Record<string, number>> {
+async function computeBadges(role: UserRole, sid: string): Promise<Record<string, number>> {
   const result: Record<string, number> = {};
 
   if (role === "student") {
     // Bài tập: homework for enrolled classes that hasn't been submitted
-    const sid = currentStudentId();
     const myClassIds = MOCK_CLASSES
       .filter(c => (c.student_ids ?? []).includes(sid))
       .map(c => c.id);
@@ -168,15 +158,21 @@ export default function Sidebar({ role, userName, isOpen = true, onClose }: Side
   const router   = useRouter();
   const items    = navConfig[role];
   const config   = roleConfig[role];
+  // Nhận diện đúng học viên hiện tại (demo s1 / cookie enrolled / phiên Supabase)
+  const { studentId, ready } = useStudentContext();
 
   const [badges, setBadges] = useState<Record<string, number>>({});
 
   // Recompute on every navigation so badge clears when user visits the page
   useEffect(() => {
+    if (role === "student" && !ready) return; // chờ context resolve, tránh đếm theo s1 mặc định
+    let cancelled = false;
     (async () => {
-      setBadges(await computeBadges(role));
+      const next = await computeBadges(role, studentId);
+      if (!cancelled) setBadges(next);
     })();
-  }, [role, pathname]);
+    return () => { cancelled = true; };
+  }, [role, pathname, studentId, ready]);
 
   const handleLogout = async () => {
     // Clear all session cookies
