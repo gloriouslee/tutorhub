@@ -4,12 +4,13 @@ import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import {
   getClassTuition, saveClassTuition, recordTuitionPayment, deleteTuitionPayment,
-  type ClassTuitionConfig, type StudentTuitionData, type TuitionPaymentRecord,
+  getInvoices, issueTuitionInvoice, confirmInvoicePaid,
+  type ClassTuitionConfig, type StudentTuitionData, type TuitionPaymentRecord, type TuitionInvoice,
 } from "@/lib/storage";
 import { formatCurrency } from "@/lib/utils";
 import {
   Wallet, Plus, Pencil, Check, X,
-  Trash2, Clock, AlertCircle, CheckCircle2, Settings,
+  Trash2, Clock, AlertCircle, CheckCircle2, Settings, FileText, Receipt,
 } from "lucide-react";
 
 type PackageType = "online" | "advanced" | "offline";
@@ -225,13 +226,22 @@ function HistoryPanel({
 
 // ── Student row ───────────────────────────────────────────────────────────────
 
+const INVOICE_BADGE: Record<string, { label: string; cls: string }> = {
+  none:                 { label: "Chưa phát hành", cls: "bg-muted text-muted-foreground" },
+  pending:              { label: "Chờ đóng",       cls: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400" },
+  pending_verification: { label: "Chờ xác minh",   cls: "bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-400" },
+  paid:                 { label: "Đã đóng",        cls: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" },
+};
+
 function StudentRow({
-  student, config, period, classId, onUpdate,
+  student, config, period, classId, className, invoice, onUpdate,
 }: {
   student: { id: string; full_name?: string; name?: string; package?: PackageType };
   config: ClassTuitionConfig;
   period: string;
   classId: string;
+  className: string;
+  invoice?: TuitionInvoice;
   onUpdate: () => void;
 }) {
   const sData = config.students[student.id] ?? { payments: [] };
@@ -247,6 +257,37 @@ function StudentRow({
   const [noteInput, setNoteInput] = useState(sData.notes ?? "");
   const [showPay,   setShowPay]   = useState(false);
   const [showHist,  setShowHist]  = useState(false);
+  const [busy,      setBusy]      = useState(false);
+
+  async function issueInvoice() {
+    if (busy) return;
+    setBusy(true);
+    await issueTuitionInvoice({
+      classId, className, studentId: student.id,
+      amount: fee, period, dueDate: `${period}-15`,
+    });
+    setBusy(false);
+    onUpdate();
+  }
+
+  async function confirmReceipt() {
+    if (busy || !invoice || invoice.status !== "pending_verification") return;
+    setBusy(true);
+    // Đọc lại trạng thái mới nhất để tránh ghi nhận trùng
+    const fresh = (await getInvoices()).find(i => i.id === invoice.id);
+    if (fresh && fresh.status === "pending_verification") {
+      await confirmInvoicePaid(invoice.id);
+      await recordTuitionPayment(classId, student.id, {
+        amount: invoice.amount,
+        period: invoice.period ?? period,
+        paid_at: new Date().toISOString(),
+        method: "transfer",
+        note: "Xác nhận từ biên lai học sinh",
+      });
+    }
+    setBusy(false);
+    onUpdate();
+  }
 
   async function saveFee() {
     const v = parseInt(feeInput.replace(/\D/g, ""), 10) || 0;
@@ -352,6 +393,15 @@ function StudentRow({
           ) : (
             <span className="text-xs text-muted-foreground">—</span>
           )}
+          {(() => {
+            const b = INVOICE_BADGE[invoice?.status ?? "none"];
+            return (
+              <span className={`inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full mt-1 ${b.cls}`}>
+                <FileText className="h-2.5 w-2.5" />
+                {b.label}
+              </span>
+            );
+          })()}
         </div>
 
         {/* Paid this period */}
@@ -389,7 +439,17 @@ function StudentRow({
         </div>
 
         {/* Actions */}
-        <div className="shrink-0">
+        <div className="shrink-0 flex items-center gap-1.5">
+          {!invoice && fee > 0 && (
+            <Button size="sm" variant="outline" className="h-8 text-xs px-2.5" disabled={busy} onClick={issueInvoice} title="Phát hành hóa đơn tháng này">
+              <FileText className="h-3 w-3 mr-1" />Phát hành HĐ
+            </Button>
+          )}
+          {invoice?.status === "pending_verification" && (
+            <Button size="sm" variant="gradient" className="h-8 text-xs px-2.5" disabled={busy} onClick={confirmReceipt} title="Học sinh đã nộp biên lai — xác nhận đã thu">
+              <Receipt className="h-3 w-3 mr-1" />Xác nhận đã thu
+            </Button>
+          )}
           <Button size="sm" variant="outline" className="h-8 text-xs px-3" onClick={() => setShowPay(true)}>
             <Plus className="h-3 w-3 mr-1" />Ghi nhận
           </Button>
@@ -476,17 +536,49 @@ function ConfigPanel({ classId, config, onUpdate }: {
 
 interface Props {
   classId: string;
+  className?: string;
   students: Array<{ id: string; full_name?: string; name?: string; package?: PackageType }>;
 }
 
-export default function TuitionTab({ classId, students }: Props) {
+export default function TuitionTab({ classId, className, students }: Props) {
   const [config,     setConfig]     = useState<ClassTuitionConfig>({ package_fees: { online: 0, advanced: 0, offline: 0 }, students: {} });
+  const [invoices,   setInvoices]   = useState<TuitionInvoice[]>([]);
   const [period,     setPeriod]     = useState(currentPeriod());
   const [showConfig, setShowConfig] = useState(false);
+  const [bulkBusy,   setBulkBusy]   = useState(false);
 
-  const reload = useCallback(() => { getClassTuition(classId).then(setConfig); }, [classId]);
+  const reload = useCallback(() => {
+    getClassTuition(classId).then(setConfig);
+    getInvoices().then(list => setInvoices(list.filter(inv => inv.class_id === classId)));
+  }, [classId]);
 
   useEffect(() => { reload(); }, [reload]);
+
+  const clsName = className ?? "lớp học";
+  const invoiceFor = (studentId: string) =>
+    invoices.find(inv => inv.child_id === studentId && inv.period === period);
+
+  async function issueAll() {
+    if (bulkBusy) return;
+    setBulkBusy(true);
+    for (const st of students) {
+      if (invoiceFor(st.id)) continue;
+      const sData = config.students[st.id] ?? { payments: [] };
+      const fee = getEffectiveFee(sData, st.package ?? "online", config);
+      if (fee <= 0) continue;
+      await issueTuitionInvoice({
+        classId, className: clsName, studentId: st.id,
+        amount: fee, period, dueDate: `${period}-15`,
+      });
+    }
+    setBulkBusy(false);
+    reload();
+  }
+
+  const missingCount = students.filter(st => {
+    const sData = config.students[st.id] ?? { payments: [] };
+    return !invoiceFor(st.id) && getEffectiveFee(sData, st.package ?? "online", config) > 0;
+  }).length;
 
   // Summary for selected period
   const totalExpected = students.reduce((s, st) => {
@@ -516,6 +608,11 @@ export default function TuitionTab({ classId, students }: Props) {
             onChange={e => setPeriod(e.target.value)}
             className="h-9 px-3 rounded-xl border border-border bg-background text-sm text-foreground outline-none focus:ring-2 focus:ring-primary/40"
           />
+          {missingCount > 0 && (
+            <Button variant="gradient" size="sm" disabled={bulkBusy} onClick={issueAll}>
+              <FileText className="h-4 w-4 mr-1.5" />Phát hành hóa đơn tháng này ({missingCount})
+            </Button>
+          )}
           <Button variant="outline" size="sm" onClick={() => setShowConfig(v => !v)}>
             <Settings className="h-4 w-4 mr-1.5" />Cài đặt
           </Button>
@@ -567,6 +664,8 @@ export default function TuitionTab({ classId, students }: Props) {
               config={config}
               period={period}
               classId={classId}
+              className={clsName}
+              invoice={invoiceFor(s.id)}
               onUpdate={reload}
             />
           ))}

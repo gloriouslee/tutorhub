@@ -546,7 +546,7 @@ export default function TeacherClassDetailPage() {
           )}
 
           {activeTab === "tuition" && (
-            <TuitionTab classId={classId} students={classStudents} />
+            <TuitionTab classId={classId} className={cls.class_name} students={classStudents} />
           )}
         </div>
       </div>

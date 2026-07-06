@@ -635,6 +635,8 @@ export interface TuitionInvoice {
   status: InvoiceStatus;
   paid_at?: string;
   submitted_by?: "student" | "parent";  // who uploaded the receipt
+  class_id?: string;       // liên kết với lớp học (hóa đơn do giáo viên phát hành)
+  period?: string;         // "YYYY-MM"
 }
 
 const INVOICE_KEY = "tutorhub_invoices";
@@ -665,6 +667,50 @@ export async function updateInvoiceStatus(
       return match ? { ...inv, status, submitted_by: submittedBy } : inv;
     })
   );
+}
+
+/** Giáo viên phát hành hóa đơn học phí cho một học sinh trong lớp (idempotent theo id). */
+export async function issueTuitionInvoice(params: {
+  classId: string;
+  className: string;
+  studentId: string;
+  amount: number;
+  period: string;   // "YYYY-MM"
+  dueDate: string;  // "YYYY-MM-DD"
+}): Promise<TuitionInvoice> {
+  const { classId, className, studentId, amount, period, dueDate } = params;
+  const id = `INV-${period}-${classId}-${studentId}`;
+  const [y, m] = period.split("-");
+  const invoice: TuitionInvoice = {
+    id,
+    child_id: studentId,
+    title: `Học phí ${className} - Tháng ${parseInt(m)}/${y}`,
+    amount,
+    due_date: dueDate,
+    status: "pending",
+    class_id: classId,
+    period,
+  };
+  let result = invoice;
+  await kvUpdate<TuitionInvoice[]>(INVOICE_KEY, DEFAULT_INVOICES, invoices => {
+    const existing = invoices.find(inv => inv.id === id);
+    if (existing) { result = existing; return invoices; }
+    return [...invoices, invoice];
+  });
+  return result;
+}
+
+/** Giáo viên xác nhận đã thu tiền cho một hóa đơn. */
+export async function confirmInvoicePaid(invoiceId: string): Promise<TuitionInvoice | null> {
+  let result: TuitionInvoice | null = null;
+  await kvUpdate<TuitionInvoice[]>(INVOICE_KEY, DEFAULT_INVOICES, invoices =>
+    invoices.map(inv => {
+      if (inv.id !== invoiceId) return inv;
+      result = inv.status === "paid" ? inv : { ...inv, status: "paid" as const, paid_at: new Date().toISOString() };
+      return result;
+    })
+  );
+  return result;
 }
 
 // ── Enrollment requests (Supabase) ───────────────────────────────────────────
@@ -1122,6 +1168,15 @@ export async function recordTuitionPayment(
   const newPayment: TuitionPaymentRecord = { ...payment, id: crypto.randomUUID() };
   config.students[studentId] = { ...student, payments: [...student.payments, newPayment] };
   await saveClassTuition(classId, config);
+
+  // Đồng bộ: đánh dấu hóa đơn tương ứng (lớp + học sinh + kỳ) là đã đóng
+  await kvUpdate<TuitionInvoice[]>(INVOICE_KEY, DEFAULT_INVOICES, invoices =>
+    invoices.map(inv =>
+      inv.class_id === classId && inv.child_id === studentId && inv.period === payment.period && inv.status !== "paid"
+        ? { ...inv, status: "paid" as const, paid_at: new Date().toISOString() }
+        : inv
+    )
+  );
 }
 
 export async function deleteTuitionPayment(classId: string, studentId: string, paymentId: string): Promise<void> {
