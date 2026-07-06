@@ -21,6 +21,7 @@ export interface ParsedStatement { text: string; correct: boolean }
 export interface ParsedQuestion {
   index: number;                      // số câu trong văn bản ("Câu 3." → 3)
   type: "multiple_choice" | "true_false" | "fill_blank" | "essay";
+  score?: number;                     // điểm câu này — "(0,5đ)" sau "Câu N."; mặc định 1
   content: string;                    // đề bài (text thuần)
   options?: string[];                 // trắc nghiệm A-D
   correctOption?: number;             // 0-based
@@ -46,6 +47,8 @@ const MCQ_OPT_RE  = /(^|\s)(\*?)([A-D])\.\s+/g;
 // "*a) text" | "a) text" — chữ thường + dấu ngoặc (đúng sai)
 const TF_OPT_RE   = /(^|\s)(\*?)([a-d])\)\s+/g;
 const SHORT_ANS_RE = /Đáp\s*án\s*[:：]\s*(.+)/i;
+// "(0,5đ)" | "(0.5 điểm)" | "(2đ)" ngay sau "Câu N." — điểm của câu
+const SCORE_RE = /^\s*\((\d+(?:[.,]\d+)?)\s*(?:đ|điểm)\)\s*/i;
 
 /** Tách các phương án nằm trên cùng một dòng hoặc nhiều dòng. */
 function extractOptions(
@@ -76,8 +79,17 @@ function extractOptions(
   return { before, opts };
 }
 
-function parseOneQuestion(index: number, body: string): ParsedQuestion {
+function parseOneQuestion(index: number, rawBody: string): ParsedQuestion {
   const warnings: string[] = [];
+
+  // Điểm câu: "(0,5đ)" ngay đầu thân câu (sau "Câu N.") — bỏ khỏi nội dung
+  let body = rawBody;
+  let score: number | undefined;
+  const sm = body.match(SCORE_RE);
+  if (sm) {
+    score = parseFloat(sm[1].replace(",", "."));
+    body = body.slice(sm[0].length);
+  }
 
   // Tách đề / lời giải
   const lines = body.split("\n");
@@ -95,7 +107,7 @@ function parseOneQuestion(index: number, body: string): ParsedQuestion {
     if (correctIdx < 0) warnings.push("Trắc nghiệm nhưng chưa đánh dấu * đáp án đúng.");
     if (mcq.opts.filter(o => o.starred).length > 1) warnings.push("Có nhiều hơn 1 phương án đánh dấu *.");
     return {
-      index, type: "multiple_choice",
+      index, type: "multiple_choice", score,
       content: mcq.before,
       options: mcq.opts.map(o => o.text),
       correctOption: correctIdx >= 0 ? correctIdx : undefined,
@@ -109,7 +121,7 @@ function parseOneQuestion(index: number, body: string): ParsedQuestion {
   if (tf.opts.length >= 2) {
     if (!tf.opts.some(o => o.starred)) warnings.push("Đúng sai nhưng chưa đánh dấu * mệnh đề đúng.");
     return {
-      index, type: "true_false",
+      index, type: "true_false", score,
       content: tf.before,
       statements: tf.opts.map(o => ({ text: o.text, correct: o.starred })),
       solution: solutionPart || undefined,
@@ -122,7 +134,7 @@ function parseOneQuestion(index: number, body: string): ParsedQuestion {
   if (shortMatch) {
     const answer = shortMatch[1].trim().split(/\s/)[0]; // lấy token đầu (con số)
     return {
-      index, type: "fill_blank",
+      index, type: "fill_blank", score,
       content: questionPart,
       shortAnswer: answer,
       solution: solutionPart || undefined,
@@ -132,7 +144,7 @@ function parseOneQuestion(index: number, body: string): ParsedQuestion {
 
   // 4) Mặc định: tự luận
   return {
-    index, type: "essay",
+    index, type: "essay", score,
     content: questionPart,
     solution: solutionPart || undefined,
     warnings,
@@ -295,7 +307,11 @@ export function parsedToText(
   sectionsAt?: { index: number; text: string }[]
 ): string {
   const blocks = questions.map((q, i) => {
-    const lines: string[] = [`Câu ${i + 1}. ${q.content}`.trimEnd()];
+    // Điểm ≠ 1 → ghi "(Xđ)" ngay sau số câu để round-trip
+    const scoreTag = q.score !== undefined && q.score !== 1
+      ? `(${String(q.score).replace(".", ",")}đ) `
+      : "";
+    const lines: string[] = [`Câu ${i + 1}. ${scoreTag}${q.content}`.trimEnd()];
     if (q.type === "multiple_choice" && q.options) {
       q.options.forEach((opt, j) => {
         const letter = String.fromCharCode(65 + j); // A, B, C, D
@@ -405,7 +421,7 @@ export function examQuestionsToText(questions: ExamQuestion[]): { text: string; 
   const parsed: ParsedQuestion[] = questions.map((q, i) => {
     const content = htmlToConventionText(q.content_html);
     const solution = htmlToConventionText(q.explanation_html ?? "") || undefined;
-    const base = { index: i + 1, content, solution, warnings: [] as string[] };
+    const base = { index: i + 1, content, solution, warnings: [] as string[], score: q.score !== 1 ? q.score : undefined };
 
     switch (q.type) {
       case "multiple_choice":
@@ -444,7 +460,7 @@ export function parsedToExamQuestions(parsed: ParsedQuestion[], registry?: ExamA
       order: i,
       content_html: toHtml(p.content, registry),
       explanation_html: p.solution ? toHtml(p.solution, registry) : undefined,
-      score: 1,
+      score: p.score ?? 1,
     };
     switch (p.type) {
       case "multiple_choice":

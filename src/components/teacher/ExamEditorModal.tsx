@@ -224,6 +224,15 @@ function ParsedQuestionCard({ q, num, update, registry, onUpdateTex }: {
       <div className="flex items-center gap-2 flex-wrap">
         <span className="text-xs font-bold px-2.5 py-1 rounded-lg bg-primary/10 text-primary">Câu {num}</span>
         <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${meta.cls}`}>{meta.label}</span>
+        <span className="flex items-center gap-1 text-[11px] text-muted-foreground ml-auto" title="Điểm của câu này">
+          <input
+            type="number" min={0.25} step={0.25}
+            value={q.score ?? 1}
+            onChange={e => update({ score: e.target.value === "" ? undefined : Math.max(0.25, parseFloat(e.target.value) || 1) })}
+            className="w-14 h-6 px-1.5 rounded-md border border-border bg-background text-xs text-center text-foreground outline-none focus:ring-2 focus:ring-primary/40"
+          />
+          điểm
+        </span>
         {q.warnings.map((w, wi) => (
           <span key={wi} className="flex items-center gap-1 text-[11px] text-amber-600 dark:text-amber-400">
             <AlertTriangle className="h-3 w-3 shrink-0" />{w}
@@ -671,9 +680,11 @@ export default function ExamEditorModal({
               </button>
             )}
           </div>
-          <div className="hidden sm:flex items-center gap-1.5 border border-border rounded-lg px-2.5 py-1.5" title="Mỗi câu 1 điểm">
+          <div className="hidden sm:flex items-center gap-1.5 border border-border rounded-lg px-2.5 py-1.5" title="Tổng điểm các câu (chỉnh điểm từng câu trên thẻ câu hỏi)">
             <span className="text-xs text-muted-foreground">Tổng:</span>
-            <span className="text-xs font-semibold text-foreground">{questions.length}đ</span>
+            <span className="text-xs font-semibold text-foreground">
+              {questions.reduce((s, q) => s + (q.score ?? 1), 0)}đ
+            </span>
           </div>
           <button
             onClick={() => setShowSolution(s => !s)}
