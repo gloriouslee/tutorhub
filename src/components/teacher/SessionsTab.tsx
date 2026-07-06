@@ -23,6 +23,7 @@ const LESSON_TYPE_META: Record<string, { label: string; color: string }> = {
   material: { label: "Tài liệu",       color: "text-emerald-600 dark:text-emerald-400" },
   homework: { label: "Bài tập",        color: "text-amber-600 dark:text-amber-400" },
   solution: { label: "Video chữa bài", color: "text-violet-600 dark:text-violet-400" },
+  exam:     { label: "Bài kiểm tra",   color: "text-rose-600 dark:text-rose-400" },
 };
 
 function CurriculumSessionPreview({ session }: { session: CurriculumSessionData }) {

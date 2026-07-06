@@ -259,6 +259,10 @@ function StudentRow({
   const [showHist,  setShowHist]  = useState(false);
   const [busy,      setBusy]      = useState(false);
 
+  // Re-sync inputs khi dữ liệu nguồn thay đổi (reload sau khi lưu) — tránh input cũ
+  useEffect(() => { if (!editFee) setFeeInput(fee.toString()); }, [fee, editFee]);
+  useEffect(() => { if (!editNote) setNoteInput(sData.notes ?? ""); }, [sData.notes, editNote]);
+
   async function issueInvoice() {
     if (busy) return;
     setBusy(true);
@@ -277,13 +281,20 @@ function StudentRow({
     const fresh = (await getInvoices()).find(i => i.id === invoice.id);
     if (fresh && fresh.status === "pending_verification") {
       await confirmInvoicePaid(invoice.id);
-      await recordTuitionPayment(classId, student.id, {
-        amount: invoice.amount,
-        period: invoice.period ?? period,
-        paid_at: new Date().toISOString(),
-        method: "transfer",
-        note: "Xác nhận từ biên lai học sinh",
-      });
+      // Nếu kỳ này đã có các lần ghi nhận thủ công đủ số tiền hóa đơn thì
+      // chỉ xác nhận hóa đơn, KHÔNG ghi nhận thêm để tránh đếm trùng.
+      const invPeriod = invoice.period ?? period;
+      const freshConfig = await getClassTuition(classId);
+      const freshData = freshConfig.students[student.id] ?? { payments: [] };
+      if (paidInPeriod(freshData, invPeriod) < invoice.amount) {
+        await recordTuitionPayment(classId, student.id, {
+          amount: invoice.amount,
+          period: invPeriod,
+          paid_at: new Date().toISOString(),
+          method: "transfer",
+          note: "Xác nhận từ biên lai học sinh",
+        });
+      }
     }
     setBusy(false);
     onUpdate();

@@ -32,8 +32,15 @@ function ScheduleEditor({ classId, className, initialSchedule, onSaved }: {
     setDirty(true);
   };
 
+  // Mỗi thứ trong tuần chỉ được một ca học
+  const usedDays = rows.map(r => r.day);
+  const hasDuplicateDays = new Set(usedDays).size !== usedDays.length;
+  const allDaysUsed = DAYS_VI.every(d => usedDays.includes(d));
+
   const addRow = () => {
-    setRows(prev => [...prev, { day: "Thứ 2", start_time: "08:00", end_time: "10:00" }]);
+    const freeDay = DAYS_VI.find(d => !usedDays.includes(d));
+    if (!freeDay) return;
+    setRows(prev => [...prev, { day: freeDay, start_time: "08:00", end_time: "10:00" }]);
     setDirty(true);
   };
 
@@ -85,7 +92,9 @@ function ScheduleEditor({ classId, className, initialSchedule, onSaved }: {
                 onChange={e => updateRow(i, "day", e.target.value)}
                 className="h-9 flex-1 min-w-0 sm:w-36 sm:flex-none rounded-lg border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-primary"
               >
-                {DAYS_VI.map(d => <option key={d} value={d}>{d}</option>)}
+                {DAYS_VI.map(d => (
+                  <option key={d} value={d} disabled={d !== row.day && usedDays.includes(d)}>{d}</option>
+                ))}
               </select>
               <div className="flex items-center gap-2 flex-1 sm:flex-none">
                 <input
@@ -112,9 +121,17 @@ function ScheduleEditor({ classId, className, initialSchedule, onSaved }: {
             </div>
           ))}
 
+          {(hasDuplicateDays || allDaysUsed) && (
+            <p className="flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400">
+              <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+              Mỗi thứ chỉ một ca — điều chỉnh giờ ca hiện có.
+            </p>
+          )}
+
           <button
             onClick={addRow}
-            className="flex items-center gap-2 text-sm text-primary hover:underline font-medium"
+            disabled={allDaysUsed}
+            className="flex items-center gap-2 text-sm text-primary hover:underline font-medium disabled:opacity-50 disabled:no-underline disabled:cursor-not-allowed"
           >
             <Plus className="h-4 w-4" /> Thêm buổi học
           </button>

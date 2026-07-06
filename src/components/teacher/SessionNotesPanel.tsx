@@ -2,9 +2,9 @@
 
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import { Upload, X, Save, CheckCircle2 } from "lucide-react";
+import { X, Save, CheckCircle2 } from "lucide-react";
 import { formatDate } from "./classDetail.types";
-import { kvGet, kvSet } from "@/lib/storage";
+import { kvGet, kvUpdate } from "@/lib/storage";
 
 export default function SessionNotesPanel({
   classId,
@@ -30,9 +30,8 @@ export default function SessionNotesPanel({
 
   const handleSave = async () => {
     try {
-      const notes = await kvGet<Record<string, string>>(storageKey, {});
-      notes[dateStr] = note;
-      await kvSet(storageKey, notes);
+      // Merge into the fresh document (kvUpdate) — don't clobber other dates' notes
+      await kvUpdate<Record<string, string>>(storageKey, {}, notes => ({ ...notes, [dateStr]: note }));
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch {}
@@ -60,14 +59,6 @@ export default function SessionNotesPanel({
               className="w-full p-3 rounded-xl border border-border bg-background text-sm resize-none focus:outline-none focus:ring-2 focus:ring-primary/50 text-foreground"
               placeholder="Nội dung, nhận xét, lưu ý cho buổi học này..."
             />
-          </div>
-          <div>
-            <label className="text-sm font-medium text-foreground mb-1.5 block">Tài liệu đính kèm</label>
-            <div className="border-2 border-dashed border-border rounded-xl p-6 text-center hover:border-primary/50 hover:bg-primary/5 transition-all cursor-pointer">
-              <Upload className="h-6 w-6 text-muted-foreground mx-auto mb-2" />
-              <p className="text-sm text-muted-foreground">Nhấn để tải file lên</p>
-              <p className="text-xs text-muted-foreground mt-0.5">PDF, DOCX, ảnh · Tối đa 50MB</p>
-            </div>
           </div>
         </div>
         <div className="p-5 border-t border-border bg-muted/20 flex items-center justify-between gap-3">

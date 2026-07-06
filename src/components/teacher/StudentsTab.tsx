@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { ProgressBar } from "@/components/shared";
 import { type StudentPackage } from "@/lib/storage";
-import { Users, Plus, Eye, Edit3, Trash2, MessageSquare } from "lucide-react";
+import { Users, Plus, Trash2, MessageSquare } from "lucide-react";
 import { PACKAGE_TYPES } from "./classDetail.types";
 
 export default function StudentsTab({
@@ -17,6 +17,7 @@ export default function StudentsTab({
   onAddStudent,
   onSetPackage,
   onOpenComment,
+  onRemoveStudent,
 }: {
   classStudents: any[];
   studentSearch: string;
@@ -25,6 +26,7 @@ export default function StudentsTab({
   onAddStudent: () => void;
   onSetPackage: (studentId: string, pkg: StudentPackage) => void;
   onOpenComment: (student: any) => void;
+  onRemoveStudent: (student: any) => void;
 }) {
   return (
     <div className="space-y-6">
@@ -116,13 +118,17 @@ export default function StudentsTab({
                     </div>
                   </td>
                   <td className="p-4 min-w-[150px]">
-                    <div className="space-y-1.5">
-                      <div className="flex justify-between text-[10px] font-medium">
-                        <span className="text-muted-foreground">Hoàn thành</span>
-                        <span className="text-primary">{student.progress}%</span>
+                    {student.progress == null ? (
+                      <p className="text-center text-xs text-muted-foreground">—</p>
+                    ) : (
+                      <div className="space-y-1.5">
+                        <div className="flex justify-between text-[10px] font-medium">
+                          <span className="text-muted-foreground">Hoàn thành</span>
+                          <span className="text-primary">{student.progress}%</span>
+                        </div>
+                        <ProgressBar value={student.progress} className="h-1.5" />
                       </div>
-                      <ProgressBar value={student.progress} className="h-1.5" />
-                    </div>
+                    )}
                   </td>
                   <td className="p-4 text-right">
                     <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -130,9 +136,8 @@ export default function StudentsTab({
                         className="text-xs h-8 flex items-center gap-1 hover:bg-primary/5 hover:text-primary transition-all font-semibold">
                         <MessageSquare className="h-3.5 w-3.5" /> Nhận xét
                       </Button>
-                      <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground"><Eye className="h-4 w-4" /></Button>
-                      <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground"><Edit3 className="h-4 w-4" /></Button>
-                      <Button size="icon" variant="ghost" className="h-8 w-8 text-red-500 hover:bg-red-50"><Trash2 className="h-4 w-4" /></Button>
+                      <Button size="icon" variant="ghost" title="Xóa khỏi lớp" onClick={() => onRemoveStudent(student)}
+                        className="h-8 w-8 text-red-500 hover:bg-red-50"><Trash2 className="h-4 w-4" /></Button>
                     </div>
                   </td>
                 </tr>

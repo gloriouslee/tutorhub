@@ -1,11 +1,23 @@
 "use client";
 
-import React from "react";
+import React, { useEffect, useState, useCallback } from "react";
+import { useParams } from "next/navigation";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { StickyNote, Pin, Tag, Trash2, Edit3 } from "lucide-react";
+import { getClassMaterials, deleteClassMaterial } from "@/lib/storage";
+import { StickyNote, Pin, Tag, Trash2 } from "lucide-react";
 import { formatDate } from "./classDetail.types";
+
+interface NoteItem {
+  id: string;
+  title: string;
+  content?: string;
+  is_pinned: boolean;
+  created_at: string;
+  tags?: string[];
+  isUploaded: boolean;
+}
 
 export default function NotesTab({
   notes,
@@ -14,13 +26,40 @@ export default function NotesTab({
   notes: any[];
   addButton: React.ReactNode;
 }) {
+  const params = useParams();
+  const classId = params?.classId as string;
+  const [uploaded, setUploaded] = useState<NoteItem[]>([]);
+
+  const reload = useCallback(async () => {
+    if (!classId) return;
+    const mats = await getClassMaterials(classId);
+    setUploaded(mats.filter(m => m.kind === "note").map(m => ({
+      id: m.id,
+      title: m.title,
+      content: m.description,
+      is_pinned: !!m.pinned,
+      created_at: m.created_at,
+      isUploaded: true,
+    })));
+  }, [classId]);
+
+  useEffect(() => { reload(); }, [reload]);
+
+  const merged: NoteItem[] = [
+    ...uploaded,
+    ...notes.map(n => ({ ...n, is_pinned: !!n.is_pinned, isUploaded: false }) as NoteItem),
+  ].sort((a, b) =>
+    (b.is_pinned ? 1 : 0) - (a.is_pinned ? 1 : 0) ||
+    new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  );
+
   return (
     <div className="space-y-4">
       <div className="flex justify-between items-center">
-        <p className="text-sm text-muted-foreground">{notes.length} ghi chú</p>
+        <p className="text-sm text-muted-foreground">{merged.length} ghi chú</p>
         {addButton}
       </div>
-      {notes.sort((a, b) => (b.is_pinned ? 1 : 0) - (a.is_pinned ? 1 : 0) || new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).map((note, i) => (
+      {merged.map((note, i) => (
         <Card key={note.id} className={`animate-fade-in transition-all hover:shadow-md ${note.is_pinned ? "border-amber-200 dark:border-amber-800/50 bg-amber-50/30 dark:bg-amber-900/5" : ""}`} style={{ animationDelay: `${i * 60}ms` }}>
           <CardContent className="p-5 md:p-6">
             <div className="flex items-start gap-4">
@@ -44,10 +83,18 @@ export default function NotesTab({
                   </div>
                 )}
               </div>
-              <div className="flex items-center gap-1 shrink-0">
-                <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground"><Edit3 className="h-3.5 w-3.5" /></Button>
-                <Button size="icon" variant="ghost" className="h-8 w-8 text-red-500 hover:bg-red-50"><Trash2 className="h-3.5 w-3.5" /></Button>
-              </div>
+              {note.isUploaded && (
+                <div className="flex items-center gap-1 shrink-0">
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-8 w-8 text-red-500 hover:bg-red-50"
+                    onClick={async () => { await deleteClassMaterial(note.id); await reload(); }}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>

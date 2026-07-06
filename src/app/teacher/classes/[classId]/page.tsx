@@ -18,7 +18,8 @@ import {
   getCurriculum, type CurriculumSession as CurriculumSessionData,
   getStudentPackages, saveStudentPackages, type StudentPackage,
   getClassMaterials, type StoredClassMaterial,
-  kvGet, kvSet,
+  kvGet, kvSet, kvUpdate,
+  getClasses, removeStudentFromClass,
 } from "@/lib/storage";
 import { toLocalDateKey } from "@/lib/utils";
 import { ClassSchedule } from "@/types";
@@ -102,25 +103,38 @@ export default function TeacherClassDetailPage() {
   const [addStudentModal, setAddStudentModal] = useState(false);
   const [studentSearch, setStudentSearch] = useState("");
 
-  // Approved enrolled students from Supabase
-  const [approvedEnrollments, setApprovedEnrollments] = useState<{ id: string; full_name: string; email: string; school: string; grade: string }[]>([]);
+  // Approved enrolled students from Supabase — only those assigned to THIS class.
+  // Id dùng `enr_${e.id}` cho khớp với id mà approveEnrollment ghi vào classes.student_ids.
+  const [approvedEnrollments, setApprovedEnrollments] = useState<{ id: string; full_name: string; email: string; school: string; grade: string; created_at?: string }[]>([]);
   useEffect(() => {
     import("@/lib/storage").then(({ getEnrollments }) =>
       getEnrollments().then(list => {
         setApprovedEnrollments(
           list
-            .filter(e => e.status === "approved")
+            .filter(e => e.status === "approved" && e.assigned_class_id === classId)
             .map(e => ({
-              id: e.supabase_user_id ?? `enr_${e.id}`,
+              id: `enr_${e.id}`,
               full_name: e.full_name,
               email: e.email,
               school: e.school ?? "",
               grade: e.grade ?? "",
+              created_at: e.created_at,
             }))
         );
       })
     );
-  }, []);
+  }, [classId]);
+
+  // DB class row (Supabase) — nguồn chính cho danh sách student_ids của lớp
+  const [dbStudentIds, setDbStudentIds] = useState<string[] | null>(null);
+  useEffect(() => {
+    getClasses()
+      .then(list => {
+        const row = list.find(c => c.id === classId);
+        if (row) setDbStudentIds((row.student_ids as string[] | null) ?? []);
+      })
+      .catch(() => {});
+  }, [classId]);
 
   // Uploaded materials (localStorage) merged with mock
   const [uploadedMaterials, setUploadedMaterials] = useState<StoredClassMaterial[]>([]);
@@ -167,7 +181,9 @@ export default function TeacherClassDetailPage() {
     async function load() {
       const override = await getClassScheduleOverride(classId);
       setCurrentSchedule(override ?? cls!.schedule);
-      const saved = (await getOnlineLink(classId)) ?? cls!.zoom_link ?? "";
+      // null = chưa từng đặt → dùng zoom_link mặc định; "" = giáo viên đã xóa → không hiện link
+      const stored = await getOnlineLink(classId);
+      const saved = stored === null ? (cls!.zoom_link ?? "") : stored;
       setOnlineLink(saved);
       setOnlineLinkDraft(saved);
     }
@@ -253,7 +269,7 @@ export default function TeacherClassDetailPage() {
   useEffect(() => {
     if (!cls) return;
     const ids = [...new Set([
-      ...(cls.student_ids ?? []),
+      ...(dbStudentIds ?? cls.student_ids ?? []),
       ...extraStudentIds,
       ...approvedEnrollments.map(e => e.id),
     ])];
@@ -265,7 +281,7 @@ export default function TeacherClassDetailPage() {
       setComments(loaded);
     }
     loadComments();
-  }, [cls, extraStudentIds, approvedEnrollments]);
+  }, [cls, dbStudentIds, extraStudentIds, approvedEnrollments]);
 
   async function handleSaveOnlineLink() {
     await saveOnlineLink(classId, onlineLinkDraft);
@@ -319,25 +335,43 @@ export default function TeacherClassDetailPage() {
   const lectures = MOCK_LECTURES.filter(l => l.class_id === classId);
   const notes = MOCK_CLASS_NOTES.filter(n => n.class_id === classId);
 
-  // Students enrolled in this class (mock + extra added by teacher)
-  const allEnrolledIds = [...new Set([...(cls.student_ids ?? []), ...extraStudentIds])];
-  const mockClassStudents = MOCK_STUDENTS.filter(s => allEnrolledIds.includes(s.id)).map((s, idx) => ({
+  // Students enrolled in this class — DB class row is the source of truth for
+  // student_ids (falls back to mock when offline), plus extras added by teacher.
+  const allEnrolledIds = [...new Set([...(dbStudentIds ?? cls.student_ids ?? []), ...extraStudentIds])];
+  // Progress from real data: distinct homework submissions / homework count (null → hiển thị "—")
+  const progressFor = (studentId: string): number | null => {
+    if (homeworks.length === 0) return null;
+    const hwIds = new Set(homeworks.map(h => h.id));
+    const done = new Set(
+      submissions.filter(sub => sub.student_id === studentId && hwIds.has(sub.homework_id)).map(sub => sub.homework_id)
+    ).size;
+    return Math.round((done / homeworks.length) * 100);
+  };
+  const mockClassStudents = MOCK_STUDENTS.filter(s => allEnrolledIds.includes(s.id)).map(s => ({
     ...s,
-    package: (studentPackages[s.id] ?? (idx % 3 === 0 ? "online" : idx % 3 === 1 ? "advanced" : "offline")) as StudentPackage,
-    join_date: "2024-09-0" + (idx + 1),
-    progress: [72, 85, 61, 90, 78][idx] ?? 70,
+    package: (studentPackages[s.id] ?? "online") as StudentPackage,
+    join_date: toLocalDateKey(new Date()),
+    progress: progressFor(s.id),
   }));
   const enrolledClassStudents = approvedEnrollments
     .filter(e => allEnrolledIds.includes(e.id))
-    .map((e, idx) => ({
+    .map(e => ({
       id: e.id, user_id: e.id, full_name: e.full_name, email: e.email,
       dob: "", school: e.school, grade: e.grade, learning_type: "online" as const,
-      parent_id: undefined, avatar_url: undefined, created_at: "",
+      parent_id: undefined, avatar_url: undefined, created_at: e.created_at ?? "",
       package: (studentPackages[e.id] ?? "online") as StudentPackage,
-      join_date: toLocalDateKey(new Date()),
-      progress: [72, 85, 61, 90, 78][idx] ?? 70,
+      join_date: e.created_at ? e.created_at.slice(0, 10) : toLocalDateKey(new Date()),
+      progress: progressFor(e.id),
     }));
   const classStudents = [...mockClassStudents, ...enrolledClassStudents];
+
+  async function handleRemoveStudent(student: { id: string; full_name: string }) {
+    if (!window.confirm(`Xóa ${student.full_name} khỏi lớp?`)) return;
+    await kvUpdate<string[]>(`tutorhub_class_extra_students_${classId}`, [], ids => ids.filter(id => id !== student.id));
+    setExtraStudentIds(prev => prev.filter(id => id !== student.id));
+    await removeStudentFromClass(classId, student.id);
+    setDbStudentIds(prev => (prev ? prev.filter(id => id !== student.id) : prev));
+  }
 
   async function handleSetPackage(studentId: string, pkg: StudentPackage) {
     const updated = { ...studentPackages, [studentId]: pkg };
@@ -542,6 +576,7 @@ export default function TeacherClassDetailPage() {
               onAddStudent={() => setAddStudentModal(true)}
               onSetPackage={handleSetPackage}
               onOpenComment={setCommentModalStudent}
+              onRemoveStudent={handleRemoveStudent}
             />
           )}
 
@@ -571,6 +606,7 @@ export default function TeacherClassDetailPage() {
         <HomeworkModal
           classId={classId}
           initial={homeworkModal.editing}
+          defaultDueDate={homeworkModalForSession ?? undefined}
           onSave={hw => {
             handleSaveHomework(hw);
             if (homeworkModalForSession) setHomeworkModalForSession(null);

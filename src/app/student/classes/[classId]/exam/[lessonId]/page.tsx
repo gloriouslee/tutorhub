@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { getCurriculum, saveExamResult, getExamResult, kvUpdate, kvDelete, type CurriculumLesson, type ExamQuestion } from "@/lib/storage";
+import { getCurriculum, getClasses, saveExamResult, getExamResult, kvUpdate, kvDelete, type CurriculumLesson, type ExamQuestion } from "@/lib/storage";
+import { MOCK_CLASSES } from "@/lib/mock-data";
 import { Button } from "@/components/ui/button";
 import "katex/dist/katex.min.css";
 import {
@@ -530,7 +531,7 @@ export default function ExamPage() {
   const lessonId = params.lessonId as string;
   const router   = useRouter();
 
-  const { studentId, studentName, ready } = useStudentContext();
+  const { studentId, studentName, assignedClassId, ready } = useStudentContext();
 
   const [lesson,      setLesson]      = useState<CurriculumLesson | null>(null);
   const [questions,   setQuestions]   = useState<ExamQuestion[]>([]);
@@ -542,12 +543,30 @@ export default function ExamPage() {
   const [showPanel,   setShowPanel]   = useState(false);
   const [examLocked,  setExamLocked]  = useState(false);
   const [lockReason,  setLockReason]  = useState("");
+  // null = đang kiểm tra quyền truy cập
+  const [accessDenied, setAccessDenied] = useState<boolean | null>(null);
 
   useEffect(() => {
     // Chờ context sẵn sàng — tránh load nhầm kết quả của s1 mặc định
     if (!ready) return;
     let cancelled = false;
     (async () => {
+    // Roster check — nhất quán với trang chi tiết lớp:
+    // học sinh phải nằm trong student_ids của lớp HOẶC assignedClassId === classId
+    let allowed = assignedClassId === classId;
+    if (!allowed) {
+      let clsFound: { student_ids?: string[] } | undefined;
+      try {
+        const all = await getClasses();
+        clsFound = all.find(c => c.id === classId);
+      } catch { /* offline */ }
+      if (!clsFound) clsFound = MOCK_CLASSES.find(c => c.id === classId);
+      allowed = (clsFound?.student_ids ?? []).includes(studentId);
+    }
+    if (cancelled) return;
+    setAccessDenied(!allowed);
+    if (!allowed) return;
+
     const chapters = await getCurriculum(classId);
     for (const ch of chapters)
       for (const sess of ch.sessions) {
@@ -563,7 +582,10 @@ export default function ExamPage() {
           const opensAt = found.exam_opens_at;
           const now = new Date();
           const isOpen = status === "open" || (status === "draft" && !!opensAt && new Date(opensAt) <= now);
-          if (status === "closed") {
+          // Chưa công bố (is_published === false) — thiếu trường coi như đã công bố (legacy)
+          if (found.is_published === false) {
+            setExamLocked(true); setLockReason("Bài thi chưa được công bố.");
+          } else if (status === "closed") {
             setExamLocked(true); setLockReason("Bài thi đã kết thúc.");
           } else if (!isOpen) {
             setExamLocked(true);
@@ -590,7 +612,7 @@ export default function ExamPage() {
       }
     })();
     return () => { cancelled = true; };
-  }, [classId, lessonId, studentId, ready]);
+  }, [classId, lessonId, studentId, assignedClassId, ready]);
 
   const timeLimit = lesson?.exam_content?.time_limit
     ? lesson.exam_content.time_limit * 60
@@ -639,6 +661,21 @@ export default function ExamPage() {
   }
 
   // ── States ──
+
+  if (accessDenied) return (
+    <div className="min-h-screen flex items-center justify-center bg-background">
+      <div className="text-center space-y-4 px-4 max-w-sm">
+        <div className="h-16 w-16 rounded-full bg-muted flex items-center justify-center mx-auto">
+          <AlertTriangle className="h-8 w-8 text-muted-foreground" />
+        </div>
+        <p className="text-base font-semibold text-foreground">Bạn không có quyền truy cập bài thi này</p>
+        <p className="text-sm text-muted-foreground">Bạn chưa được đăng ký vào lớp học này.</p>
+        <Button variant="outline" onClick={() => router.back()}>
+          <ChevronLeft className="h-4 w-4 mr-1" />Quay lại
+        </Button>
+      </div>
+    </div>
+  );
 
   if (!lesson) return (
     <div className="min-h-screen flex items-center justify-center bg-background">

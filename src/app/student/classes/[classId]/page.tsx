@@ -13,7 +13,7 @@ import {
   MOCK_LECTURES, MOCK_CLASS_NOTES, MOCK_EXAM_SCORES, MOCK_HOMEWORK, MOCK_ATTENDANCE,
 } from "@/lib/mock-data";
 import { getSubmissionsByStudent, type SubmissionRecord } from "@/lib/supabase/submissions";
-import { kvGet, getOnlineLink, getStudentPackages, getCurriculum, getClassMaterials, incrementMaterialDownload, type StudentPackage, type CurriculumSession, type StoredClassMaterial } from "@/lib/storage";
+import { kvGet, getClasses, getClassScheduleOverride, getOnlineLink, getStudentPackages, getCurriculum, getClassMaterials, incrementMaterialDownload, type StudentPackage, type CurriculumSession, type StoredClassMaterial } from "@/lib/storage";
 import CurriculumView from "@/components/student/CurriculumView";
 import {
   BookOpen, Clock, Video, MapPin, Users, ArrowLeft, FileText, Download,
@@ -45,6 +45,9 @@ const ATTENDANCE_META: Record<AttendanceStatus, { label: string; icon: React.Ele
 const DAY_INDEX: Record<string, number> = {
   Sunday: 0, Monday: 1, Tuesday: 2, Wednesday: 3,
   Thursday: 4, Friday: 5, Saturday: 6,
+  // Vietnamese day names (used by teacher schedule overrides)
+  "Thứ 2": 1, "Thứ 3": 2, "Thứ 4": 3, "Thứ 5": 4,
+  "Thứ 6": 5, "Thứ 7": 6, "Chủ nhật": 0,
 };
 
 function generateSessionDates(
@@ -78,6 +81,9 @@ type TabKey = "overview" | "curriculum" | "sessions" | "attendance" | "homework"
 const DAY_VI: Record<string, string> = {
   Monday: "Thứ Hai", Tuesday: "Thứ Ba", Wednesday: "Thứ Tư",
   Thursday: "Thứ Năm", Friday: "Thứ Sáu", Saturday: "Thứ Bảy", Sunday: "Chủ Nhật",
+  // Vietnamese day names (teacher overrides) — display as-is
+  "Thứ 2": "Thứ 2", "Thứ 3": "Thứ 3", "Thứ 4": "Thứ 4", "Thứ 5": "Thứ 5",
+  "Thứ 6": "Thứ 6", "Thứ 7": "Thứ 7", "Chủ nhật": "Chủ nhật",
 };
 
 const CATEGORY_MAP: Record<string, { label: string; color: string }> = {
@@ -94,9 +100,10 @@ const LESSON_TYPE_META: Record<string, { label: string; icon: React.ElementType;
   material: { label: "Tài liệu",       icon: FileText,        color: "text-emerald-600 dark:text-emerald-400" },
   homework: { label: "Bài tập",        icon: ClipboardList,   color: "text-amber-600 dark:text-amber-400" },
   solution: { label: "Video chữa bài", icon: Eye,             color: "text-violet-600 dark:text-violet-400" },
+  exam:     { label: "Bài kiểm tra",   icon: GraduationCap,   color: "text-violet-600 dark:text-violet-400" },
 };
 
-function StudentCurriculumSessionPreview({ session }: { session: CurriculumSession }) {
+function StudentCurriculumSessionPreview({ session, classId }: { session: CurriculumSession; classId: string }) {
   const [open, setOpen] = useState(false);
   const published = session.lessons.filter(l => l.is_published);
   if (published.length === 0) return null;
@@ -115,11 +122,23 @@ function StudentCurriculumSessionPreview({ session }: { session: CurriculumSessi
           {published.map(l => {
             const meta = LESSON_TYPE_META[l.type] ?? LESSON_TYPE_META.lecture;
             const Icon = meta.icon;
-            return (
-              <div key={l.id} className="flex items-center gap-2 px-3 py-2 bg-background">
+            const row = (
+              <>
                 <Icon className={`h-3.5 w-3.5 shrink-0 ${meta.color}`} />
                 <span className="flex-1 text-foreground line-clamp-1">{l.title}</span>
                 <span className={`shrink-0 ${meta.color} opacity-70`}>{meta.label}</span>
+              </>
+            );
+            if (l.type === "exam") {
+              return (
+                <Link key={l.id} href={`/student/classes/${classId}/exam/${l.id}`} className="flex items-center gap-2 px-3 py-2 bg-background hover:bg-muted/40 transition-colors">
+                  {row}
+                </Link>
+              );
+            }
+            return (
+              <div key={l.id} className="flex items-center gap-2 px-3 py-2 bg-background">
+                {row}
               </div>
             );
           })}
@@ -142,9 +161,20 @@ function loadLocalSubs(): Promise<SubmissionRecord[]> {
   return kvGet<SubmissionRecord[]>("tutorhub_submissions", []);
 }
 
+type ClassInfo = (typeof MOCK_CLASSES)[number];
+
+interface HomeworkItem {
+  id: string;
+  class_id: string;
+  title: string;
+  description?: string;
+  due_date: string;
+  created_at?: string;
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function StudentClassDetailPage() {
-  const { studentId, studentName, assignedClassId } = useStudentContext();
+  const { studentId, studentName, assignedClassId, ready } = useStudentContext();
   const CURRENT_STUDENT_ID = studentId;
   const params  = useParams();
   const classId = params.classId as string;
@@ -159,6 +189,27 @@ export default function StudentClassDetailPage() {
   const [sessionNotes, setSessionNotes] = useState<Record<string, string>>({});
   const [uploadedMaterials, setUploadedMaterials] = useState<StoredClassMaterial[]>([]);
   const [studentPkg, setStudentPkg] = useState<StudentPackage | undefined>(undefined);
+  // undefined = still resolving, null = not found
+  const [cls, setCls] = useState<ClassInfo | null | undefined>(undefined);
+  const [scheduleOverride, setScheduleOverride] = useState<ClassInfo["schedule"] | null>(null);
+  const [teacherHomework, setTeacherHomework] = useState<HomeworkItem[]>([]);
+
+  // Resolve class from DB (includes admin-created), fallback to mock
+  useEffect(() => {
+    (async () => {
+      let found: ClassInfo | null = null;
+      try {
+        const all = await getClasses();
+        found = (all.find(c => c.id === classId) as unknown as ClassInfo) ?? null;
+      } catch { /* offline */ }
+      if (!found) found = MOCK_CLASSES.find(c => c.id === classId) ?? null;
+      setCls(found);
+    })();
+    getClassScheduleOverride(classId).then(ov => setScheduleOverride(ov as ClassInfo["schedule"] | null));
+    kvGet<HomeworkItem[]>("tutorhub_teacher_homework", [])
+      .then(all => setTeacherHomework(all.filter(h => h.class_id === classId)));
+  }, [classId]);
+
   useEffect(() => {
     getStudentPackages(classId).then(pkgs => setStudentPkg(pkgs[studentId]));
   }, [classId, studentId]);
@@ -195,7 +246,17 @@ export default function StudentClassDetailPage() {
     kvGet<Record<string, string>>(`tutorhub_session_notes_${classId}`, {}).then(setSessionNotes);
   }, [classId, studentId]);
 
-  const cls = MOCK_CLASSES.find(c => c.id === classId);
+  // ── Loading (class resolution + student context) ──────────────────────────
+  if (!ready || cls === undefined) {
+    return (
+      <PortalLayout role="student" userName={studentName} pageTitle="Lớp học">
+        <div className="flex flex-col items-center justify-center py-20">
+          <div className="h-10 w-10 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+          <p className="text-sm text-muted-foreground mt-4">Đang tải lớp học…</p>
+        </div>
+      </PortalLayout>
+    );
+  }
 
   // ── Not found ─────────────────────────────────────────────────────────────
   if (!cls) {
@@ -225,10 +286,16 @@ export default function StudentClassDetailPage() {
   }
 
   // ── Data ──────────────────────────────────────────────────────────────────
+  const schedule          = scheduleOverride ?? cls.schedule ?? [];
   const teacher           = MOCK_TEACHERS.find(t => t.id === cls.tutor_id);
   const lectures          = MOCK_LECTURES.filter(l => l.class_id === classId);
   const notes             = MOCK_CLASS_NOTES.filter(n => n.class_id === classId);
-  const classHomework     = MOCK_HOMEWORK.filter(h => h.class_id === classId);
+  // Merge teacher-created homework (kv) with mock — kv wins on id collision
+  const kvHwIds           = new Set(teacherHomework.map(h => h.id));
+  const classHomework: HomeworkItem[] = [
+    ...teacherHomework,
+    ...MOCK_HOMEWORK.filter(h => h.class_id === classId && !kvHwIds.has(h.id)),
+  ];
   const publishedLectures = lectures.filter(l => l.is_published);
 
   // Completion: per-student localStorage tracking
@@ -259,16 +326,20 @@ export default function StudentClassDetailPage() {
   const today = new Date();
   const sessionFrom = new Date(today); sessionFrom.setMonth(sessionFrom.getMonth() - 3);
   const sessionTo   = new Date(today); sessionTo.setDate(sessionTo.getDate() + 14);
-  const allSessions = generateSessionDates(cls.schedule ?? [], sessionFrom, sessionTo)
+  const allSessions = generateSessionDates(schedule, sessionFrom, sessionTo)
     .sort((a, b) => b.date.localeCompare(a.date)); // newest first
   const todayStr = toLocalDateKey(today);
   const pastSessions     = allSessions.filter(s => s.date <= todayStr);
   const upcomingSessions = allSessions.filter(s => s.date > todayStr);
 
-  const attendedCount = pastSessions.filter(s => {
-    const rec = savedAttendance.find(r => r.class_id === classId && r.student_id === CURRENT_STUDENT_ID && r.date === s.date);
-    return rec?.status === "present" || rec?.status === "late" || rec?.status === "excused";
-  }).length;
+  // Chuẩn chuyên cần: excused không tính vắng, loại khỏi cả tử số lẫn mẫu số
+  // tỷ lệ = (present + late) / (tổng buổi - excused)
+  const pastRecords = pastSessions.map(s =>
+    savedAttendance.find(r => r.class_id === classId && r.student_id === CURRENT_STUDENT_ID && r.date === s.date)
+  );
+  const attendedCount = pastRecords.filter(r => r?.status === "present" || r?.status === "late").length;
+  const excusedCount  = pastRecords.filter(r => r?.status === "excused").length;
+  const sessionRateDenom = pastSessions.length - excusedCount;
 
   const TABS: { key: TabKey; label: string; icon: React.ElementType; badge?: number | string }[] = [
     { key: "overview",    label: "Tổng quan",  icon: BookOpen },
@@ -378,7 +449,7 @@ export default function StudentClassDetailPage() {
                 <Card>
                   <CardHeader><CardTitle className="text-sm">Lịch học</CardTitle></CardHeader>
                   <CardContent className="space-y-2">
-                    {cls.schedule.map((s, i) => (
+                    {schedule.map((s, i) => (
                       <div key={i} className="flex items-center justify-between p-3 bg-muted/30 rounded-xl border border-border/50">
                         <span className="flex items-center gap-2 text-sm font-medium">
                           <Clock className="h-4 w-4 text-primary" />
@@ -584,7 +655,7 @@ export default function StudentClassDetailPage() {
                 {[
                   { label: "Buổi đã học", value: pastSessions.length, color: "text-foreground" },
                   { label: "Có mặt",      value: attendedCount,       color: "text-emerald-600" },
-                  { label: "Tỉ lệ",       value: pastSessions.length > 0 ? `${Math.round(attendedCount / pastSessions.length * 100)}%` : "—", color: "text-primary" },
+                  { label: "Tỉ lệ",       value: sessionRateDenom > 0 ? `${Math.round(attendedCount / sessionRateDenom * 100)}%` : "—", color: "text-primary" },
                 ].map(s => (
                   <Card key={s.label}>
                     <CardContent className="p-4 text-center">
@@ -603,7 +674,7 @@ export default function StudentClassDetailPage() {
                     const upCurrSession = curriculumByDate[s.date];
                     const upNote = sessionNotes[s.date];
                     const dateObj = new Date(s.date + "T12:00:00");
-                    const dayName = DAY_VI[cls.schedule?.find(sc => DAY_INDEX[sc.day] === dateObj.getDay())?.day ?? ""] ?? "";
+                    const dayName = DAY_VI[schedule.find(sc => DAY_INDEX[sc.day] === dateObj.getDay())?.day ?? ""] ?? "";
                     return (
                       <div key={s.date} className="rounded-xl border border-primary/30 bg-primary/5 overflow-hidden">
                         <div className="flex items-center gap-4 p-4">
@@ -623,7 +694,7 @@ export default function StudentClassDetailPage() {
                                 <p className="text-xs text-blue-800 dark:text-blue-300 leading-relaxed">{upNote}</p>
                               </div>
                             )}
-                            {upCurrSession && <StudentCurriculumSessionPreview session={upCurrSession} />}
+                            {upCurrSession && <StudentCurriculumSessionPreview session={upCurrSession} classId={classId} />}
                           </div>
                         )}
                       </div>
@@ -654,7 +725,7 @@ export default function StudentClassDetailPage() {
                       return diff <= 7 * 86400 * 1000;
                     });
                     const sessionDateObj = new Date(session.date + "T12:00:00");
-                    const dayName = DAY_VI[cls.schedule?.find(sc => DAY_INDEX[sc.day] === sessionDateObj.getDay())?.day ?? ""] ?? "";
+                    const dayName = DAY_VI[schedule.find(sc => DAY_INDEX[sc.day] === sessionDateObj.getDay())?.day ?? ""] ?? "";
                     return (
                       <Card key={session.date} className="overflow-hidden">
                         <CardContent className="p-0">
@@ -696,7 +767,7 @@ export default function StudentClassDetailPage() {
 
                               {/* Curriculum session content */}
                               {currSession && (
-                                <StudentCurriculumSessionPreview session={currSession} />
+                                <StudentCurriculumSessionPreview session={currSession} classId={classId} />
                               )}
 
                               {/* Homework for this session */}
@@ -982,8 +1053,10 @@ export default function StudentClassDetailPage() {
             const present  = merged.filter(r => r.status === "present").length;
             const late     = merged.filter(r => r.status === "late").length;
             const absent   = merged.filter(r => r.status === "absent").length;
+            const excused  = merged.filter(r => r.status === "excused").length;
             const attended = present + late;
-            const rate     = total > 0 ? Math.round((attended / total) * 100) : 100;
+            // Chuẩn: tỷ lệ = (present + late) / (total - excused) — có phép không tính vắng
+            const rate     = total - excused > 0 ? Math.round((attended / (total - excused)) * 100) : 100;
 
             const rateColor = rate >= 90 ? "from-emerald-500 to-emerald-600"
               : rate >= 75 ? "from-amber-500 to-amber-600"
@@ -1050,7 +1123,7 @@ export default function StudentClassDetailPage() {
                                   </div>
                                   <div>
                                     <p className="font-semibold text-foreground text-sm">
-                                      {DAY_VI[cls.schedule?.find(sc => DAY_INDEX[sc.day] === dateObj.getDay())?.day ?? ""] || ""} {dateObj.toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit", year: "numeric" })}
+                                      {DAY_VI[schedule.find(sc => DAY_INDEX[sc.day] === dateObj.getDay())?.day ?? ""] || ""} {dateObj.toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit", year: "numeric" })}
                                     </p>
                                     <p className="text-xs text-muted-foreground mt-0.5">{cls.subject}</p>
                                   </div>

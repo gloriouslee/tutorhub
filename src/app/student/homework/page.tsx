@@ -41,19 +41,40 @@ function daysLeft(due: string) {
 
 type FilterTab = "all" | "pending" | "submitted" | "graded";
 
+interface HomeworkItem {
+  id: string;
+  class_id: string;
+  title: string;
+  description?: string;
+  due_date: string;
+  created_at?: string;
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function StudentHomeworkPage() {
   const { studentId: STUDENT_ID, studentName: STUDENT_NAME, myClasses } = useStudentContext();
   const myClassIds = myClasses.map(c => c.id);
-  const myHomework = MOCK_HOMEWORK.filter(h => myClassIds.includes(h.class_id));
+  const [teacherHw,    setTeacherHw]    = useState<HomeworkItem[]>([]);
+  // Merge teacher-created homework (kv) with mock — kv wins on id collision
+  const kvHwIds = new Set(teacherHw.map(h => h.id));
+  const myHomework: HomeworkItem[] = [
+    ...teacherHw,
+    ...MOCK_HOMEWORK.filter(h => myClassIds.includes(h.class_id) && !kvHwIds.has(h.id)),
+  ];
   const [submissions,  setSubmissions]  = useState<SubmissionRecord[]>([]);
   const [filterTab,    setFilterTab]    = useState<FilterTab>("all");
-  const [selectedHw,   setSelectedHw]   = useState<typeof myHomework[0] | null>(null);
+  const [selectedHw,   setSelectedHw]   = useState<HomeworkItem | null>(null);
   const [modalType,    setModalType]    = useState<"submit" | "detail" | null>(null);
   const [file,         setFile]         = useState<File | null>(null);
   const [dragOver,     setDragOver]     = useState(false);
   const [uploadState,  setUploadState]  = useState<"idle" | "uploading" | "success">("idle");
   const [errorMsg,     setErrorMsg]     = useState("");
+
+  useEffect(() => {
+    kvGet<HomeworkItem[]>("tutorhub_teacher_homework", [])
+      .then(all => setTeacherHw(all.filter(h => myClassIds.includes(h.class_id))));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [myClassIds.join(",")]);
 
   useEffect(() => {
     getSubmissionsByStudent(STUDENT_ID).then(async remote => {
@@ -92,7 +113,7 @@ export default function StudentHomeworkPage() {
     if (filterTab === "all") return true;
     return hwStatus(hw.id, hw.due_date).key === filterTab;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [filterTab, submissions]);
+  }), [filterTab, submissions, teacherHw]);
 
   // Sidebar stats
   const submittedCount = myHomework.filter(hw => getSub(hw.id)).length;

@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
-  getCurriculum, saveCurriculum, getAllExamResults,
+  getCurriculum, mutateCurriculum, getAllExamResults,
   type CurriculumChapter, type CurriculumSession, type CurriculumLesson, type StoredExamResult,
 } from "@/lib/storage";
 import { uploadClassFile } from "@/lib/upload";
@@ -383,9 +383,12 @@ export default function CurriculumTab({ classId, schedule }: { classId: string; 
     return () => { cancelled = true; };
   }, [chapters, classId]);
 
-  function persist(next: CurriculumChapter[]) {
-    setChapters(next);
-    saveCurriculum(classId, next);
+  // Merge-safe persist: apply the SAME pure mutation to local state AND to the
+  // fresh document read right before writing (mutateCurriculum → kvUpdate),
+  // so two tabs / concurrent edits don't overwrite each other's changes.
+  function persist(mutate: (chapters: CurriculumChapter[]) => CurriculumChapter[]) {
+    setChapters(prev => mutate(prev));
+    mutateCurriculum(classId, mutate);
   }
 
   function toggle(id: string) {
@@ -393,7 +396,7 @@ export default function CurriculumTab({ classId, schedule }: { classId: string; 
   }
 
   function updateExamField(chapterId: string, sessionId: string, lessonId: string, patch: Partial<CurriculumLesson>) {
-    persist(chapters.map(ch => ch.id !== chapterId ? ch : {
+    persist(chs => chs.map(ch => ch.id !== chapterId ? ch : {
       ...ch,
       sessions: ch.sessions.map(s => s.id !== sessionId ? s : {
         ...s,
@@ -405,18 +408,17 @@ export default function CurriculumTab({ classId, schedule }: { classId: string; 
   // ── Chapter ops ──
   function addChapter() {
     const ch: CurriculumChapter = { id: uid(), title: `Chương ${chapters.length + 1}`, order: chapters.length, sessions: [] };
-    const next = [...chapters, ch];
-    persist(next);
+    persist(chs => [...chs, ch]);
     setExpanded(prev => new Set([...prev, ch.id]));
   }
 
   function updateChapterTitle(id: string, title: string) {
-    persist(chapters.map(ch => ch.id === id ? { ...ch, title } : ch));
+    persist(chs => chs.map(ch => ch.id === id ? { ...ch, title } : ch));
   }
 
   function deleteChapter(id: string) {
     if (!confirm("Xoá chương này và toàn bộ nội dung bên trong?")) return;
-    persist(chapters.filter(ch => ch.id !== id));
+    persist(chs => chs.filter(ch => ch.id !== id));
   }
 
   // ── Session ops ──
@@ -428,13 +430,12 @@ export default function CurriculumTab({ classId, schedule }: { classId: string; 
       order: ch.sessions.length,
       lessons: [],
     };
-    const next = chapters.map(c => c.id === chapterId ? { ...c, sessions: [...c.sessions, session] } : c);
-    persist(next);
+    persist(chs => chs.map(c => c.id === chapterId ? { ...c, sessions: [...c.sessions, session] } : c));
     setExpanded(prev => new Set([...prev, session.id]));
   }
 
   function updateSessionTitle(chapterId: string, sessionId: string, title: string) {
-    persist(chapters.map(ch =>
+    persist(chs => chs.map(ch =>
       ch.id === chapterId
         ? { ...ch, sessions: ch.sessions.map(s => s.id === sessionId ? { ...s, title } : s) }
         : ch
@@ -442,7 +443,7 @@ export default function CurriculumTab({ classId, schedule }: { classId: string; 
   }
 
   function updateSessionDate(chapterId: string, sessionId: string, date: string | undefined) {
-    persist(chapters.map(ch =>
+    persist(chs => chs.map(ch =>
       ch.id === chapterId
         ? { ...ch, sessions: ch.sessions.map(s => s.id === sessionId ? { ...s, date } : s) }
         : ch
@@ -454,14 +455,14 @@ export default function CurriculumTab({ classId, schedule }: { classId: string; 
 
   function deleteSession(chapterId: string, sessionId: string) {
     if (!confirm("Xoá buổi học này?")) return;
-    persist(chapters.map(ch =>
+    persist(chs => chs.map(ch =>
       ch.id === chapterId ? { ...ch, sessions: ch.sessions.filter(s => s.id !== sessionId) } : ch
     ));
   }
 
   // ── Lesson ops ──
   function saveLesson(chapterId: string, sessionId: string, lesson: CurriculumLesson) {
-    persist(chapters.map(ch =>
+    persist(chs => chs.map(ch =>
       ch.id === chapterId ? {
         ...ch,
         sessions: ch.sessions.map(s =>
@@ -477,7 +478,7 @@ export default function CurriculumTab({ classId, schedule }: { classId: string; 
   }
 
   function togglePublish(chapterId: string, sessionId: string, lessonId: string) {
-    persist(chapters.map(ch =>
+    persist(chs => chs.map(ch =>
       ch.id === chapterId ? {
         ...ch,
         sessions: ch.sessions.map(s =>
@@ -491,7 +492,7 @@ export default function CurriculumTab({ classId, schedule }: { classId: string; 
   }
 
   function deleteLesson(chapterId: string, sessionId: string, lessonId: string) {
-    persist(chapters.map(ch =>
+    persist(chs => chs.map(ch =>
       ch.id === chapterId ? {
         ...ch,
         sessions: ch.sessions.map(s =>
@@ -588,7 +589,7 @@ export default function CurriculumTab({ classId, schedule }: { classId: string; 
                           {session.date ? (
                             <span className="inline-flex items-center gap-1 text-[11px] font-medium text-primary bg-primary/10 px-2 py-0.5 rounded-full">
                               <CalendarDays className="h-3 w-3" />
-                              {new Date(session.date).toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit" })}
+                              {new Date(`${session.date}T00:00:00`).toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit" })}
                               <button
                                 onClick={() => updateSessionDate(chapter.id, session.id, undefined)}
                                 className="ml-0.5 hover:text-red-500 transition-colors"
@@ -793,11 +794,12 @@ export default function CurriculumTab({ classId, schedule }: { classId: string; 
           return html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
         }
 
-        function isCorrect(q: typeof questions[0], ans: Record<string, unknown>): boolean {
+        // null = not auto-gradable (essay — "chưa chấm")
+        function isCorrect(q: typeof questions[0], ans: Record<string, unknown>): boolean | null {
           if (q.type === "multiple_choice") return ans.selected_option === q.correct_option;
           if (q.type === "true_false")      return ans.selected_value === q.correct_value;
           if (q.type === "fill_blank")      return String(ans.selected_value ?? "").trim().toLowerCase() === String(q.correct_value ?? "").trim().toLowerCase();
-          return true;
+          return null;
         }
 
         const sorted = [...resultsPanel.results].sort((a, b) => (b.score / (b.total || 1)) - (a.score / (a.total || 1)));

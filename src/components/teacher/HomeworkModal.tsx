@@ -11,18 +11,22 @@ import type { Homework } from "./classDetail.types";
 export default function HomeworkModal({
   classId,
   initial,
+  defaultDueDate,
   onSave,
   onClose,
 }: {
   classId: string;
   initial?: Partial<Homework>;
+  defaultDueDate?: string;
   onSave: (hw: Homework) => void;
   onClose: () => void;
 }) {
   const [title, setTitle] = useState(initial?.title ?? "");
   const [description, setDescription] = useState(initial?.description ?? "");
-  const [dueDate, setDueDate] = useState(initial?.due_date ?? "");
+  const [dueDate, setDueDate] = useState(initial?.due_date ?? (!initial ? defaultDueDate ?? "" : ""));
   const [file, setFile] = useState<File | null>(null);
+  // Existing attachment when editing — preserved unless removed or replaced
+  const [existingAttachment, setExistingAttachment] = useState<HomeworkAttachment | undefined>(initial?.attachment);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
   const fileInputRef = React.useRef<HTMLInputElement>(null);
@@ -32,11 +36,13 @@ export default function HomeworkModal({
     setUploading(true);
     setUploadError("");
 
-    let attachment: HomeworkAttachment | undefined;
+    // Single id used for BOTH the attachment record and the homework object
+    const hwId = initial?.id ?? `hw_${Date.now()}`;
+
+    let attachment: HomeworkAttachment | undefined = existingAttachment;
     if (file) {
       try {
         const uploaded = await uploadClassFile(file, classId, "homework");
-        const hwId = initial?.id ?? `hw_${Date.now()}`;
         attachment = {
           homework_id: hwId,
           file_url: uploaded.url,
@@ -53,7 +59,7 @@ export default function HomeworkModal({
     }
 
     const hw: Homework = {
-      id: initial?.id ?? `hw_${Date.now()}`,
+      id: hwId,
       class_id: classId,
       title: title.trim(),
       description: description.trim() || undefined,
@@ -111,6 +117,17 @@ export default function HomeworkModal({
                   <p className="text-xs text-muted-foreground">{(file.size / 1024 / 1024).toFixed(1)} MB</p>
                 </div>
                 <button onClick={() => setFile(null)} className="p-1 rounded hover:bg-muted text-muted-foreground">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            ) : existingAttachment ? (
+              <div className="flex items-center gap-3 p-3 rounded-xl border border-border bg-muted/30">
+                <FileText className="h-5 w-5 text-primary shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-foreground truncate">{existingAttachment.file_name}</p>
+                  <p className="text-xs text-muted-foreground">File hiện tại · {existingAttachment.file_size}</p>
+                </div>
+                <button onClick={() => setExistingAttachment(undefined)} className="p-1 rounded hover:bg-muted text-muted-foreground" title="Gỡ file đính kèm">
                   <X className="h-4 w-4" />
                 </button>
               </div>

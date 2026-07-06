@@ -552,6 +552,15 @@ export async function saveCurriculum(classId: string, curriculum: CurriculumChap
   await kvSet(`tutorhub_curriculum_${classId}`, curriculum);
 }
 
+// Merge-safe curriculum mutation: re-applies `fn` to the FRESH document read
+// right before writing (kvUpdate) instead of overwriting with stale state.
+export async function mutateCurriculum(
+  classId: string,
+  fn: (chapters: CurriculumChapter[]) => CurriculumChapter[]
+): Promise<CurriculumChapter[]> {
+  return kvUpdate<CurriculumChapter[]>(`tutorhub_curriculum_${classId}`, [], fn);
+}
+
 // ── Exam results (per student, per exam) ─────────────────────────────────────
 
 export interface StoredExamResult {
@@ -618,8 +627,10 @@ export async function getOnlineLink(classId: string): Promise<string | null> {
   return kvGet<string | null>(`tutorhub_online_link_${classId}`, null);
 }
 
+// Lưu "" khi giáo viên xóa link (khác với null = chưa từng đặt) — để trang
+// không hồi sinh zoom_link mặc định sau khi link đã bị xóa chủ động.
 export async function saveOnlineLink(classId: string, link: string): Promise<void> {
-  await kvSet<string | null>(`tutorhub_online_link_${classId}`, link.trim() ? link.trim() : null);
+  await kvSet<string>(`tutorhub_online_link_${classId}`, link.trim());
 }
 
 // ── Shared tuition invoices (localStorage) ───────────────────────────────────
@@ -1055,6 +1066,8 @@ export interface StoredClassMaterial {
   created_at: string;
   download_count: number;
   packages?: StudentPackage[];  // empty/undefined = visible to all packages
+  pinned?: boolean;             // notes: pinned to top
+  kind?: "material" | "lecture" | "note"; // undefined = material (backward compat)
 }
 
 const MATERIALS_KEY = "tutorhub_class_materials";
@@ -1169,14 +1182,37 @@ export async function recordTuitionPayment(
   config.students[studentId] = { ...student, payments: [...student.payments, newPayment] };
   await saveClassTuition(classId, config);
 
-  // Đồng bộ: đánh dấu hóa đơn tương ứng (lớp + học sinh + kỳ) là đã đóng
+  // Đồng bộ: chỉ đánh dấu hóa đơn (lớp + học sinh + kỳ) là đã đóng khi tổng
+  // các lần đóng trong kỳ đã đủ số tiền hóa đơn (hỗ trợ đóng từng phần).
+  const totalForPeriod = config.students[studentId].payments
+    .filter(p => p.period === payment.period)
+    .reduce((s, p) => s + p.amount, 0);
   await kvUpdate<TuitionInvoice[]>(INVOICE_KEY, DEFAULT_INVOICES, invoices =>
     invoices.map(inv =>
-      inv.class_id === classId && inv.child_id === studentId && inv.period === payment.period && inv.status !== "paid"
+      inv.class_id === classId && inv.child_id === studentId && inv.period === payment.period &&
+      inv.status !== "paid" && totalForPeriod >= inv.amount
         ? { ...inv, status: "paid" as const, paid_at: new Date().toISOString() }
         : inv
     )
   );
+}
+
+/** Xóa học viên khỏi sĩ số lớp trong DB (bảng classes.student_ids). */
+export async function removeStudentFromClass(classId: string, studentId: string): Promise<void> {
+  try {
+    const { data: cls } = await supabase
+      .from("classes")
+      .select("id, student_ids")
+      .eq("id", classId)
+      .maybeSingle();
+    const ids = (cls?.student_ids as string[] | null) ?? [];
+    if (ids.includes(studentId)) {
+      await supabase
+        .from("classes")
+        .update({ student_ids: ids.filter(x => x !== studentId) })
+        .eq("id", classId);
+    }
+  } catch { /* offline — DB sẽ không đổi, extra-students local vẫn được cập nhật */ }
 }
 
 export async function deleteTuitionPayment(classId: string, studentId: string, paymentId: string): Promise<void> {

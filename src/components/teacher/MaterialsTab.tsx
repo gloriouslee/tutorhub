@@ -27,14 +27,16 @@ export default function MaterialsTab({
   addButton: React.ReactNode;
   setUploadedMaterials: (mats: StoredClassMaterial[]) => void;
 }) {
+  // Only true materials — lectures/notes live in their own tabs (no kind = legacy material)
+  const visibleMaterials = materials.filter(m => !m.kind || m.kind === "material");
   return (
     <div className="space-y-5">
       <div className="flex justify-between items-center">
-        <p className="text-sm text-muted-foreground">{materials.length} tài liệu</p>
+        <p className="text-sm text-muted-foreground">{visibleMaterials.length} tài liệu</p>
         {addButton}
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
-        {materials.map((mat, i) => {
+        {visibleMaterials.map((mat, i) => {
           const cat = CATEGORY_MAP[mat.category] || { label: mat.category, color: "bg-muted text-muted-foreground" };
           return (
             <Card key={mat.id} className="group hover:shadow-lg hover:border-primary/30 transition-all animate-fade-in flex flex-col" style={{ animationDelay: `${i * 60}ms` }}>
@@ -79,8 +81,9 @@ export default function MaterialsTab({
                   <span>{mat.file_size}</span><span>·</span>
                   <span className="flex items-center gap-1"><Download className="h-3 w-3" />{mat.download_count}</span>
                 </div>
-                <div className="pt-3 border-t border-border/50">
-                  {mat.file_url && !mat.file_url.startsWith("/uploads/") ? (
+                {/* /uploads/ paths are dead (files not persisted) — no preview button for those */}
+                {mat.file_url && !mat.file_url.startsWith("/uploads/") && (
+                  <div className="pt-3 border-t border-border/50">
                     <a
                       href={mat.file_url}
                       target="_blank"
@@ -89,10 +92,8 @@ export default function MaterialsTab({
                     >
                       <Eye className="h-3 w-3" />Xem / Tải xuống
                     </a>
-                  ) : (
-                    <Button size="sm" variant="outline" className="w-full text-xs h-8"><Eye className="h-3 w-3 mr-1.5" />Xem trước</Button>
-                  )}
-                </div>
+                  </div>
+                )}
               </CardContent>
             </Card>
           );

@@ -23,6 +23,15 @@ import {
 
 function uid() { return `q_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`; }
 
+// ISO string → value for <input type="datetime-local"> (local time)
+function isoToLocalInput(iso?: string): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 function emptyQuestion(order: number): ExamQuestion {
   return {
     id: uid(),
@@ -515,6 +524,7 @@ export default function ExamEditorModal({
 }) {
   const [title,      setTitle]      = useState(initial?.title ?? "");
   const [timeLimit,  setTimeLimit]  = useState(initial?.exam_content?.time_limit?.toString() ?? "");
+  const [opensAt,    setOpensAt]    = useState(isoToLocalInput(initial?.exam_opens_at));
   const [published,  setPublished]  = useState(initial?.is_published ?? true);
   const [questions,  setQuestions]  = useState<ExamQuestion[]>(
     initial?.exam_content?.questions?.length
@@ -553,6 +563,7 @@ export default function ExamEditorModal({
       type:         "exam",
       title:        title.trim(),
       is_published: published,
+      exam_opens_at: opensAt ? new Date(opensAt).toISOString() : undefined,
       exam_content: {
         questions: questions.map((q, i) => ({ ...q, order: i })),
         time_limit: timeLimit ? parseInt(timeLimit) : undefined,
@@ -584,6 +595,20 @@ export default function ExamEditorModal({
               className="w-10 text-xs bg-transparent outline-none text-center text-foreground"
             />
             <span className="text-xs text-muted-foreground">phút</span>
+          </div>
+          <div className="hidden md:flex items-center gap-1.5 border border-border rounded-lg px-2.5 py-1.5" title="Tự động mở lúc">
+            <span className="text-xs text-muted-foreground whitespace-nowrap">Tự động mở lúc</span>
+            <input
+              type="datetime-local"
+              value={opensAt}
+              onChange={e => setOpensAt(e.target.value)}
+              className="text-xs bg-transparent outline-none text-foreground"
+            />
+            {opensAt && (
+              <button onClick={() => setOpensAt("")} className="p-0.5 rounded hover:bg-muted text-muted-foreground" title="Xoá giờ mở tự động">
+                <X className="h-3 w-3" />
+              </button>
+            )}
           </div>
           <div className="hidden sm:flex items-center gap-1.5 border border-border rounded-lg px-2.5 py-1.5">
             <span className="text-xs text-muted-foreground">Tổng:</span>

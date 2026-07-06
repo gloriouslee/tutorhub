@@ -22,8 +22,13 @@ export const PACKAGE_TYPES: Record<string, { label: string; color: string; descr
   offline:  { label: "Gói Offline",  color: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",  description: "Học tại trung tâm + Full tài liệu" },
 };
 
+// Parse date-only strings as LOCAL midnight (avoid UTC shifting the day)
+function parseLocalDate(dateStr: string): Date {
+  return /^\d{4}-\d{2}-\d{2}$/.test(dateStr) ? new Date(`${dateStr}T00:00:00`) : new Date(dateStr);
+}
+
 export function formatDate(dateStr: string) {
-  return new Date(dateStr).toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit", year: "numeric" });
+  return parseLocalDate(dateStr).toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit", year: "numeric" });
 }
 
 // ── Session types ────────────────────────────────────────────────────────────
@@ -42,8 +47,9 @@ export function generateSessions(schedule: ClassSchedule[]): Session[] {
   today.setHours(0, 0, 0, 0);
   const sessions: Session[] = [];
 
-  const pastWeeks = 8;
-  const futureWeeks = 4;
+  // Keep in sync with CurriculumTab.generateSlots (−12/+8 weeks)
+  const pastWeeks = 12;
+  const futureWeeks = 8;
   const startDate = new Date(today);
   startDate.setDate(startDate.getDate() - pastWeeks * 7);
   const endDate = new Date(today);
@@ -104,7 +110,7 @@ export interface Submission {
 
 export function dueStatus(dueDate: string): { label: string; color: string } {
   const now = new Date();
-  const due = new Date(dueDate);
+  const due = parseLocalDate(dueDate);
   const diffMs = due.getTime() - now.getTime();
   const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
   if (diffDays < 0) return { label: "Đã hết hạn", color: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" };

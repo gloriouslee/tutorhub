@@ -60,13 +60,14 @@ export default function UploadModal({
           file_type: uploaded.file_type,
           file_size: uploaded.size,
           category,
+          kind: "material",
           uploaded_by: "teacher",
           created_at: new Date().toISOString(),
           packages: selectedPkgs.length > 0 ? selectedPkgs : undefined,
         });
         onMaterialSaved?.(mat);
       }
-      // lecture type: same flow (saved as material with type)
+      // lecture type: same flow, tagged with kind "lecture"
       if (type === "lecture" && file) {
         const uploaded = await uploadClassFile(file, classId, "materials");
         const mat = await saveClassMaterial({
@@ -76,10 +77,28 @@ export default function UploadModal({
           file_url: uploaded.url,
           file_type: uploaded.file_type,
           file_size: uploaded.size,
-          category: "textbook",
+          category: "lecture",
+          kind: "lecture",
           uploaded_by: "teacher",
           created_at: new Date().toISOString(),
           packages: selectedPkgs.length > 0 ? selectedPkgs : undefined,
+        });
+        onMaterialSaved?.(mat);
+      }
+      // note type: no file — store text note with pinned flag
+      if (type === "note") {
+        const mat = await saveClassMaterial({
+          class_id: classId,
+          title: title.trim(),
+          description: description.trim() || undefined,
+          file_url: "",
+          file_type: "note",
+          file_size: "",
+          category: "note",
+          kind: "note",
+          pinned,
+          uploaded_by: "teacher",
+          created_at: new Date().toISOString(),
         });
         onMaterialSaved?.(mat);
       }

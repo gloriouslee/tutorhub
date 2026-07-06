@@ -14,12 +14,21 @@ import {
   MOCK_CLASSES, MOCK_HOMEWORK, MOCK_ATTENDANCE,
   MOCK_EXAM_SCORES, MOCK_TEACHERS, ATTENDANCE_CHART_DATA,
 } from "@/lib/mock-data";
-import { getNotifications, getEnrollments } from "@/lib/storage";
+import { getNotifications, getEnrollments, kvGet } from "@/lib/storage";
 import { getSubmissionsByStudent } from "@/lib/supabase/submissions";
 import Link from "next/link";
 import { formatDate } from "@/lib/utils";
 import { useStudentContext } from "@/hooks/useStudentContext";
 import { AreaChart, Area, Tooltip, ResponsiveContainer } from "recharts";
+
+interface HomeworkItem {
+  id: string;
+  class_id: string;
+  title: string;
+  description?: string;
+  due_date: string;
+  created_at?: string;
+}
 
 const DOW_EN = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const DOW_VI: Record<string, string> = {
@@ -65,6 +74,7 @@ export default function StudentDashboard() {
   const [attendanceRate, setAttendanceRate] = useState<number | null>(null);
   const [unreadCount,    setUnreadCount]    = useState(0);
   const [submittedCount, setSubmittedCount] = useState(0);
+  const [teacherHw,      setTeacherHw]      = useState<HomeworkItem[]>([]);
 
   useEffect(() => {
     if (!ready) return;
@@ -99,14 +109,24 @@ export default function StudentDashboard() {
       ).length);
     });
 
-    // Submissions
-    getSubmissionsByStudent(studentId).then(subs => {
+    // Submissions + teacher-created homework (kv wins on id collision)
+    (async () => {
       const classIds = myClasses.map(c => c.id);
-      const hw = MOCK_HOMEWORK.filter(h => classIds.includes(h.class_id));
+      const [subs, allTeacherHw] = await Promise.all([
+        getSubmissionsByStudent(studentId),
+        kvGet<HomeworkItem[]>("tutorhub_teacher_homework", []).catch(() => [] as HomeworkItem[]),
+      ]);
+      const teacher = allTeacherHw.filter(h => classIds.includes(h.class_id));
+      setTeacherHw(teacher);
+      const kvIds = new Set(teacher.map(h => h.id));
+      const hw = [
+        ...teacher,
+        ...MOCK_HOMEWORK.filter(h => classIds.includes(h.class_id) && !kvIds.has(h.id)),
+      ];
       setSubmittedCount(subs.filter(s =>
         hw.find(h => h.id === s.homework_id)
       ).length);
-    });
+    })();
   }, [ready, studentId, myClasses]);
 
   const now             = new Date();
@@ -115,7 +135,11 @@ export default function StudentDashboard() {
   const greeting        = greetingHour < 12 ? "Chào buổi sáng" : greetingHour < 18 ? "Chào buổi chiều" : "Chào buổi tối";
 
   const myClassIds        = myClasses.map(c => c.id);
-  const myHomework        = MOCK_HOMEWORK.filter(h => myClassIds.includes(h.class_id));
+  const kvHwIds           = new Set(teacherHw.map(h => h.id));
+  const myHomework: HomeworkItem[] = [
+    ...teacherHw,
+    ...MOCK_HOMEWORK.filter(h => myClassIds.includes(h.class_id) && !kvHwIds.has(h.id)),
+  ];
   const pendingHomework   = myHomework.filter(h => new Date(h.due_date) >= now);
   const homeworkTotal     = myHomework.length;
   const completionPct     = homeworkTotal > 0 ? Math.round((submittedCount / homeworkTotal) * 100) : 0;
