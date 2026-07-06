@@ -34,9 +34,11 @@
     "@tiptap/extension-text-align": "^3.27.1",
     "@tiptap/react": "^3.27.1",
     "@tiptap/starter-kit": "^3.27.1",
+    "cfb": "^1.2.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "date-fns": "^3.6.0",
+    "jszip": "^3.10.1",
     "katex": "^0.17.0",
     "lucide-react": "^1.14.0",
     "mammoth": "^1.12.0",
@@ -46,7 +48,8 @@
     "react-day-picker": "^8.10.2",
     "react-dom": "19.2.4",
     "recharts": "^3.8.1",
-    "tailwind-merge": "^3.5.0"
+    "tailwind-merge": "^3.5.0",
+    "wmf": "^1.0.2"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

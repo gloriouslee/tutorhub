@@ -793,7 +793,15 @@ function TextImportPanel({ text, setText, onAppend, onReplace, classId }: {
     setImporting(true);
     setFormulaCount(0);
     try {
-      const arrayBuffer = await file.arrayBuffer();
+      let arrayBuffer = await file.arrayBuffer();
+      // Tự chuyển công thức MathType (OLE/MTEF) → $LaTeX$ trước khi mammoth xử lý.
+      // Công thức không chuyển được vẫn đi theo đường placeholder WMF bên dưới.
+      try {
+        const { preprocessDocxEquations } = await import("@/lib/docxToText");
+        arrayBuffer = await preprocessDocxEquations(arrayBuffer);
+      } catch {
+        // bỏ qua — dùng file gốc
+      }
       const mammoth = await import("mammoth");
       // Ảnh PNG/JPEG/GIF/WebP → upload lên storage, trả về URL công khai.
       // WMF/EMF (công thức MathType) hoặc upload lỗi → placeholder để đánh dấu.
@@ -924,7 +932,7 @@ function TextImportPanel({ text, setText, onAppend, onReplace, classId }: {
             <div className="flex items-start gap-2 mx-3 mt-2 px-3 py-2 rounded-xl border border-amber-300 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-700/50 text-xs text-amber-700 dark:text-amber-400 shrink-0">
               <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
               <span>
-                File chứa {formulaCount} công thức dạng ảnh (MathType) không thể tự chuyển — hãy gõ lại bằng $LaTeX$ tại các vị trí đánh dấu.
+                File chứa {formulaCount} công thức dạng ảnh (MathType) không thể tự chuyển — hãy gõ lại công thức (dạng LaTeX giữa hai dấu $) tại các vị trí có marker &ldquo;{FORMULA_MARKER}&rdquo;.
               </span>
               <button onClick={() => setFormulaCount(0)} className="ml-auto shrink-0 p-0.5 rounded hover:bg-amber-100 dark:hover:bg-amber-900/40">
                 <X className="h-3 w-3" />
