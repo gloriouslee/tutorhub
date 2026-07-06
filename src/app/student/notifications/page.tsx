@@ -99,7 +99,7 @@ export default function StudentNotificationsPage() {
   const [filter, setFilter] = useState<"all" | "unread" | "read">("all");
 
   useEffect(() => {
-    setScheduleNotifs(getScheduleNotifications());
+    getScheduleNotifications().then(setScheduleNotifs);
     setReadIds(getReadIds());
     setDeletedIds(getDeletedIds());
     getNotifications().then(all =>
@@ -125,8 +125,8 @@ export default function StudentNotificationsPage() {
     return true;
   });
 
-  const handleMarkAllRead = () => {
-    markScheduleNotificationsRead();
+  const handleMarkAllRead = async () => {
+    await markScheduleNotificationsRead();
     setScheduleNotifs(prev => prev.map(n => ({ ...n, is_read: true })));
     markAllReadIds(unified.map(n => n.id));
     setReadIds(getReadIds());

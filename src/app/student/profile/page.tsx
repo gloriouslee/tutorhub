@@ -91,16 +91,18 @@ export default function StudentProfilePage() {
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    // Find account matching the enrolled student cookie (demo s1 gets mock profile)
-    const accounts = getStudentAccounts();
-    const acc = accounts.find(a => a.student_id === studentId) ?? null;
-    setAccount(acc);
-    const base = buildProfile(acc);
-    setForm(loadSavedProfile(base, studentId));
-    try {
-      setAvatarUrl(localStorage.getItem(`tutorhub_avatar_${studentId}`));
-    } catch { /* ignore */ }
-    setLoaded(true);
+    (async () => {
+      // Find account matching the enrolled student cookie (demo s1 gets mock profile)
+      const accounts = await getStudentAccounts();
+      const acc = accounts.find(a => a.student_id === studentId) ?? null;
+      setAccount(acc);
+      const base = buildProfile(acc);
+      setForm(loadSavedProfile(base, studentId));
+      try {
+        setAvatarUrl(localStorage.getItem(`tutorhub_avatar_${studentId}`));
+      } catch { /* ignore */ }
+      setLoaded(true);
+    })();
   }, [studentId]);
 
   if (!loaded || !form) return null;

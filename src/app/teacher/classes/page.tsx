@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { LearningModeBadge, SectionHeader } from "@/components/shared";
 import { MOCK_CLASSES } from "@/lib/mock-data";
-import { getOnlineLink, getClassTeacherOverrides } from "@/lib/storage";
+import { getOnlineLink, getClassTeacherOverrides, kvGet, kvSet } from "@/lib/storage";
 import {
   BookOpen, Clock, Video, MapPin, Users, Settings, Search,
   GraduationCap, X, Plus, Trash2, Check,
@@ -50,11 +50,11 @@ interface ExtraClass {
   created_at: string;
 }
 
-function loadExtraClasses(): ExtraClass[] {
-  try { return JSON.parse(localStorage.getItem(LS_KEY) ?? "[]"); } catch { return []; }
+async function loadExtraClasses(): Promise<ExtraClass[]> {
+  try { return await kvGet<ExtraClass[]>(LS_KEY, []); } catch { return []; }
 }
-function saveExtraClasses(list: ExtraClass[]) {
-  localStorage.setItem(LS_KEY, JSON.stringify(list));
+async function saveExtraClasses(list: ExtraClass[]) {
+  await kvSet(LS_KEY, list);
 }
 
 // ── Form state ────────────────────────────────────────────────────────────────
@@ -121,7 +121,7 @@ function CreateClassModal({
     return Object.keys(e).length === 0;
   }
 
-  function handleSubmit() {
+  async function handleSubmit() {
     if (!validate()) return;
     const id = `cls_${Date.now()}`;
     const cls: ExtraClass = {
@@ -139,8 +139,8 @@ function CreateClassModal({
       tutor_id:      TEACHER_ID,
       created_at:    new Date().toISOString(),
     };
-    const list = loadExtraClasses();
-    saveExtraClasses([cls, ...list]);
+    const list = await loadExtraClasses();
+    await saveExtraClasses([cls, ...list]);
     onCreated(cls);
     onClose();
   }
@@ -352,8 +352,8 @@ export default function TeacherClassesPage() {
   const [teacherOverrides, setTeacherOverrides] = useState<Record<string, string>>({});
 
   useEffect(() => {
-    setTeacherOverrides(getClassTeacherOverrides());
-    setExtraClasses(loadExtraClasses().filter(c => c.tutor_id === TEACHER_ID));
+    getClassTeacherOverrides().then(setTeacherOverrides);
+    loadExtraClasses().then(list => setExtraClasses(list.filter(c => c.tutor_id === TEACHER_ID)));
   }, []);
 
   const baseClasses = useMemo(
@@ -371,12 +371,15 @@ export default function TeacherClassesPage() {
 
   // Load saved online links from localStorage
   useEffect(() => {
-    const links: Record<string, string> = {};
-    myClasses.forEach(cls => {
-      const saved = getOnlineLink(cls.id);
-      links[cls.id] = saved ?? (cls as any).zoom_link ?? "";
-    });
-    setOnlineLinks(links);
+    async function loadLinks() {
+      const links: Record<string, string> = {};
+      for (const cls of myClasses) {
+        const saved = await getOnlineLink(cls.id);
+        links[cls.id] = saved ?? (cls as any).zoom_link ?? "";
+      }
+      setOnlineLinks(links);
+    }
+    loadLinks();
   }, [myClasses]);
 
   const displayed = useMemo(() =>

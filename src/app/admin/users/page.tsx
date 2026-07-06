@@ -41,7 +41,7 @@ const TABS = [
 // Seed: merge localStorage + existing data into ManagedUsers on first load
 // ─────────────────────────────────────────────────────────────────────────────
 
-function seedIfNeeded(existing: ManagedUser[]): ManagedUser[] {
+async function seedIfNeeded(existing: ManagedUser[]): Promise<ManagedUser[]> {
   const existingIds = new Set(existing.map(u => u.id));
   const seeded: ManagedUser[] = [...existing];
 
@@ -80,7 +80,7 @@ function seedIfNeeded(existing: ManagedUser[]): ManagedUser[] {
 
   // Seed enrolled student accounts; also seed MOCK_STUDENTS as base
   try {
-    const accounts = typeof window !== "undefined" ? getStudentAccounts() : [];
+    const accounts = typeof window !== "undefined" ? await getStudentAccounts() : [];
     for (const a of accounts) {
       const id = `account_${a.student_id}`;
       if (!existingIds.has(id)) {
@@ -308,15 +308,17 @@ export default function AdminUsersPage() {
   const [pwdVisible, setPwdVis]   = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    const stored = getManagedUsers();
-    const seeded = seedIfNeeded(stored);
-    if (seeded.length !== stored.length) {
-      localStorage.setItem("tutorhub_managed_users", JSON.stringify(seeded));
-    }
-    setUsers(seeded);
+    (async () => {
+      const stored = await getManagedUsers();
+      const seeded = await seedIfNeeded(stored);
+      if (seeded.length !== stored.length) {
+        localStorage.setItem("tutorhub_managed_users", JSON.stringify(seeded));
+      }
+      setUsers(seeded);
+    })();
   }, []);
 
-  const reload = () => setUsers(getManagedUsers());
+  const reload = async () => setUsers(await getManagedUsers());
 
   const filtered = useMemo(() => {
     let list = users;
@@ -339,21 +341,21 @@ export default function AdminUsersPage() {
     admin:   users.filter(u => u.type === "admin").length,
   }), [users]);
 
-  function handleSaveUser(u: ManagedUser) {
-    saveManagedUser(u);
-    reload();
+  async function handleSaveUser(u: ManagedUser) {
+    await saveManagedUser(u);
+    await reload();
   }
-  function handleDelete(id: string) {
-    deleteManagedUser(id);
-    reload();
+  async function handleDelete(id: string) {
+    await deleteManagedUser(id);
+    await reload();
   }
-  function handleResetPwd(id: string, pwd: string) {
-    resetManagedUserPassword(id, pwd);
-    reload();
+  async function handleResetPwd(id: string, pwd: string) {
+    await resetManagedUserPassword(id, pwd);
+    await reload();
   }
-  function handleToggle(id: string) {
-    toggleManagedUserDisabled(id);
-    reload();
+  async function handleToggle(id: string) {
+    await toggleManagedUserDisabled(id);
+    await reload();
   }
   function togglePwdVisible(id: string) {
     setPwdVis(prev => {

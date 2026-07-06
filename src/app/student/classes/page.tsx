@@ -31,11 +31,13 @@ export default function StudentClassesPage() {
   const [onlineLinks, setOnlineLinks] = useState<Record<string, string>>({});
 
   useEffect(() => {
-    const links: Record<string, string> = {};
-    myClasses.forEach(cls => {
-      links[cls.id] = getOnlineLink(cls.id) ?? cls.zoom_link ?? "";
-    });
-    setOnlineLinks(links);
+    (async () => {
+      const links: Record<string, string> = {};
+      for (const cls of myClasses) {
+        links[cls.id] = (await getOnlineLink(cls.id)) ?? cls.zoom_link ?? "";
+      }
+      setOnlineLinks(links);
+    })();
   }, [myClasses]);
 
   const displayed = useMemo(() => myClasses.filter(cls => {

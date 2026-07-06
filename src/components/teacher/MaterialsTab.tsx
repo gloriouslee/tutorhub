@@ -50,9 +50,9 @@ export default function MaterialsTab({
                         size="icon"
                         variant="ghost"
                         className="h-7 w-7 text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 opacity-0 group-hover:opacity-100 transition-opacity"
-                        onClick={() => {
-                          deleteClassMaterial(mat.id);
-                          setUploadedMaterials(getClassMaterials(classId));
+                        onClick={async () => {
+                          await deleteClassMaterial(mat.id);
+                          setUploadedMaterials(await getClassMaterials(classId));
                         }}
                       >
                         <Trash2 className="h-3 w-3" />

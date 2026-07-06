@@ -18,6 +18,7 @@ import {
   getSubmissionsByStudent,
   type SubmissionRecord,
 } from "@/lib/supabase/submissions";
+import { kvGet, kvSet } from "@/lib/storage";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const ACCEPTED = ".pdf,.doc,.docx,.jpg,.jpeg,.png";
@@ -25,12 +26,12 @@ const MAX_MB   = 10;
 const LS_KEY   = "tutorhub_submissions";
 
 // ── localStorage fallback ─────────────────────────────────────────────────────
-function loadLocalSubs(): SubmissionRecord[] {
-  try { return JSON.parse(localStorage.getItem(LS_KEY) ?? "[]"); } catch { return []; }
+async function loadLocalSubs(): Promise<SubmissionRecord[]> {
+  try { return await kvGet<SubmissionRecord[]>(LS_KEY, []); } catch { return []; }
 }
-function saveLocalSub(sub: SubmissionRecord) {
-  const arr = loadLocalSubs();
-  localStorage.setItem(LS_KEY, JSON.stringify([...arr.filter(s => s.id !== sub.id), sub]));
+async function saveLocalSub(sub: SubmissionRecord) {
+  const arr = await loadLocalSubs();
+  await kvSet(LS_KEY, [...arr.filter(s => s.id !== sub.id), sub]);
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -55,11 +56,11 @@ export default function StudentHomeworkPage() {
   const [errorMsg,     setErrorMsg]     = useState("");
 
   useEffect(() => {
-    getSubmissionsByStudent(STUDENT_ID).then(remote => {
+    getSubmissionsByStudent(STUDENT_ID).then(async remote => {
       if (remote.length > 0) {
         setSubmissions(remote);
       } else {
-        setSubmissions(loadLocalSubs().filter(s => s.student_id === STUDENT_ID));
+        setSubmissions((await loadLocalSubs()).filter(s => s.student_id === STUDENT_ID));
       }
     });
   }, [STUDENT_ID]);
@@ -160,7 +161,7 @@ export default function StudentHomeworkPage() {
 
     const saved = await insertSubmission(subData);
     const finalSub: SubmissionRecord = saved ?? { ...subData, id: `local-${Date.now()}` };
-    if (!saved) saveLocalSub(finalSub);
+    if (!saved) await saveLocalSub(finalSub);
 
     setSubmissions(prev => [
       ...prev.filter(s => !(s.homework_id === selectedHw.id && s.student_id === STUDENT_ID)),

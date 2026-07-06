@@ -135,7 +135,7 @@ function AdminClassesPageInner() {
       setClasses(updated);
       await saveClasses(updated);
       // Persist teacher assignment so teacher portal picks it up
-      setClassTeacherOverride(editingClass.id, formData.tutor_id);
+      await setClassTeacherOverride(editingClass.id, formData.tutor_id);
     } else {
       // Add
       const newId = `c${classes.length + 1}-${Math.floor(Math.random() * 1000)}`;

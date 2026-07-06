@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { MOCK_ATTENDANCE } from "@/lib/mock-data";
-import { type CurriculumSession as CurriculumSessionData } from "@/lib/storage";
+import { kvSet, type CurriculumSession as CurriculumSessionData } from "@/lib/storage";
 import {
   Clock, FileText, Save, CheckCircle2, CalendarDays, CheckSquare,
   UserCheck, UserX, Map,
@@ -98,7 +98,7 @@ function InlineAttendancePanel({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [savedRecords]);
 
-  function handleSave() {
+  async function handleSave() {
     const newRecs: SavedAttendanceRecord[] = Object.entries(marks).map(([student_id, status]) => ({
       class_id: classId,
       student_id,
@@ -108,7 +108,7 @@ function InlineAttendancePanel({
     }));
     const others = savedRecords.filter(r => !(r.class_id === classId && r.date === date));
     const updated = [...others, ...newRecs];
-    try { localStorage.setItem("tutorhub_teacher_attendance", JSON.stringify(updated)); } catch {}
+    try { await kvSet("tutorhub_teacher_attendance", updated); } catch {}
     onSaved(updated);
     setSaved(true);
     setTimeout(() => setSaved(false), 2500);

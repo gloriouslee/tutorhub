@@ -90,19 +90,21 @@ function YoutubePlayer({ lesson, onClose }: { lesson: CurriculumLesson; onClose:
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function CurriculumView({ classId, watched, onWatch, submissions }: Props) {
-  const [chapters,     setChapters]     = useState<ReturnType<typeof getCurriculum>>([]);
+  const [chapters,     setChapters]     = useState<Awaited<ReturnType<typeof getCurriculum>>>([]);
   const [expanded,     setExpanded]     = useState<Set<string>>(new Set());
   const [activeLesson, setActiveLesson] = useState<CurriculumLesson | null>(null);
 
   useEffect(() => {
-    const data = getCurriculum(classId);
-    setChapters(data);
-    const ids = new Set<string>();
-    if (data[0]) {
-      ids.add(data[0].id);
-      if (data[0].sessions[0]) ids.add(data[0].sessions[0].id);
-    }
-    setExpanded(ids);
+    (async () => {
+      const data = await getCurriculum(classId);
+      setChapters(data);
+      const ids = new Set<string>();
+      if (data[0]) {
+        ids.add(data[0].id);
+        if (data[0].sessions[0]) ids.add(data[0].sessions[0].id);
+      }
+      setExpanded(ids);
+    })();
   }, [classId]);
 
   function toggle(id: string) {

@@ -544,7 +544,8 @@ export default function ExamPage() {
   const [lockReason,  setLockReason]  = useState("");
 
   useEffect(() => {
-    const chapters = getCurriculum(classId);
+    (async () => {
+    const chapters = await getCurriculum(classId);
     for (const ch of chapters)
       for (const sess of ch.sessions) {
         const found = sess.lessons.find(l => l.id === lessonId);
@@ -565,11 +566,12 @@ export default function ExamPage() {
           }
 
           // Load previous result (scoped to this student)
-          const prev = getExamResult(classId, lessonId, studentId || "anon");
+          const prev = await getExamResult(classId, lessonId, studentId || "anon");
           if (prev) { setResult(prev as unknown as ExamResult); setSubmitted(true); }
           return;
         }
       }
+    })();
   }, [classId, lessonId, studentId]);
 
   const timeLimit = lesson?.exam_content?.time_limit
@@ -587,13 +589,13 @@ export default function ExamPage() {
     setAnswers(prev => ({ ...prev, [questionId]: ans }));
   }
 
-  function submit() {
+  async function submit() {
     const score = calcScore(questions, answers);
     const total = questions.reduce((s, q) => s + q.score, 0);
     const submitted_at = new Date().toISOString();
     const res: ExamResult = { answers, score, total, submitted_at };
     const sid = studentId || "anon";
-    saveExamResult(classId, lessonId, sid, studentName, { score, total, submitted_at, answers: answers as Record<string, unknown> });
+    await saveExamResult(classId, lessonId, sid, studentName, { score, total, submitted_at, answers: answers as Record<string, unknown> });
     markExamComplete(sid, lessonId);
     setResult(res);
     setSubmitted(true);

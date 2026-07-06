@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { MOCK_STUDENTS } from "@/lib/mock-data";
 import { Users, Plus, X } from "lucide-react";
+import { kvGet, kvSet } from "@/lib/storage";
 
 export default function AddStudentModal({
   classId,
@@ -42,14 +43,13 @@ export default function AddStudentModal({
     setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   }
 
-  function handleAdd() {
+  async function handleAdd() {
     const newIds = [...selected];
     if (newIds.length === 0) return;
     try {
-      const raw = localStorage.getItem(`tutorhub_class_extra_students_${classId}`);
-      const existing: string[] = raw ? JSON.parse(raw) : [];
+      const existing = await kvGet<string[]>(`tutorhub_class_extra_students_${classId}`, []);
       const updated = [...new Set([...existing, ...newIds])];
-      localStorage.setItem(`tutorhub_class_extra_students_${classId}`, JSON.stringify(updated));
+      await kvSet(`tutorhub_class_extra_students_${classId}`, updated);
     } catch {}
     onAdd(newIds);
     onClose();

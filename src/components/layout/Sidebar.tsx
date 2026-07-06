@@ -13,6 +13,7 @@ import {
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { UserRole } from "@/types";
 import { MOCK_CLASSES, MOCK_HOMEWORK, MOCK_NOTIFICATIONS } from "@/lib/mock-data";
+import { kvGet } from "@/lib/storage";
 
 // ── Nav config (no static badges) ────────────────────────────────────────────
 interface NavItem {
@@ -91,7 +92,7 @@ function currentStudentId(): string {
   return "s1";
 }
 
-function computeBadges(role: UserRole): Record<string, number> {
+async function computeBadges(role: UserRole): Promise<Record<string, number>> {
   const result: Record<string, number> = {};
 
   if (role === "student") {
@@ -102,7 +103,7 @@ function computeBadges(role: UserRole): Record<string, number> {
       .map(c => c.id);
     const myHw = MOCK_HOMEWORK.filter(h => myClassIds.includes(h.class_id));
     const subs: { homework_id: string; student_id: string }[] =
-      JSON.parse(ls("tutorhub_submissions") ?? "[]");
+      await kvGet("tutorhub_submissions", []);
     const submittedIds = new Set(
       subs.filter(s => s.student_id === sid).map(s => s.homework_id)
     );
@@ -170,7 +171,9 @@ export default function Sidebar({ role, userName, isOpen = true, onClose }: Side
 
   // Recompute on every navigation so badge clears when user visits the page
   useEffect(() => {
-    setBadges(computeBadges(role));
+    (async () => {
+      setBadges(await computeBadges(role));
+    })();
   }, [role, pathname]);
 
   const handleLogout = async () => {

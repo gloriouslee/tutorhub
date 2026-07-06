@@ -44,7 +44,7 @@ export default function HomeworkModal({
           file_size: uploaded.size,
           file_type: uploaded.file_type,
         };
-        saveHomeworkAttachment(attachment);
+        await saveHomeworkAttachment(attachment);
       } catch (e: any) {
         setUploadError(e.message ?? "Lỗi tải lên file");
         setUploading(false);

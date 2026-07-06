@@ -16,6 +16,7 @@ import {
   getStudentComments, saveStudentComment,
   getStudentPackages, type StudentPackage,
   getExamScoresByStudent, saveExamScore, deleteExamScore, type StoredExamScore,
+  kvGet,
 } from "@/lib/storage";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
@@ -194,10 +195,9 @@ function StudentDetailPanel({
   const classNameMap = Object.fromEntries(studentClasses.map(c => [c.id, c.class_name]));
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem("tutorhub_submissions");
-      if (raw) setLsSubmissions(JSON.parse(raw));
-    } catch {}
+    kvGet<Submission[] | null>("tutorhub_submissions", null)
+      .then(subs => { if (subs) setLsSubmissions(subs); })
+      .catch(() => {});
     try {
       const val = localStorage.getItem(`tutorhub_gpa_target_${student.id}`);
       if (val) setGpaTarget(parseFloat(val));
@@ -825,13 +825,15 @@ export default function TeacherStudentsPage() {
   );
 
   useEffect(() => {
-    const map: Record<string, Record<string, StudentPackage>> = {};
-    for (const cls of myClasses) map[cls.id] = getStudentPackages(cls.id);
-    setPackagesMap(map);
-    try {
-      const raw = localStorage.getItem("tutorhub_teacher_attendance");
-      if (raw) setSavedAttendance(JSON.parse(raw));
-    } catch {}
+    async function loadPackages() {
+      const map: Record<string, Record<string, StudentPackage>> = {};
+      for (const cls of myClasses) map[cls.id] = await getStudentPackages(cls.id);
+      setPackagesMap(map);
+    }
+    loadPackages();
+    kvGet<SavedAttendanceRecord[] | null>("tutorhub_teacher_attendance", null)
+      .then(recs => { if (recs) setSavedAttendance(recs); })
+      .catch(() => {});
   }, [myClasses]);
 
   const allStudentIds = useMemo(

@@ -12,6 +12,7 @@ import { MOCK_CLASSES, MOCK_STUDENTS, MOCK_HOMEWORK, MOCK_ATTENDANCE } from "@/l
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import { toLocalDateKey } from "@/lib/utils";
+import { kvGet } from "@/lib/storage";
 
 const TEACHER_ID = "t1";
 const TEACHER_NAME = "Thầy Hùng Toán";
@@ -41,18 +42,16 @@ function getTodaySessions(classes: typeof MOCK_CLASSES) {
 }
 
 // Load extra classes from localStorage
-function loadExtraClasses() {
+async function loadExtraClasses() {
   try {
-    const raw = localStorage.getItem("tutorhub_teacher_classes");
-    return raw ? JSON.parse(raw) : [];
+    return await kvGet<any[]>("tutorhub_teacher_classes", []);
   } catch { return []; }
 }
 
 // Load homework from localStorage (seeded from mock if empty)
-function loadHomework(classIds: string[]) {
+async function loadHomework(classIds: string[]) {
   try {
-    const raw = localStorage.getItem("tutorhub_teacher_homework");
-    const all = raw ? JSON.parse(raw) : [];
+    const all = await kvGet<any[]>("tutorhub_teacher_homework", []);
     const forClasses = all.filter((h: any) => classIds.includes(h.class_id));
     if (forClasses.length > 0) return forClasses;
   } catch {}
@@ -76,8 +75,7 @@ export default function TeacherDashboard() {
   const baseMockClasses = MOCK_CLASSES.filter(c => c.tutor_id === TEACHER_ID);
 
   useEffect(() => {
-    const extra = loadExtraClasses();
-    setExtraClasses(extra);
+    loadExtraClasses().then(setExtraClasses);
   }, []);
 
   const allClasses = [...baseMockClasses, ...extraClasses];
@@ -85,7 +83,7 @@ export default function TeacherDashboard() {
 
   useEffect(() => {
     if (classIds.length === 0) return;
-    setHomeworks(loadHomework(classIds));
+    loadHomework(classIds).then(setHomeworks);
   }, [classIds.join(",")]);
 
   // All unique student IDs across teacher's classes

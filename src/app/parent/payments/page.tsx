@@ -28,7 +28,7 @@ export default function ParentPaymentsPage() {
   const [receiptFile,  setReceiptFile]  = useState<File | null>(null);
   const [submitting,   setSubmitting]   = useState(false);
 
-  const load = () => setInvoices(getInvoices().filter(inv => childIds.includes(inv.child_id)));
+  const load = async () => setInvoices((await getInvoices()).filter(inv => childIds.includes(inv.child_id)));
   useEffect(() => { load(); }, []);
 
   const getChildName = (id: string) => children.find(c => c.id === id)?.full_name ?? "Học viên";
@@ -67,8 +67,8 @@ export default function ParentPaymentsPage() {
     if (!modalInvoice || !receiptFile) return;
     setSubmitting(true);
     await new Promise(r => setTimeout(r, 600));
-    updateInvoiceStatus(modalInvoice.id, "pending_verification", "parent");
-    load();
+    await updateInvoiceStatus(modalInvoice.id, "pending_verification", "parent");
+    await load();
     setSubmitting(false);
     closeModal();
   };

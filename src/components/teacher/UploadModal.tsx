@@ -52,7 +52,7 @@ export default function UploadModal({
     try {
       if (type === "material" && file) {
         const uploaded = await uploadClassFile(file, classId, "materials");
-        const mat = saveClassMaterial({
+        const mat = await saveClassMaterial({
           class_id: classId,
           title: title.trim(),
           description: description.trim() || undefined,
@@ -69,7 +69,7 @@ export default function UploadModal({
       // lecture type: same flow (saved as material with type)
       if (type === "lecture" && file) {
         const uploaded = await uploadClassFile(file, classId, "materials");
-        const mat = saveClassMaterial({
+        const mat = await saveClassMaterial({
           class_id: classId,
           title: title.trim(),
           description: description.trim() || undefined,

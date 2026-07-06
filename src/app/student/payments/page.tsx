@@ -63,7 +63,7 @@ function PaymentsContent() {
   const [submitting,     setSubmitting]      = useState(false);
 
   useEffect(() => {
-    setInvoices(getInvoices().filter(inv => inv.child_id === STUDENT.id));
+    getInvoices().then(list => setInvoices(list.filter(inv => inv.child_id === STUDENT.id)));
     // Filter by this student only
     getTransactions().then(txs => setPkgTransactions(txs.filter(t => t.student_id === STUDENT.id)));
     if (pkgParam && PACKAGES[pkgParam]) {
@@ -84,8 +84,9 @@ function PaymentsContent() {
     await new Promise(r => setTimeout(r, 600));
 
     if (modalTarget.kind === "invoice") {
-      updateInvoiceStatus(modalTarget.invoice.id, "pending_verification", "student");
-      setInvoices(getInvoices().filter(inv => inv.child_id === STUDENT.id));
+      await updateInvoiceStatus(modalTarget.invoice.id, "pending_verification", "student");
+      const list = await getInvoices();
+      setInvoices(list.filter(inv => inv.child_id === STUDENT.id));
     } else {
       await createTransaction({
         pkg_id:        modalTarget.pkgId,

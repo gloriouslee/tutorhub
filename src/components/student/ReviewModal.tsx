@@ -19,9 +19,9 @@ export default function ReviewModal({
   const [hovered, setHovered] = useState(0);
   const [comment, setComment] = useState(existingReview?.comment ?? "");
 
-  function handleSubmit() {
+  async function handleSubmit() {
     if (!rating) return;
-    submitCourseReview({
+    await submitCourseReview({
       course_id: courseId, student_id: studentId, student_name: studentName,
       rating, comment: comment.trim() || undefined,
       created_at: new Date().toISOString(),

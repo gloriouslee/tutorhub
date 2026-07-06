@@ -8,6 +8,7 @@ import { AttendanceBadge, LearningModeBadge, SectionHeader } from "@/components/
 import { MOCK_STUDENTS, MOCK_CLASSES, MOCK_ATTENDANCE } from "@/lib/mock-data";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { formatDate, toLocalDateKey } from "@/lib/utils";
+import { kvGet, kvSet } from "@/lib/storage";
 import {
   CheckSquare, Users, UserCheck, UserX, Clock,
   CalendarDays, ChevronLeft, ChevronRight, Save,
@@ -29,11 +30,11 @@ interface SavedRecord {
   saved_at: string;
 }
 
-function loadSaved(): SavedRecord[] {
-  try { return JSON.parse(localStorage.getItem(LS_KEY) ?? "[]"); } catch { return []; }
+async function loadSaved(): Promise<SavedRecord[]> {
+  try { return await kvGet<SavedRecord[]>(LS_KEY, []); } catch { return []; }
 }
-function persistSaved(list: SavedRecord[]) {
-  localStorage.setItem(LS_KEY, JSON.stringify(list));
+async function persistSaved(list: SavedRecord[]) {
+  await kvSet(LS_KEY, list);
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -55,14 +56,14 @@ interface ExtraClass {
   color: string;
 }
 
-function loadExtraClasses(): ExtraClass[] {
-  try { return JSON.parse(localStorage.getItem("tutorhub_teacher_classes") ?? "[]"); } catch { return []; }
+async function loadExtraClasses(): Promise<ExtraClass[]> {
+  try { return await kvGet<ExtraClass[]>("tutorhub_teacher_classes", []); } catch { return []; }
 }
 
 export default function TeacherAttendancePage() {
   const [extraClasses, setExtraClasses] = useState<ExtraClass[]>([]);
   useEffect(() => {
-    setExtraClasses(loadExtraClasses().filter(c => c.tutor_id === TEACHER_ID));
+    loadExtraClasses().then(list => setExtraClasses(list.filter(c => c.tutor_id === TEACHER_ID)));
   }, []);
 
   const teacherClasses = useMemo(
@@ -83,7 +84,7 @@ export default function TeacherAttendancePage() {
 
   // Load saved records from localStorage
   useEffect(() => {
-    setSavedRecords(loadSaved());
+    loadSaved().then(setSavedRecords);
   }, []);
 
   // When class or date changes, pre-fill marks from saved/mock data
@@ -143,9 +144,9 @@ export default function TeacherAttendancePage() {
     setMarks(prev => ({ ...prev, [studentId]: status }));
   }
 
-  function handleSave() {
+  async function handleSave() {
     if (!selectedClass) return;
-    const existing = loadSaved().filter(
+    const existing = (await loadSaved()).filter(
       r => !(r.class_id === selectedClass.id && r.date === date)
     );
     const newEntries: SavedRecord[] = Object.entries(marks).map(([student_id, status]) => ({
@@ -153,7 +154,7 @@ export default function TeacherAttendancePage() {
       saved_at: new Date().toISOString(),
     }));
     const updated = [...newEntries, ...existing];
-    persistSaved(updated);
+    await persistSaved(updated);
     setSavedRecords(updated);
     setSaveFlash(true);
     setTimeout(() => setSaveFlash(false), 2000);

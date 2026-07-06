@@ -168,8 +168,8 @@ function HistoryPanel({
 }) {
   const sorted = [...data.payments].sort((a, b) => b.paid_at.localeCompare(a.paid_at));
 
-  function handleDelete(paymentId: string) {
-    deleteTuitionPayment(classId, studentId, paymentId);
+  async function handleDelete(paymentId: string) {
+    await deleteTuitionPayment(classId, studentId, paymentId);
     onUpdate();
   }
 
@@ -248,28 +248,28 @@ function StudentRow({
   const [showPay,   setShowPay]   = useState(false);
   const [showHist,  setShowHist]  = useState(false);
 
-  function saveFee() {
+  async function saveFee() {
     const v = parseInt(feeInput.replace(/\D/g, ""), 10) || 0;
-    const cur = getClassTuition(classId);
+    const cur = await getClassTuition(classId);
     cur.students[student.id] = { ...sData, custom_fee: v };
-    saveClassTuition(classId, cur);
+    await saveClassTuition(classId, cur);
     setEditFee(false);
     onUpdate();
   }
 
-  function clearCustomFee() {
-    const cur = getClassTuition(classId);
+  async function clearCustomFee() {
+    const cur = await getClassTuition(classId);
     const existing = cur.students[student.id] ?? { payments: [] };
     delete existing.custom_fee;
     cur.students[student.id] = existing;
-    saveClassTuition(classId, cur);
+    await saveClassTuition(classId, cur);
     onUpdate();
   }
 
-  function saveNote() {
-    const cur = getClassTuition(classId);
+  async function saveNote() {
+    const cur = await getClassTuition(classId);
     cur.students[student.id] = { ...sData, notes: noteInput.trim() || undefined };
-    saveClassTuition(classId, cur);
+    await saveClassTuition(classId, cur);
     setEditNote(false);
     onUpdate();
   }
@@ -400,7 +400,7 @@ function StudentRow({
         <PaymentModal
           studentName={name}
           defaultAmount={fee}
-          onSave={p => { recordTuitionPayment(classId, student.id, p); onUpdate(); }}
+          onSave={async p => { await recordTuitionPayment(classId, student.id, p); onUpdate(); }}
           onClose={() => setShowPay(false)}
         />
       )}
@@ -430,14 +430,14 @@ function ConfigPanel({ classId, config, onUpdate }: {
     offline:  fees.offline.toString(),
   });
 
-  function saveAll() {
-    const cur = getClassTuition(classId);
+  async function saveAll() {
+    const cur = await getClassTuition(classId);
     cur.package_fees = {
       online:   parseInt(inputs.online.replace(/\D/g, ""), 10) || 0,
       advanced: parseInt(inputs.advanced.replace(/\D/g, ""), 10) || 0,
       offline:  parseInt(inputs.offline.replace(/\D/g, ""), 10) || 0,
     };
-    saveClassTuition(classId, cur);
+    await saveClassTuition(classId, cur);
     onUpdate();
   }
 
@@ -484,7 +484,7 @@ export default function TuitionTab({ classId, students }: Props) {
   const [period,     setPeriod]     = useState(currentPeriod());
   const [showConfig, setShowConfig] = useState(false);
 
-  const reload = useCallback(() => setConfig(getClassTuition(classId)), [classId]);
+  const reload = useCallback(() => { getClassTuition(classId).then(setConfig); }, [classId]);
 
   useEffect(() => { reload(); }, [reload]);
 

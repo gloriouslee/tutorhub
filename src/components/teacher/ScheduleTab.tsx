@@ -44,10 +44,10 @@ function ScheduleEditor({ classId, className, initialSchedule }: {
   const handleSave = async () => {
     setSaveState("saving");
     try {
-      saveClassScheduleOverride(classId, rows);
+      await saveClassScheduleOverride(classId, rows);
 
       const scheduleText = rows.map(r => `${r.day} ${r.start_time}–${r.end_time}`).join(", ");
-      pushScheduleNotification({
+      await pushScheduleNotification({
         class_id: classId,
         class_name: className,
         message: notifMessage.trim() || `Lịch học lớp ${className} đã được cập nhật: ${scheduleText}.`,
@@ -307,7 +307,7 @@ export default function ScheduleTab({
 
           {onlineLink && (
             <button
-              onClick={() => { setOnlineLinkDraft(""); saveOnlineLink(classId, ""); setOnlineLink(""); }}
+              onClick={async () => { setOnlineLinkDraft(""); await saveOnlineLink(classId, ""); setOnlineLink(""); }}
               className="text-xs text-red-500 hover:text-red-700 transition-colors"
             >
               Xoá link

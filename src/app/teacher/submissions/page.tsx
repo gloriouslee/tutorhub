@@ -17,6 +17,7 @@ import {
   updateGrade as supabaseUpdateGrade,
   type SubmissionRecord,
 } from "@/lib/supabase/submissions";
+import { kvGet, kvSet } from "@/lib/storage";
 
 // ── Data types ────────────────────────────────────────────────────────────────
 // Use SubmissionRecord from Supabase lib; extend with student_name for display
@@ -34,15 +35,15 @@ const DEFAULT_SUBMISSIONS: Submission[] = [
   { id: "sub6", homework_id: "h4", student_id: "s4", student_name: "Phạm Thảo My",     status: "submitted", submitted_at: "2026-06-30T09:00:00Z", file_name: "phamthaomy_tracnghiem.pdf" },
 ];
 
-function loadSubmissions(): Submission[] {
+async function loadSubmissions(): Promise<Submission[]> {
   try {
-    const raw = localStorage.getItem(SUBMISSION_KEY);
-    return raw ? JSON.parse(raw) : DEFAULT_SUBMISSIONS;
+    const raw = await kvGet<Submission[] | null>(SUBMISSION_KEY, null);
+    return raw ?? DEFAULT_SUBMISSIONS;
   } catch { return DEFAULT_SUBMISSIONS; }
 }
 
-function saveSubmissions(subs: Submission[]) {
-  localStorage.setItem(SUBMISSION_KEY, JSON.stringify(subs));
+async function saveSubmissions(subs: Submission[]) {
+  await kvSet(SUBMISSION_KEY, subs);
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -61,9 +62,9 @@ interface HomeworkItem {
 const MOCK_MY_HOMEWORK: HomeworkItem[] = MOCK_HOMEWORK.filter(h => myClassIds.includes(h.class_id));
 
 // Merge mock homework with teacher-created homework from localStorage
-function loadMyHomework(): HomeworkItem[] {
+async function loadMyHomework(): Promise<HomeworkItem[]> {
   let stored: HomeworkItem[] = [];
-  try { stored = JSON.parse(localStorage.getItem(HW_KEY) ?? "[]"); } catch {}
+  try { stored = await kvGet<HomeworkItem[]>(HW_KEY, []); } catch {}
   const storedIds = new Set(stored.map(h => h.id));
   return [...stored, ...MOCK_MY_HOMEWORK.filter(h => !storedIds.has(h.id))];
 }
@@ -102,10 +103,11 @@ function TeacherSubmissionsPageInner() {
   const [tfDragOver,    setTfDragOver]    = useState(false);
 
   useEffect(() => {
-    const hwList = loadMyHomework();
-    setMyHomework(hwList);
-    // Try Supabase first, fall back to localStorage seed
-    getSubmissionsByHomeworks(hwList.map(h => h.id)).then(remote => {
+    (async () => {
+      const hwList = await loadMyHomework();
+      setMyHomework(hwList);
+      // Try Supabase first, fall back to localStorage seed
+      const remote = await getSubmissionsByHomeworks(hwList.map(h => h.id));
       if (remote.length > 0) {
         // Enrich with student_name from MOCK_STUDENTS for display
         const enriched = remote.map(s => ({
@@ -116,9 +118,9 @@ function TeacherSubmissionsPageInner() {
         })) as Submission[];
         setSubmissions(enriched);
       } else {
-        setSubmissions(loadSubmissions());
+        setSubmissions(await loadSubmissions());
       }
-    });
+    })();
   }, []);
 
   // Filtered list
@@ -178,7 +180,7 @@ function TeacherSubmissionsPageInner() {
         : s
     );
     setSubmissions(updated);
-    saveSubmissions(updated);
+    await saveSubmissions(updated);
     setGrading(null);
     setTeacherFile(null);
 

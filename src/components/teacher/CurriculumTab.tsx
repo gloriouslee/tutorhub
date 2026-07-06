@@ -355,13 +355,33 @@ export default function CurriculumTab({ classId, schedule }: { classId: string; 
   const [detailStudent, setDetailStudent] = useState<StoredExamResult | null>(null);
 
   useEffect(() => {
-    const data = getCurriculum(classId);
-    setChapters(data);
-    // Expand all chapters and sessions by default
-    const ids = new Set<string>();
-    data.forEach(ch => { ids.add(ch.id); ch.sessions.forEach(s => ids.add(s.id)); });
-    setExpanded(ids);
+    (async () => {
+      const data = await getCurriculum(classId);
+      setChapters(data);
+      // Expand all chapters and sessions by default
+      const ids = new Set<string>();
+      data.forEach(ch => { ids.add(ch.id); ch.sessions.forEach(s => ids.add(s.id)); });
+      setExpanded(ids);
+    })();
   }, [classId]);
+
+  const [examResultsMap, setExamResultsMap] = useState<Record<string, StoredExamResult[]>>({});
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const map: Record<string, StoredExamResult[]> = {};
+      for (const ch of chapters) {
+        for (const s of ch.sessions) {
+          for (const l of s.lessons) {
+            if (l.type === "exam") map[l.id] = await getAllExamResults(classId, l.id);
+          }
+        }
+      }
+      if (!cancelled) setExamResultsMap(map);
+    })();
+    return () => { cancelled = true; };
+  }, [chapters, classId]);
 
   function persist(next: CurriculumChapter[]) {
     setChapters(next);
@@ -620,7 +640,7 @@ export default function CurriculumTab({ classId, schedule }: { classId: string; 
                             const meta = LESSON_META[lesson.type];
                             const isExam = lesson.type === "exam";
                             const examStatus = lesson.exam_status ?? "draft";
-                            const examResults = isExam ? getAllExamResults(classId, lesson.id) : [];
+                            const examResults = isExam ? (examResultsMap[lesson.id] ?? []) : [];
 
                             return (
                               <div key={lesson.id} className="space-y-0">

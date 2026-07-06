@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SectionHeader } from "@/components/shared";
 import { MOCK_HOMEWORK, MOCK_CLASSES } from "@/lib/mock-data";
+import { kvGet, kvSet } from "@/lib/storage";
 import { FileText, Plus, Calendar, CheckCircle2, Clock, X, Trash2, Edit2, ArrowRight, BookOpen } from "lucide-react";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -45,14 +46,14 @@ interface ExtraClass {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-function loadExtraClasses(): ExtraClass[] {
-  try { return JSON.parse(localStorage.getItem(CLS_KEY) ?? "[]"); } catch { return []; }
+async function loadExtraClasses(): Promise<ExtraClass[]> {
+  try { return await kvGet<ExtraClass[]>(CLS_KEY, []); } catch { return []; }
 }
 
-function loadHw(seedIds: string[]): Homework[] {
+async function loadHw(seedIds: string[]): Promise<Homework[]> {
   try {
-    const raw = localStorage.getItem(HW_KEY);
-    if (raw) return JSON.parse(raw);
+    const raw = await kvGet<Homework[] | null>(HW_KEY, null);
+    if (raw) return raw;
     // First visit: seed from mock data filtered to teacher's classes
     return MOCK_HOMEWORK
       .filter(h => seedIds.includes(h.class_id))
@@ -60,12 +61,12 @@ function loadHw(seedIds: string[]): Homework[] {
   } catch { return []; }
 }
 
-function saveHw(hw: Homework[]) {
-  localStorage.setItem(HW_KEY, JSON.stringify(hw));
+async function saveHw(hw: Homework[]) {
+  await kvSet(HW_KEY, hw);
 }
 
-function loadSubs(): Submission[] {
-  try { return JSON.parse(localStorage.getItem(SUB_KEY) ?? "[]"); } catch { return []; }
+async function loadSubs(): Promise<Submission[]> {
+  try { return await kvGet<Submission[]>(SUB_KEY, []); } catch { return []; }
 }
 
 function isOverdue(dueDate: string): boolean {
@@ -104,19 +105,21 @@ export default function TeacherHomeworkPage() {
   const [fErr,   setFErr]   = useState("");
 
   useEffect(() => {
-    // Build full class list: MOCK_CLASSES (filtered to teacher) + localStorage extra classes
-    const baseClasses = MOCK_CLASSES.filter(c => c.tutor_id === TEACHER_ID);
-    const extra       = loadExtraClasses().filter(c => c.tutor_id === TEACHER_ID);
-    const all = [
-      ...baseClasses.map(c => ({ id: c.id, class_name: c.class_name, student_ids: c.student_ids })),
-      ...extra.map(c => ({ id: c.id, class_name: c.class_name, student_ids: c.student_ids })),
-    ];
-    setMyClasses(all);
-    setFClass(all[0]?.id ?? "");
+    (async () => {
+      // Build full class list: MOCK_CLASSES (filtered to teacher) + localStorage extra classes
+      const baseClasses = MOCK_CLASSES.filter(c => c.tutor_id === TEACHER_ID);
+      const extra       = (await loadExtraClasses()).filter(c => c.tutor_id === TEACHER_ID);
+      const all = [
+        ...baseClasses.map(c => ({ id: c.id, class_name: c.class_name, student_ids: c.student_ids })),
+        ...extra.map(c => ({ id: c.id, class_name: c.class_name, student_ids: c.student_ids })),
+      ];
+      setMyClasses(all);
+      setFClass(all[0]?.id ?? "");
 
-    const allIds = all.map(c => c.id);
-    setHomeworks(loadHw(allIds));
-    setSubmissions(loadSubs());
+      const allIds = all.map(c => c.id);
+      setHomeworks(await loadHw(allIds));
+      setSubmissions(await loadSubs());
+    })();
   }, []);
 
   function openCreate() {

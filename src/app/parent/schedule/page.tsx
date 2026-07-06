@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { SectionHeader } from "@/components/shared";
 import { MOCK_STUDENTS, MOCK_CLASSES } from "@/lib/mock-data";
 import { Calendar, Clock, MapPin, Video, ChevronLeft, ChevronRight, Filter, StickyNote, ChevronDown, BookOpen } from "lucide-react";
-import { getCurriculum } from "@/lib/storage";
+import { getCurriculum, kvGet } from "@/lib/storage";
 import { toLocalDateKey } from "@/lib/utils";
 import type { CurriculumSession } from "@/lib/storage";
 
@@ -38,20 +38,20 @@ export default function ParentSchedulePage() {
   const [currByClass, setCurrByClass] = useState<Record<string, CurrMap>>({});
 
   useEffect(() => {
-    const nb: Record<string, NoteMap> = {};
-    const cb: Record<string, CurrMap> = {};
-    MOCK_CLASSES.forEach(cls => {
-      try {
-        const raw = localStorage.getItem(`tutorhub_session_notes_${cls.id}`);
-        if (raw) nb[cls.id] = JSON.parse(raw);
-      } catch {}
-      const chapters = getCurriculum(cls.id);
-      const byDate: CurrMap = {};
-      chapters.forEach(ch => ch.sessions.forEach(s => { if (s.date) byDate[s.date] = s; }));
-      if (Object.keys(byDate).length) cb[cls.id] = byDate;
-    });
-    setNotesByClass(nb);
-    setCurrByClass(cb);
+    (async () => {
+      const nb: Record<string, NoteMap> = {};
+      const cb: Record<string, CurrMap> = {};
+      for (const cls of MOCK_CLASSES) {
+        const notes = await kvGet<NoteMap>(`tutorhub_session_notes_${cls.id}`, {});
+        if (Object.keys(notes).length) nb[cls.id] = notes;
+        const chapters = await getCurriculum(cls.id);
+        const byDate: CurrMap = {};
+        chapters.forEach(ch => ch.sessions.forEach(s => { if (s.date) byDate[s.date] = s; }));
+        if (Object.keys(byDate).length) cb[cls.id] = byDate;
+      }
+      setNotesByClass(nb);
+      setCurrByClass(cb);
+    })();
   }, []);
 
   const children = MOCK_STUDENTS.filter(s => s.parent_id === "p1");

@@ -64,33 +64,35 @@ export default function StudentScoresPage() {
     getExamScoresByStudent(studentId).then(setStoredScores);
 
     // Merge results from exams the student actually took (tutorhub_exam_result_* keys)
-    const prefix = "tutorhub_exam_result_";
-    const suffix = `_${studentId}`;
-    const found: StoredExamScore[] = [];
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (!key || !key.startsWith(prefix) || !key.endsWith(suffix)) continue;
-      try {
-        const rec = JSON.parse(localStorage.getItem(key) || "");
-        const middle   = key.slice(prefix.length, key.length - suffix.length);
-        const classId  = middle.split("_")[0];
-        const lessonId = middle.slice(classId.length + 1);
-        const lesson = getCurriculum(classId)
-          .flatMap(ch => ch.sessions)
-          .flatMap(sess => sess.lessons)
-          .find(l => l.id === lessonId);
-        found.push({
-          id:         key,
-          student_id: studentId,
-          class_id:   classId,
-          exam_name:  lesson?.title ?? "Bài kiểm tra trực tuyến",
-          score:      rec.score,
-          max_score:  rec.total,
-          exam_date:  rec.submitted_at,
-        });
-      } catch { /* ignore malformed entries */ }
-    }
-    setTakenExams(found);
+    (async () => {
+      const prefix = "tutorhub_exam_result_";
+      const suffix = `_${studentId}`;
+      const found: StoredExamScore[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (!key || !key.startsWith(prefix) || !key.endsWith(suffix)) continue;
+        try {
+          const rec = JSON.parse(localStorage.getItem(key) || "");
+          const middle   = key.slice(prefix.length, key.length - suffix.length);
+          const classId  = middle.split("_")[0];
+          const lessonId = middle.slice(classId.length + 1);
+          const lesson = (await getCurriculum(classId))
+            .flatMap(ch => ch.sessions)
+            .flatMap(sess => sess.lessons)
+            .find(l => l.id === lessonId);
+          found.push({
+            id:         key,
+            student_id: studentId,
+            class_id:   classId,
+            exam_name:  lesson?.title ?? "Bài kiểm tra trực tuyến",
+            score:      rec.score,
+            max_score:  rec.total,
+            exam_date:  rec.submitted_at,
+          });
+        } catch { /* ignore malformed entries */ }
+      }
+      setTakenExams(found);
+    })();
   }, [studentId, gpaTarget_KEY]);
 
   function startEdit() {

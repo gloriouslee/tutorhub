@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Upload, X, Save, CheckCircle2 } from "lucide-react";
 import { formatDate } from "./classDetail.types";
+import { kvGet, kvSet } from "@/lib/storage";
 
 export default function SessionNotesPanel({
   classId,
@@ -19,21 +20,19 @@ export default function SessionNotesPanel({
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(storageKey);
-      if (raw) {
-        const notes: Record<string, string> = JSON.parse(raw);
+    (async () => {
+      try {
+        const notes = await kvGet<Record<string, string>>(storageKey, {});
         setNote(notes[dateStr] ?? "");
-      }
-    } catch {}
+      } catch {}
+    })();
   }, [storageKey, dateStr]);
 
-  const handleSave = () => {
+  const handleSave = async () => {
     try {
-      const raw = localStorage.getItem(storageKey);
-      const notes: Record<string, string> = raw ? JSON.parse(raw) : {};
+      const notes = await kvGet<Record<string, string>>(storageKey, {});
       notes[dateStr] = note;
-      localStorage.setItem(storageKey, JSON.stringify(notes));
+      await kvSet(storageKey, notes);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch {}

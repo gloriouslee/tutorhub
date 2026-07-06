@@ -18,6 +18,7 @@ import {
   getCurriculum, type CurriculumSession as CurriculumSessionData,
   getStudentPackages, saveStudentPackages, type StudentPackage,
   getClassMaterials, type StoredClassMaterial,
+  kvGet, kvSet,
 } from "@/lib/storage";
 import { toLocalDateKey } from "@/lib/utils";
 import { ClassSchedule } from "@/types";
@@ -124,7 +125,7 @@ export default function TeacherClassDetailPage() {
   // Uploaded materials (localStorage) merged with mock
   const [uploadedMaterials, setUploadedMaterials] = useState<StoredClassMaterial[]>([]);
   useEffect(() => {
-    setUploadedMaterials(getClassMaterials(classId));
+    getClassMaterials(classId).then(setUploadedMaterials);
   }, [classId]);
 
   // Student packages per class (persisted to localStorage)
@@ -134,91 +135,89 @@ export default function TeacherClassDetailPage() {
 
   useEffect(() => {
     if (!cls) return;
-    const override = getClassScheduleOverride(classId);
-    setCurrentSchedule(override ?? cls.schedule);
-    const saved = getOnlineLink(classId) ?? cls.zoom_link ?? "";
-    setOnlineLink(saved);
-    setOnlineLinkDraft(saved);
+    async function load() {
+      const override = await getClassScheduleOverride(classId);
+      setCurrentSchedule(override ?? cls!.schedule);
+      const saved = (await getOnlineLink(classId)) ?? cls!.zoom_link ?? "";
+      setOnlineLink(saved);
+      setOnlineLinkDraft(saved);
+    }
+    load();
   }, [classId, cls]);
 
   // Load session notes from localStorage
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(`tutorhub_session_notes_${classId}`);
-      if (raw) setSessionNotes(JSON.parse(raw));
-    } catch {}
+    kvGet<Record<string, string> | null>(`tutorhub_session_notes_${classId}`, null)
+      .then(notes => { if (notes) setSessionNotes(notes); })
+      .catch(() => {});
   }, [classId]);
 
   // Build curriculum date-index
   useEffect(() => {
-    const chapters = getCurriculum(classId);
-    const map: Record<string, CurriculumSessionData> = {};
-    for (const ch of chapters) {
-      for (const s of ch.sessions) {
-        if (s.date) map[s.date] = s;
+    getCurriculum(classId).then(chapters => {
+      const map: Record<string, CurriculumSessionData> = {};
+      for (const ch of chapters) {
+        for (const s of ch.sessions) {
+          if (s.date) map[s.date] = s;
+        }
       }
-    }
-    setCurriculumByDate(map);
+      setCurriculumByDate(map);
+    });
   }, [classId, activeTab]);
 
   // Load homework from localStorage
   useEffect(() => {
     if (!cls) return;
-    try {
-      const raw = localStorage.getItem("tutorhub_teacher_homework");
-      const all: Homework[] = raw ? JSON.parse(raw) : [];
-      const forClass = all.filter(h => h.class_id === classId);
-      if (forClass.length === 0) {
-        // Seed from mock
-        const mock = (MOCK_HOMEWORK as any[])
-          .filter((h: any) => h.class_id === classId)
-          .map((h: any): Homework => ({
-            id: h.id,
-            class_id: h.class_id,
-            title: h.title,
-            description: h.description,
-            due_date: h.due_date,
-            created_at: h.created_at,
-          }));
-        setHomeworks(mock);
-      } else {
-        setHomeworks(forClass);
+    (async () => {
+      try {
+        const all = await kvGet<Homework[]>("tutorhub_teacher_homework", []);
+        const forClass = all.filter(h => h.class_id === classId);
+        if (forClass.length === 0) {
+          // Seed from mock
+          const mock = (MOCK_HOMEWORK as any[])
+            .filter((h: any) => h.class_id === classId)
+            .map((h: any): Homework => ({
+              id: h.id,
+              class_id: h.class_id,
+              title: h.title,
+              description: h.description,
+              due_date: h.due_date,
+              created_at: h.created_at,
+            }));
+          setHomeworks(mock);
+        } else {
+          setHomeworks(forClass);
+        }
+      } catch {
+        setHomeworks([]);
       }
-    } catch {
-      setHomeworks([]);
-    }
 
-    try {
-      const rawSub = localStorage.getItem("tutorhub_submissions");
-      setSubmissions(rawSub ? JSON.parse(rawSub) : (MOCK_SUBMISSIONS as any[]));
-    } catch {
-      setSubmissions(MOCK_SUBMISSIONS as any[]);
-    }
+      try {
+        const rawSub = await kvGet<Submission[] | null>("tutorhub_submissions", null);
+        setSubmissions(rawSub ?? (MOCK_SUBMISSIONS as any[]));
+      } catch {
+        setSubmissions(MOCK_SUBMISSIONS as any[]);
+      }
+    })();
   }, [classId, cls]);
 
   // Load attendance from localStorage
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem("tutorhub_teacher_attendance");
-      setSavedAttendanceRecords(raw ? JSON.parse(raw) : []);
-    } catch {
-      setSavedAttendanceRecords([]);
-    }
+    kvGet<SavedAttendanceRecord[]>("tutorhub_teacher_attendance", [])
+      .then(setSavedAttendanceRecords)
+      .catch(() => setSavedAttendanceRecords([]));
   }, []);
 
   // Load extra students from localStorage
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(`tutorhub_class_extra_students_${classId}`);
-      setExtraStudentIds(raw ? JSON.parse(raw) : []);
-    } catch {
-      setExtraStudentIds([]);
-    }
+    kvGet<string[]>(`tutorhub_class_extra_students_${classId}`, [])
+      .then(setExtraStudentIds)
+      .catch(() => setExtraStudentIds([]));
   }, [classId]);
 
   // Load student packages from localStorage
   useEffect(() => {
-    setStudentPackages(getStudentPackages(classId));
+    getStudentPackages(classId).then(setStudentPackages);
   }, [classId]);
 
   // Load student comments (must run before any early return so hook order is stable)
@@ -239,19 +238,18 @@ export default function TeacherClassDetailPage() {
     loadComments();
   }, [cls, extraStudentIds, approvedEnrollments]);
 
-  function handleSaveOnlineLink() {
-    saveOnlineLink(classId, onlineLinkDraft);
+  async function handleSaveOnlineLink() {
+    await saveOnlineLink(classId, onlineLinkDraft);
     setOnlineLink(onlineLinkDraft);
     setLinkSaved(true);
     setTimeout(() => setLinkSaved(false), 3000);
   }
 
-  function persistHomeworks(updated: Homework[]) {
+  async function persistHomeworks(updated: Homework[]) {
     try {
-      const raw = localStorage.getItem("tutorhub_teacher_homework");
-      const all: Homework[] = raw ? JSON.parse(raw) : [];
+      const all = await kvGet<Homework[]>("tutorhub_teacher_homework", []);
       const others = all.filter(h => h.class_id !== classId);
-      localStorage.setItem("tutorhub_teacher_homework", JSON.stringify([...others, ...updated]));
+      await kvSet("tutorhub_teacher_homework", [...others, ...updated]);
     } catch {}
     setHomeworks(updated);
   }
@@ -308,10 +306,10 @@ export default function TeacherClassDetailPage() {
     }));
   const classStudents = [...mockClassStudents, ...enrolledClassStudents];
 
-  function handleSetPackage(studentId: string, pkg: StudentPackage) {
+  async function handleSetPackage(studentId: string, pkg: StudentPackage) {
     const updated = { ...studentPackages, [studentId]: pkg };
     setStudentPackages(updated);
-    saveStudentPackages(classId, updated);
+    await saveStudentPackages(classId, updated);
   }
 
   const handleSaveComment = async (studentId: string, text: string, date: string, rating: number) => {
@@ -555,10 +553,9 @@ export default function TeacherClassDetailPage() {
           dateStr={sessionNotesPanel}
           onClose={() => {
             // Refresh notes from localStorage after closing
-            try {
-              const raw = localStorage.getItem(`tutorhub_session_notes_${classId}`);
-              if (raw) setSessionNotes(JSON.parse(raw));
-            } catch {}
+            kvGet<Record<string, string> | null>(`tutorhub_session_notes_${classId}`, null)
+              .then(notes => { if (notes) setSessionNotes(notes); })
+              .catch(() => {});
             setSessionNotesPanel(null);
           }}
         />

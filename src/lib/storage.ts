@@ -37,6 +37,106 @@ function writeLocal<T>(key: string, items: T[]): void {
   }
 }
 
+// ── Domain KV stores ─────────────────────────────────────────────────────────
+// Mỗi nhóm dữ liệu có bảng Supabase riêng (kv_curriculum, kv_online_links...).
+// kvGet/kvSet định tuyến key localStorage cũ sang đúng bảng + scope id,
+// nên call site không cần biết chi tiết. localStorage vẫn là cache offline.
+
+// [prefix key cũ, tên bảng] — prefix dài/cụ thể phải đứng trước prefix ngắn
+const KV_PREFIX_ROUTES: Array<[string, string]> = [
+  ["tutorhub_schedule_notifications", "kv_schedule_notifications"],
+  ["tutorhub_curriculum_",            "kv_curriculum"],
+  ["tutorhub_schedule_",              "kv_schedules"],
+  ["tutorhub_online_link_",           "kv_online_links"],
+  ["tutorhub_tuition_",               "kv_tuition"],
+  ["tutorhub_student_packages_",      "kv_student_packages"],
+  ["tutorhub_session_notes_",         "kv_session_notes"],
+  ["tutorhub_class_extra_students_",  "kv_class_extra_students"],
+  ["tutorhub_comments_",              "kv_student_comments"],
+  ["tutorhub_exam_result_",           "kv_exam_results"],
+  ["tutorhub_exam_submissions_",      "kv_exam_submissions"],
+  ["tutorhub_exam_scores",            "kv_exam_scores"],
+  ["tutorhub_course_reviews",         "kv_course_reviews"],
+  ["tutorhub_invoices",               "kv_invoices"],
+  ["tutorhub_managed_users",          "kv_managed_users"],
+  ["tutorhub_student_accounts",       "kv_student_accounts"],
+  ["tutorhub_homework_attachments",   "kv_homework_attachments"],
+  ["tutorhub_class_materials",        "kv_class_materials"],
+  ["tutorhub_class_teacher_overrides","kv_class_overrides"],
+  ["tutorhub_teacher_homework",       "kv_teacher_homework"],
+  ["tutorhub_teacher_classes",        "kv_teacher_classes"],
+  ["tutorhub_teacher_attendance",     "kv_teacher_attendance"],
+  ["tutorhub_teacher_materials",      "kv_teacher_materials"],
+  ["tutorhub_submissions",            "kv_submissions"],
+  ["tutorhub_parent_messages",        "kv_parent_messages"],
+];
+
+// key cũ → { bảng, id } (id = phần sau prefix, hoặc 'global' nếu không có)
+function kvRoute(key: string): { table: string; id: string } | null {
+  for (const [prefix, table] of KV_PREFIX_ROUTES) {
+    if (key === prefix) return { table, id: "global" };
+    if (key.startsWith(prefix)) return { table, id: key.slice(prefix.length) || "global" };
+  }
+  return null;
+}
+
+function kvReadLocal<T>(key: string): T | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw !== null) return JSON.parse(raw) as T;
+  } catch { /* ignore */ }
+  return null;
+}
+
+function kvWriteLocal<T>(key: string, value: T): void {
+  if (typeof window === "undefined") return;
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* ignore */ }
+}
+
+export async function kvGet<T>(key: string, fallback: T): Promise<T> {
+  const route = kvRoute(key);
+  if (!route) {
+    // Key chưa đăng ký bảng — giữ nguyên hành vi localStorage cũ
+    const local = kvReadLocal<T>(key);
+    return local !== null ? local : fallback;
+  }
+  try {
+    const { data, error } = await supabase
+      .from(route.table)
+      .select("value")
+      .eq("id", route.id)
+      .maybeSingle();
+    if (!error) {
+      if (data) {
+        kvWriteLocal(key, data.value);
+        return data.value as T;
+      }
+      // Chưa có trên DB — nếu máy này còn dữ liệu cũ thì sync lên luôn
+      const local = kvReadLocal<T>(key);
+      if (local !== null) {
+        void kvSet(key, local);
+        return local;
+      }
+      return fallback;
+    }
+  } catch { /* offline */ }
+  const local = kvReadLocal<T>(key);
+  return local !== null ? local : fallback;
+}
+
+export async function kvSet<T>(key: string, value: T): Promise<void> {
+  kvWriteLocal(key, value);
+  const route = kvRoute(key);
+  if (!route) return;
+  try {
+    const { error } = await supabase
+      .from(route.table)
+      .upsert({ id: route.id, value, updated_at: new Date().toISOString() });
+    if (error) console.error(`Error saving ${route.table}/${route.id}:`, error);
+  } catch { /* offline — đã cache local */ }
+}
+
 // Helper: attempt a Supabase query; on any error OR empty result fall back to mock data silently.
 async function queryOrFallback<T>(
   query: () => Promise<{ data: T[] | null; error: unknown }>,
@@ -177,13 +277,8 @@ export async function resetAllStorage(): Promise<void> {
 }
 
 export async function getStudentComments(studentId: string): Promise<{ text: string; date: string; rating: number }[]> {
-  if (typeof window === "undefined") return [];
-  try {
-    const data = localStorage.getItem(`tutorhub_comments_${studentId}`);
-    if (data) return JSON.parse(data);
-  } catch (e) {
-    console.error("Error reading comments from localStorage", e);
-  }
+  const data = await kvGet<{ text: string; date: string; rating: number }[] | null>(`tutorhub_comments_${studentId}`, null);
+  if (data) return data;
   // Default fallback mock data
   if (studentId === "s1") {
     return [
@@ -200,12 +295,7 @@ export async function getStudentComments(studentId: string): Promise<{ text: str
 }
 
 export async function saveStudentComment(studentId: string, commentsList: { text: string; date: string; rating: number }[]): Promise<void> {
-  if (typeof window === "undefined") return;
-  try {
-    localStorage.setItem(`tutorhub_comments_${studentId}`, JSON.stringify(commentsList));
-  } catch (e) {
-    console.error("Error saving comments to localStorage", e);
-  }
+  await kvSet(`tutorhub_comments_${studentId}`, commentsList);
 }
 
 // ── Teacher-class assignment overrides (localStorage) ────────────────────────
@@ -213,39 +303,24 @@ export async function saveStudentComment(studentId: string, commentsList: { text
 
 const TEACHER_OVERRIDE_KEY = "tutorhub_class_teacher_overrides";
 
-export function getClassTeacherOverrides(): Record<string, string> {
-  if (typeof window === "undefined") return {};
-  try {
-    const raw = localStorage.getItem(TEACHER_OVERRIDE_KEY);
-    return raw ? JSON.parse(raw) : {};
-  } catch { return {}; }
+export async function getClassTeacherOverrides(): Promise<Record<string, string>> {
+  return kvGet<Record<string, string>>(TEACHER_OVERRIDE_KEY, {});
 }
 
-export function setClassTeacherOverride(classId: string, teacherId: string): void {
-  if (typeof window === "undefined") return;
-  const existing = getClassTeacherOverrides();
+export async function setClassTeacherOverride(classId: string, teacherId: string): Promise<void> {
+  const existing = await getClassTeacherOverrides();
   existing[classId] = teacherId;
-  localStorage.setItem(TEACHER_OVERRIDE_KEY, JSON.stringify(existing));
+  await kvSet(TEACHER_OVERRIDE_KEY, existing);
 }
 
 // ── Schedule overrides (localStorage) ───────────────────────────────────────
 
-export function getClassScheduleOverride(classId: string): ClassSchedule[] | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = localStorage.getItem(`tutorhub_schedule_${classId}`);
-    if (raw) return JSON.parse(raw) as ClassSchedule[];
-  } catch { /* ignore */ }
-  return null;
+export async function getClassScheduleOverride(classId: string): Promise<ClassSchedule[] | null> {
+  return kvGet<ClassSchedule[] | null>(`tutorhub_schedule_${classId}`, null);
 }
 
-export function saveClassScheduleOverride(classId: string, schedule: ClassSchedule[]): void {
-  if (typeof window === "undefined") return;
-  try {
-    localStorage.setItem(`tutorhub_schedule_${classId}`, JSON.stringify(schedule));
-  } catch (e) {
-    console.error("Error saving schedule to localStorage", e);
-  }
+export async function saveClassScheduleOverride(classId: string, schedule: ClassSchedule[]): Promise<void> {
+  await kvSet(`tutorhub_schedule_${classId}`, schedule);
 }
 
 // ── Schedule-change notifications (localStorage) ─────────────────────────────
@@ -259,29 +334,19 @@ export interface ScheduleNotification {
   is_read: boolean;
 }
 
-export function getScheduleNotifications(): ScheduleNotification[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = localStorage.getItem("tutorhub_schedule_notifications");
-    if (raw) return JSON.parse(raw) as ScheduleNotification[];
-  } catch { /* ignore */ }
-  return [];
+export async function getScheduleNotifications(): Promise<ScheduleNotification[]> {
+  return kvGet<ScheduleNotification[]>("tutorhub_schedule_notifications", []);
 }
 
-export function pushScheduleNotification(notif: Omit<ScheduleNotification, "id" | "created_at" | "is_read">): void {
-  if (typeof window === "undefined") return;
-  const existing = getScheduleNotifications();
+export async function pushScheduleNotification(notif: Omit<ScheduleNotification, "id" | "created_at" | "is_read">): Promise<void> {
+  const existing = await getScheduleNotifications();
   const next: ScheduleNotification = {
     ...notif,
     id: crypto.randomUUID(),
     created_at: new Date().toISOString(),
     is_read: false,
   };
-  try {
-    localStorage.setItem("tutorhub_schedule_notifications", JSON.stringify([next, ...existing]));
-  } catch (e) {
-    console.error("Error saving schedule notification", e);
-  }
+  await kvSet("tutorhub_schedule_notifications", [next, ...existing]);
 }
 
 // ── Material purchase transactions (localStorage) ────────────────────────────
@@ -375,12 +440,9 @@ export async function getGrantedPackages(studentId?: string): Promise<string[]> 
   return granted;
 }
 
-export function markScheduleNotificationsRead(): void {
-  if (typeof window === "undefined") return;
-  try {
-    const existing = getScheduleNotifications().map(n => ({ ...n, is_read: true }));
-    localStorage.setItem("tutorhub_schedule_notifications", JSON.stringify(existing));
-  } catch { /* ignore */ }
+export async function markScheduleNotificationsRead(): Promise<void> {
+  const existing = (await getScheduleNotifications()).map(n => ({ ...n, is_read: true }));
+  await kvSet("tutorhub_schedule_notifications", existing);
 }
 
 // ── Curriculum (localStorage) ────────────────────────────────────────────────
@@ -435,17 +497,12 @@ export interface CurriculumChapter {
   sessions: CurriculumSession[];
 }
 
-export function getCurriculum(classId: string): CurriculumChapter[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = localStorage.getItem(`tutorhub_curriculum_${classId}`);
-    return raw ? (JSON.parse(raw) as CurriculumChapter[]) : [];
-  } catch { return []; }
+export async function getCurriculum(classId: string): Promise<CurriculumChapter[]> {
+  return kvGet<CurriculumChapter[]>(`tutorhub_curriculum_${classId}`, []);
 }
 
-export function saveCurriculum(classId: string, curriculum: CurriculumChapter[]): void {
-  if (typeof window === "undefined") return;
-  try { localStorage.setItem(`tutorhub_curriculum_${classId}`, JSON.stringify(curriculum)); } catch { /* ignore */ }
+export async function saveCurriculum(classId: string, curriculum: CurriculumChapter[]): Promise<void> {
+  await kvSet(`tutorhub_curriculum_${classId}`, curriculum);
 }
 
 // ── Exam results (per student, per exam) ─────────────────────────────────────
@@ -466,75 +523,56 @@ function examSubmissionsKey(classId: string, lessonId: string) {
   return `tutorhub_exam_submissions_${classId}_${lessonId}`;
 }
 
-export function saveExamResult(
+export async function saveExamResult(
   classId: string,
   lessonId: string,
   studentId: string,
   studentName: string,
   result: { score: number; total: number; submitted_at: string; answers: Record<string, unknown> }
-): void {
-  if (typeof window === "undefined") return;
+): Promise<void> {
   const stored: StoredExamResult = { student_id: studentId, student_name: studentName, ...result };
-  localStorage.setItem(examResultKey(classId, lessonId, studentId), JSON.stringify(stored));
+  await kvSet(examResultKey(classId, lessonId, studentId), stored);
   // Track submission registry so teacher can list all results
-  const subs: string[] = getExamSubmissionIds(classId, lessonId);
+  const subs: string[] = await getExamSubmissionIds(classId, lessonId);
   if (!subs.includes(studentId)) {
-    localStorage.setItem(examSubmissionsKey(classId, lessonId), JSON.stringify([...subs, studentId]));
+    await kvSet(examSubmissionsKey(classId, lessonId), [...subs, studentId]);
   }
 }
 
-export function getExamResult(classId: string, lessonId: string, studentId: string): StoredExamResult | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = localStorage.getItem(examResultKey(classId, lessonId, studentId));
-    return raw ? JSON.parse(raw) : null;
-  } catch { return null; }
+export async function getExamResult(classId: string, lessonId: string, studentId: string): Promise<StoredExamResult | null> {
+  return kvGet<StoredExamResult | null>(examResultKey(classId, lessonId, studentId), null);
 }
 
-function getExamSubmissionIds(classId: string, lessonId: string): string[] {
-  try {
-    const raw = localStorage.getItem(examSubmissionsKey(classId, lessonId));
-    return raw ? JSON.parse(raw) : [];
-  } catch { return []; }
+async function getExamSubmissionIds(classId: string, lessonId: string): Promise<string[]> {
+  return kvGet<string[]>(examSubmissionsKey(classId, lessonId), []);
 }
 
-export function getAllExamResults(classId: string, lessonId: string): StoredExamResult[] {
-  if (typeof window === "undefined") return [];
-  return getExamSubmissionIds(classId, lessonId)
-    .map(sid => getExamResult(classId, lessonId, sid))
-    .filter(Boolean) as StoredExamResult[];
+export async function getAllExamResults(classId: string, lessonId: string): Promise<StoredExamResult[]> {
+  const ids = await getExamSubmissionIds(classId, lessonId);
+  const results = await Promise.all(ids.map(sid => getExamResult(classId, lessonId, sid)));
+  return results.filter(Boolean) as StoredExamResult[];
 }
 
 // ── Student package per class (localStorage) ────────────────────────────────
 
 export type StudentPackage = "online" | "advanced" | "offline";
 
-export function getStudentPackages(classId: string): Record<string, StudentPackage> {
-  if (typeof window === "undefined") return {};
-  try { return JSON.parse(localStorage.getItem(`tutorhub_student_packages_${classId}`) ?? "{}"); } catch { return {}; }
+export async function getStudentPackages(classId: string): Promise<Record<string, StudentPackage>> {
+  return kvGet<Record<string, StudentPackage>>(`tutorhub_student_packages_${classId}`, {});
 }
 
-export function saveStudentPackages(classId: string, packages: Record<string, StudentPackage>): void {
-  if (typeof window === "undefined") return;
-  try { localStorage.setItem(`tutorhub_student_packages_${classId}`, JSON.stringify(packages)); } catch { /* ignore */ }
+export async function saveStudentPackages(classId: string, packages: Record<string, StudentPackage>): Promise<void> {
+  await kvSet(`tutorhub_student_packages_${classId}`, packages);
 }
 
 // ── Online meeting link per class (localStorage) ─────────────────────────────
 
-export function getOnlineLink(classId: string): string | null {
-  if (typeof window === "undefined") return null;
-  try { return localStorage.getItem(`tutorhub_online_link_${classId}`); } catch { return null; }
+export async function getOnlineLink(classId: string): Promise<string | null> {
+  return kvGet<string | null>(`tutorhub_online_link_${classId}`, null);
 }
 
-export function saveOnlineLink(classId: string, link: string): void {
-  if (typeof window === "undefined") return;
-  try {
-    if (link.trim()) {
-      localStorage.setItem(`tutorhub_online_link_${classId}`, link.trim());
-    } else {
-      localStorage.removeItem(`tutorhub_online_link_${classId}`);
-    }
-  } catch { /* ignore */ }
+export async function saveOnlineLink(classId: string, link: string): Promise<void> {
+  await kvSet<string | null>(`tutorhub_online_link_${classId}`, link.trim() ? link.trim() : null);
 }
 
 // ── Shared tuition invoices (localStorage) ───────────────────────────────────
@@ -562,26 +600,21 @@ const DEFAULT_INVOICES: TuitionInvoice[] = [
   { id: "INV-2026-05-02", child_id: "s4", title: "Học phí Hóa học cơ bản - Tháng 5", amount: 1200000, due_date: "2026-05-15", status: "paid", paid_at: "2026-05-13" },
 ];
 
-export function getInvoices(): TuitionInvoice[] {
-  if (typeof window === "undefined") return DEFAULT_INVOICES;
-  try {
-    const raw = localStorage.getItem(INVOICE_KEY);
-    return raw ? (JSON.parse(raw) as TuitionInvoice[]) : DEFAULT_INVOICES;
-  } catch { return DEFAULT_INVOICES; }
+export async function getInvoices(): Promise<TuitionInvoice[]> {
+  return kvGet<TuitionInvoice[]>(INVOICE_KEY, DEFAULT_INVOICES);
 }
 
-export function updateInvoiceStatus(
+export async function updateInvoiceStatus(
   invoiceId: string,
   status: InvoiceStatus,
   submittedBy: "student" | "parent"
-): void {
-  if (typeof window === "undefined") return;
-  const invoices = getInvoices().map(inv =>
+): Promise<void> {
+  const invoices = (await getInvoices()).map(inv =>
     (invoiceId === "ALL" ? inv.status === "pending" : inv.id === invoiceId)
       ? { ...inv, status, submitted_by: submittedBy }
       : inv
   );
-  localStorage.setItem(INVOICE_KEY, JSON.stringify(invoices));
+  await kvSet(INVOICE_KEY, invoices);
 }
 
 // ── Enrollment requests (Supabase) ───────────────────────────────────────────
@@ -724,11 +757,11 @@ export async function approveEnrollment(
     username:          opts.account_username,
     created_at:        new Date().toISOString(),
   };
-  const accounts = getStudentAccounts();
-  localStorage.setItem(ACCOUNT_KEY, JSON.stringify([
+  const accounts = await getStudentAccounts();
+  await kvSet(ACCOUNT_KEY, [
     ...accounts.filter(a => a.student_id !== account.student_id),
     account,
-  ]));
+  ]);
 }
 
 export async function deleteEnrollment(id: string): Promise<void> {
@@ -738,8 +771,8 @@ export async function deleteEnrollment(id: string): Promise<void> {
   } catch { /* offline */ }
   writeEnrollmentsLocal((await readEnrollmentsLocal()).filter(e => e.id !== id));
   // Also remove student account if approved
-  const accounts = getStudentAccounts();
-  localStorage.setItem(ACCOUNT_KEY, JSON.stringify(accounts.filter(a => a.student_id !== `enr_${id}`)));
+  const accounts = await getStudentAccounts();
+  await kvSet(ACCOUNT_KEY, accounts.filter(a => a.student_id !== `enr_${id}`));
 }
 
 export async function rejectEnrollment(id: string, reason?: string): Promise<void> {
@@ -755,12 +788,8 @@ export async function rejectEnrollment(id: string, reason?: string): Promise<voi
   writeEnrollmentsLocal((await readEnrollmentsLocal()).map(e => (e.id === id ? { ...e, ...patch } : e)));
 }
 
-export function getStudentAccounts(): StudentAccount[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = localStorage.getItem(ACCOUNT_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch { return []; }
+export async function getStudentAccounts(): Promise<StudentAccount[]> {
+  return kvGet<StudentAccount[]>(ACCOUNT_KEY, []);
 }
 
 export async function changeStudentPassword(
@@ -787,8 +816,8 @@ export async function changeStudentPassword(
   return "ok";
 }
 
-export function getCurrentStudentAccount(): StudentAccount | null {
-  const accounts = getStudentAccounts();
+export async function getCurrentStudentAccount(): Promise<StudentAccount | null> {
+  const accounts = await getStudentAccounts();
   return accounts.length > 0 ? accounts[accounts.length - 1] : null;
 }
 
@@ -806,26 +835,22 @@ export interface StoredExamScore {
 
 const SCORES_KEY = "tutorhub_exam_scores";
 
-function getStoredExamScores(): StoredExamScore[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = localStorage.getItem(SCORES_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch { return []; }
+async function getStoredExamScores(): Promise<StoredExamScore[]> {
+  return kvGet<StoredExamScore[]>(SCORES_KEY, []);
 }
 
 export async function saveExamScore(score: Omit<StoredExamScore, "id">): Promise<StoredExamScore> {
   const record: StoredExamScore = { ...score, id: crypto.randomUUID() };
-  localStorage.setItem(SCORES_KEY, JSON.stringify([...getStoredExamScores(), record]));
+  await kvSet(SCORES_KEY, [...(await getStoredExamScores()), record]);
   return record;
 }
 
 export async function deleteExamScore(id: string): Promise<void> {
-  localStorage.setItem(SCORES_KEY, JSON.stringify(getStoredExamScores().filter(s => s.id !== id)));
+  await kvSet(SCORES_KEY, (await getStoredExamScores()).filter(s => s.id !== id));
 }
 
 export async function getExamScoresByStudent(studentId: string): Promise<StoredExamScore[]> {
-  return Promise.resolve(getStoredExamScores().filter(s => s.student_id === studentId));
+  return (await getStoredExamScores()).filter(s => s.student_id === studentId);
 }
 
 // ── Class materials (localStorage) ────────────────────────────────────────────
@@ -847,37 +872,31 @@ export interface StoredClassMaterial {
 
 const MATERIALS_KEY = "tutorhub_class_materials";
 
-function getStoredMaterials(): StoredClassMaterial[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = localStorage.getItem(MATERIALS_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch { return []; }
+async function getStoredMaterials(): Promise<StoredClassMaterial[]> {
+  return kvGet<StoredClassMaterial[]>(MATERIALS_KEY, []);
 }
 
-export function getClassMaterials(classId: string): StoredClassMaterial[] {
-  return getStoredMaterials().filter(m => m.class_id === classId);
+export async function getClassMaterials(classId: string): Promise<StoredClassMaterial[]> {
+  return (await getStoredMaterials()).filter(m => m.class_id === classId);
 }
 
-export function saveClassMaterial(mat: Omit<StoredClassMaterial, "id" | "download_count">): StoredClassMaterial {
+export async function saveClassMaterial(mat: Omit<StoredClassMaterial, "id" | "download_count">): Promise<StoredClassMaterial> {
   const record: StoredClassMaterial = { ...mat, id: `mat_${Date.now()}`, download_count: 0 };
-  localStorage.setItem(MATERIALS_KEY, JSON.stringify([...getStoredMaterials(), record]));
+  await kvSet(MATERIALS_KEY, [...(await getStoredMaterials()), record]);
   return record;
 }
 
-export function deleteClassMaterial(materialId: string): void {
-  if (typeof window === "undefined") return;
-  const updated = getStoredMaterials().filter(m => m.id !== materialId);
-  localStorage.setItem(MATERIALS_KEY, JSON.stringify(updated));
+export async function deleteClassMaterial(materialId: string): Promise<void> {
+  const updated = (await getStoredMaterials()).filter(m => m.id !== materialId);
+  await kvSet(MATERIALS_KEY, updated);
 }
 
-export function incrementMaterialDownload(materialId: string): void {
-  if (typeof window === "undefined") return;
-  const all = getStoredMaterials();
+export async function incrementMaterialDownload(materialId: string): Promise<void> {
+  const all = await getStoredMaterials();
   const idx = all.findIndex(m => m.id === materialId);
   if (idx >= 0) {
     all[idx] = { ...all[idx], download_count: all[idx].download_count + 1 };
-    localStorage.setItem(MATERIALS_KEY, JSON.stringify(all));
+    await kvSet(MATERIALS_KEY, all);
   }
 }
 
@@ -893,20 +912,16 @@ export interface HomeworkAttachment {
 
 const HW_ATTACHMENTS_KEY = "tutorhub_homework_attachments";
 
-function getAllHomeworkAttachments(): HomeworkAttachment[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = localStorage.getItem(HW_ATTACHMENTS_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch { return []; }
+async function getAllHomeworkAttachments(): Promise<HomeworkAttachment[]> {
+  return kvGet<HomeworkAttachment[]>(HW_ATTACHMENTS_KEY, []);
 }
 
-export function getHomeworkAttachments(homeworkId: string): HomeworkAttachment[] {
-  return getAllHomeworkAttachments().filter(a => a.homework_id === homeworkId);
+export async function getHomeworkAttachments(homeworkId: string): Promise<HomeworkAttachment[]> {
+  return (await getAllHomeworkAttachments()).filter(a => a.homework_id === homeworkId);
 }
 
-export function saveHomeworkAttachment(att: HomeworkAttachment): void {
-  localStorage.setItem(HW_ATTACHMENTS_KEY, JSON.stringify([...getAllHomeworkAttachments(), att]));
+export async function saveHomeworkAttachment(att: HomeworkAttachment): Promise<void> {
+  await kvSet(HW_ATTACHMENTS_KEY, [...(await getAllHomeworkAttachments()), att]);
 }
 
 // ── Teacher tuition management per class (localStorage) ──────────────────────
@@ -943,43 +958,37 @@ const DEFAULT_TUITION: ClassTuitionConfig = {
 
 function tuitionKey(classId: string) { return `tutorhub_tuition_${classId}`; }
 
-export function getClassTuition(classId: string): ClassTuitionConfig {
-  if (typeof window === "undefined") return DEFAULT_TUITION;
-  try {
-    const raw = localStorage.getItem(tuitionKey(classId));
-    if (!raw) return DEFAULT_TUITION;
-    const parsed = JSON.parse(raw);
-    // Migrate old default_fee format
-    if (typeof parsed.default_fee === "number" && !parsed.package_fees) {
-      return { package_fees: { online: parsed.default_fee, advanced: parsed.default_fee, offline: parsed.default_fee }, students: parsed.students ?? {} };
-    }
-    return parsed;
-  } catch { return DEFAULT_TUITION; }
+export async function getClassTuition(classId: string): Promise<ClassTuitionConfig> {
+  const parsed = await kvGet<ClassTuitionConfig & { default_fee?: number }>(tuitionKey(classId), DEFAULT_TUITION);
+  // Migrate old default_fee format
+  if (typeof parsed.default_fee === "number" && !parsed.package_fees) {
+    return { package_fees: { online: parsed.default_fee, advanced: parsed.default_fee, offline: parsed.default_fee }, students: parsed.students ?? {} };
+  }
+  return parsed;
 }
 
-export function saveClassTuition(classId: string, config: ClassTuitionConfig): void {
-  if (typeof window === "undefined") return;
-  try { localStorage.setItem(tuitionKey(classId), JSON.stringify(config)); } catch { /* ignore */ }
+export async function saveClassTuition(classId: string, config: ClassTuitionConfig): Promise<void> {
+  await kvSet(tuitionKey(classId), config);
 }
 
-export function recordTuitionPayment(
+export async function recordTuitionPayment(
   classId: string,
   studentId: string,
   payment: Omit<TuitionPaymentRecord, "id">
-): void {
-  const config = getClassTuition(classId);
+): Promise<void> {
+  const config = await getClassTuition(classId);
   const student = config.students[studentId] ?? { payments: [] };
   const newPayment: TuitionPaymentRecord = { ...payment, id: crypto.randomUUID() };
   config.students[studentId] = { ...student, payments: [...student.payments, newPayment] };
-  saveClassTuition(classId, config);
+  await saveClassTuition(classId, config);
 }
 
-export function deleteTuitionPayment(classId: string, studentId: string, paymentId: string): void {
-  const config = getClassTuition(classId);
+export async function deleteTuitionPayment(classId: string, studentId: string, paymentId: string): Promise<void> {
+  const config = await getClassTuition(classId);
   const student = config.students[studentId];
   if (!student) return;
   config.students[studentId] = { ...student, payments: student.payments.filter(p => p.id !== paymentId) };
-  saveClassTuition(classId, config);
+  await saveClassTuition(classId, config);
 }
 
 
@@ -997,33 +1006,31 @@ export interface CourseReview {
 
 const REVIEWS_KEY = "tutorhub_course_reviews";
 
-function getStoredReviews(): CourseReview[] {
-  if (typeof window === "undefined") return [];
-  try { return JSON.parse(localStorage.getItem(REVIEWS_KEY) ?? "[]"); } catch { return []; }
+async function getStoredReviews(): Promise<CourseReview[]> {
+  return kvGet<CourseReview[]>(REVIEWS_KEY, []);
 }
 
-export function getCourseReviews(courseId: string): CourseReview[] {
-  return getStoredReviews().filter(r => r.course_id === courseId);
+export async function getCourseReviews(courseId: string): Promise<CourseReview[]> {
+  return (await getStoredReviews()).filter(r => r.course_id === courseId);
 }
 
-export function submitCourseReview(review: Omit<CourseReview, "id">): CourseReview {
-  const all = getStoredReviews();
+export async function submitCourseReview(review: Omit<CourseReview, "id">): Promise<CourseReview> {
+  const all = await getStoredReviews();
   // One review per student per course — upsert
   const existing = all.findIndex(r => r.course_id === review.course_id && r.student_id === review.student_id);
   const record: CourseReview = { ...review, id: existing >= 0 ? all[existing].id : crypto.randomUUID() };
   if (existing >= 0) all[existing] = record; else all.push(record);
-  localStorage.setItem(REVIEWS_KEY, JSON.stringify(all));
+  await kvSet(REVIEWS_KEY, all);
   return record;
 }
 
-export function deleteReview(reviewId: string): void {
-  if (typeof window === "undefined") return;
-  const updated = getStoredReviews().filter(r => r.id !== reviewId);
-  localStorage.setItem(REVIEWS_KEY, JSON.stringify(updated));
+export async function deleteReview(reviewId: string): Promise<void> {
+  const updated = (await getStoredReviews()).filter(r => r.id !== reviewId);
+  await kvSet(REVIEWS_KEY, updated);
 }
 
-export function getCourseRating(courseId: string): { rating: number; reviewCount: number } {
-  const reviews = getCourseReviews(courseId);
+export async function getCourseRating(courseId: string): Promise<{ rating: number; reviewCount: number }> {
+  const reviews = await getCourseReviews(courseId);
   if (reviews.length === 0) return { rating: 0, reviewCount: 0 };
   const avg = reviews.reduce((s, r) => s + r.rating, 0) / reviews.length;
   return { rating: Math.round(avg * 10) / 10, reviewCount: reviews.length };
@@ -1052,37 +1059,30 @@ export interface ManagedUser {
 
 const MANAGED_USERS_KEY = "tutorhub_managed_users";
 
-function ls(key: string): string | null {
-  try { return typeof window !== "undefined" ? localStorage.getItem(key) : null; } catch { return null; }
+export async function getManagedUsers(): Promise<ManagedUser[]> {
+  return kvGet<ManagedUser[]>(MANAGED_USERS_KEY, []);
 }
 
-export function getManagedUsers(): ManagedUser[] {
-  try {
-    const raw = ls(MANAGED_USERS_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch { return []; }
-}
-
-export function saveManagedUser(user: ManagedUser): void {
-  const all = getManagedUsers();
+export async function saveManagedUser(user: ManagedUser): Promise<void> {
+  const all = await getManagedUsers();
   const idx = all.findIndex(u => u.id === user.id);
   if (idx >= 0) all[idx] = user; else all.push(user);
-  localStorage.setItem(MANAGED_USERS_KEY, JSON.stringify(all));
+  await kvSet(MANAGED_USERS_KEY, all);
 }
 
-export function deleteManagedUser(id: string): void {
-  const all = getManagedUsers().filter(u => u.id !== id);
-  localStorage.setItem(MANAGED_USERS_KEY, JSON.stringify(all));
+export async function deleteManagedUser(id: string): Promise<void> {
+  const all = (await getManagedUsers()).filter(u => u.id !== id);
+  await kvSet(MANAGED_USERS_KEY, all);
 }
 
-export function resetManagedUserPassword(id: string, newPassword: string): void {
-  const all = getManagedUsers();
+export async function resetManagedUserPassword(id: string, newPassword: string): Promise<void> {
+  const all = await getManagedUsers();
   const user = all.find(u => u.id === id);
-  if (user) { user.password = newPassword; localStorage.setItem(MANAGED_USERS_KEY, JSON.stringify(all)); }
+  if (user) { user.password = newPassword; await kvSet(MANAGED_USERS_KEY, all); }
 }
 
-export function toggleManagedUserDisabled(id: string): void {
-  const all = getManagedUsers();
+export async function toggleManagedUserDisabled(id: string): Promise<void> {
+  const all = await getManagedUsers();
   const user = all.find(u => u.id === id);
-  if (user) { user.disabled = !user.disabled; localStorage.setItem(MANAGED_USERS_KEY, JSON.stringify(all)); }
+  if (user) { user.disabled = !user.disabled; await kvSet(MANAGED_USERS_KEY, all); }
 }

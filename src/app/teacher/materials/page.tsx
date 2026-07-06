@@ -13,6 +13,7 @@ import {
   Zap, DollarSign, Package, Wifi, Star, School,
 } from "lucide-react";
 import type { StudentPackage } from "@/lib/storage";
+import { kvGet, kvSet } from "@/lib/storage";
 import { MOCK_CLASSES } from "@/lib/mock-data";
 import { formatCurrency } from "@/lib/utils";
 
@@ -124,16 +125,16 @@ const SEED_COURSES: Course[] = [
 // ─────────────────────────────────────────────────────────────────────────────
 
 const LS_KEY = "tutorhub_teacher_materials";
-function loadCourses(): Course[] {
+async function loadCourses(): Promise<Course[]> {
   if (typeof window === "undefined") return SEED_COURSES;
   try {
-    const raw = localStorage.getItem(LS_KEY);
-    if (raw) return JSON.parse(raw) as Course[];
+    const raw = await kvGet<Course[] | null>(LS_KEY, null);
+    if (raw) return raw;
   } catch {}
   return SEED_COURSES;
 }
 function saveCourses(courses: Course[]) {
-  try { localStorage.setItem(LS_KEY, JSON.stringify(courses)); } catch {}
+  kvSet(LS_KEY, courses).catch(() => {});
 }
 
 function uid() { return Math.random().toString(36).slice(2, 9); }
@@ -742,7 +743,7 @@ export default function TeacherMaterialsPage() {
   const [courses, setCourses] = useState<Course[]>(SEED_COURSES);
   const [editing, setEditing] = useState<Course | null>(null);
 
-  useEffect(() => { setCourses(loadCourses()); }, []);
+  useEffect(() => { loadCourses().then(setCourses); }, []);
 
   const createCourse = () => {
     const c: Course = {

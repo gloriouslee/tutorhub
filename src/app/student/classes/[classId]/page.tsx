@@ -13,7 +13,7 @@ import {
   MOCK_LECTURES, MOCK_CLASS_NOTES, MOCK_EXAM_SCORES, MOCK_HOMEWORK, MOCK_ATTENDANCE,
 } from "@/lib/mock-data";
 import { getSubmissionsByStudent, type SubmissionRecord } from "@/lib/supabase/submissions";
-import { getOnlineLink, getStudentPackages, getCurriculum, getClassMaterials, incrementMaterialDownload, type StudentPackage, type CurriculumSession, type StoredClassMaterial } from "@/lib/storage";
+import { kvGet, getOnlineLink, getStudentPackages, getCurriculum, getClassMaterials, incrementMaterialDownload, type StudentPackage, type CurriculumSession, type StoredClassMaterial } from "@/lib/storage";
 import CurriculumView from "@/components/student/CurriculumView";
 import {
   BookOpen, Clock, Video, MapPin, Users, ArrowLeft, FileText, Download,
@@ -69,11 +69,8 @@ function generateSessionDates(
   return results;
 }
 
-function loadSavedAttendance(): SavedAttendanceRecord[] {
-  try {
-    const raw = typeof window !== "undefined" ? localStorage.getItem("tutorhub_teacher_attendance") : null;
-    return raw ? JSON.parse(raw) : [];
-  } catch { return []; }
+function loadSavedAttendance(): Promise<SavedAttendanceRecord[]> {
+  return kvGet<SavedAttendanceRecord[]>("tutorhub_teacher_attendance", []);
 }
 
 type TabKey = "overview" | "curriculum" | "sessions" | "attendance" | "homework" | "materials" | "lectures" | "notes";
@@ -140,9 +137,9 @@ function saveWatched(studentId: string, s: Set<string>) {
   localStorage.setItem(`tutorhub_watched_${studentId}`, JSON.stringify([...s]));
 }
 
-// ── localStorage: submissions fallback ───────────────────────────────────────
-function loadLocalSubs(): SubmissionRecord[] {
-  try { return JSON.parse(localStorage.getItem("tutorhub_submissions") ?? "[]"); } catch { return []; }
+// ── KV: submissions fallback ─────────────────────────────────────────────────
+function loadLocalSubs(): Promise<SubmissionRecord[]> {
+  return kvGet<SubmissionRecord[]>("tutorhub_submissions", []);
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
@@ -161,11 +158,11 @@ export default function StudentClassDetailPage() {
   const [curriculumByDate, setCurriculumByDate] = useState<Record<string, CurriculumSession>>({});
   const [sessionNotes, setSessionNotes] = useState<Record<string, string>>({});
   const [uploadedMaterials, setUploadedMaterials] = useState<StoredClassMaterial[]>([]);
-  const studentPkg: StudentPackage | undefined = useMemo(
-    () => getStudentPackages(classId)[studentId],
-    [classId, studentId],
-  );
-  useEffect(() => { setUploadedMaterials(getClassMaterials(classId)); }, [classId]);
+  const [studentPkg, setStudentPkg] = useState<StudentPackage | undefined>(undefined);
+  useEffect(() => {
+    getStudentPackages(classId).then(pkgs => setStudentPkg(pkgs[studentId]));
+  }, [classId, studentId]);
+  useEffect(() => { getClassMaterials(classId).then(setUploadedMaterials); }, [classId]);
   const materials = useMemo(() => {
     const mockMats = MOCK_CLASS_MATERIALS.filter(m => m.class_id === classId);
     const realMats = uploadedMaterials.filter(m => {
@@ -177,26 +174,25 @@ export default function StudentClassDetailPage() {
 
   useEffect(() => {
     setWatched(loadWatched(studentId));
-    setOnlineLink(getOnlineLink(classId) ?? "");
+    getOnlineLink(classId).then(link => setOnlineLink(link ?? ""));
     // Load submissions for homework status
-    getSubmissionsByStudent(CURRENT_STUDENT_ID).then(remote => {
-      setSubmissions(remote.length > 0 ? remote : loadLocalSubs().filter(s => s.student_id === CURRENT_STUDENT_ID));
+    getSubmissionsByStudent(CURRENT_STUDENT_ID).then(async remote => {
+      if (remote.length > 0) { setSubmissions(remote); return; }
+      const local = await loadLocalSubs();
+      setSubmissions(local.filter(s => s.student_id === CURRENT_STUDENT_ID));
     });
     // Load my package for this class
-    const pkgs = getStudentPackages(classId);
-    setMyPackage(pkgs[CURRENT_STUDENT_ID] ?? null);
+    getStudentPackages(classId).then(pkgs => setMyPackage(pkgs[CURRENT_STUDENT_ID] ?? null));
     // Load attendance records
-    setSavedAttendance(loadSavedAttendance());
+    loadSavedAttendance().then(setSavedAttendance);
     // Load curriculum → build date map
-    const chapters = getCurriculum(classId);
-    const byDate: Record<string, CurriculumSession> = {};
-    chapters.forEach(ch => ch.sessions.forEach(s => { if (s.date) byDate[s.date] = s; }));
-    setCurriculumByDate(byDate);
+    getCurriculum(classId).then(chapters => {
+      const byDate: Record<string, CurriculumSession> = {};
+      chapters.forEach(ch => ch.sessions.forEach(s => { if (s.date) byDate[s.date] = s; }));
+      setCurriculumByDate(byDate);
+    });
     // Load session notes written by teacher
-    try {
-      const raw = localStorage.getItem(`tutorhub_session_notes_${classId}`);
-      if (raw) setSessionNotes(JSON.parse(raw));
-    } catch {}
+    kvGet<Record<string, string>>(`tutorhub_session_notes_${classId}`, {}).then(setSessionNotes);
   }, [classId, studentId]);
 
   const cls = MOCK_CLASSES.find(c => c.id === classId);
@@ -899,7 +895,7 @@ export default function StudentClassDetailPage() {
                               className="flex-1 text-xs h-8"
                               onClick={() => {
                                 if (!mat.file_url) return;
-                                if (mat.id.startsWith("mat_")) incrementMaterialDownload(mat.id);
+                                if (mat.id.startsWith("mat_")) void incrementMaterialDownload(mat.id);
                                 const a = document.createElement("a");
                                 a.href = mat.file_url;
                                 a.download = mat.title;
