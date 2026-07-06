@@ -515,6 +515,8 @@ export interface ExamQuestion {
 export interface ExamContent {
   questions:  ExamQuestion[];
   time_limit?: number; // phút
+  // Cho học sinh xem "Lời giải" (explanation_html) sau khi nộp bài. Mặc định: true.
+  show_solution_after_submit?: boolean;
 }
 
 export interface CurriculumLesson {
@@ -573,6 +575,30 @@ export interface StoredExamResult {
   total:        number;
   submitted_at: string;
   answers:      Record<string, unknown>;
+  // Chấm thủ công (tự luận): điểm giáo viên cho theo từng câu (question id → điểm)
+  manual_scores?: Record<string, number>;
+  teacher_feedback?: string;
+  graded_at?: string;
+}
+
+/** Giáo viên chấm tự luận / nhận xét: ghi đè manual_scores + feedback vào kết quả đã nộp. */
+export async function gradeExamResult(
+  classId: string,
+  lessonId: string,
+  studentId: string,
+  patch: { manual_scores?: Record<string, number>; teacher_feedback?: string }
+): Promise<StoredExamResult | null> {
+  const key = examResultKey(classId, lessonId, studentId);
+  const current = await kvGet<StoredExamResult | null>(key, null);
+  if (!current) return null;
+  const updated: StoredExamResult = {
+    ...current,
+    ...patch,
+    manual_scores: { ...(current.manual_scores ?? {}), ...(patch.manual_scores ?? {}) },
+    graded_at: new Date().toISOString(),
+  };
+  await kvSet(key, updated);
+  return updated;
 }
 
 function examResultKey(classId: string, lessonId: string, studentId: string) {

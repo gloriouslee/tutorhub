@@ -11,15 +11,14 @@ import {
   type CurriculumChapter, type CurriculumSession, type CurriculumLesson, type StoredExamResult,
 } from "@/lib/storage";
 import { uploadClassFile } from "@/lib/upload";
-import { renderMathInHtml } from "@/lib/mathRender";
-import "katex/dist/katex.min.css";
 import ExamEditorModal from "@/components/teacher/ExamEditorModal";
+import ExamGradingView from "@/components/teacher/ExamGradingView";
 import {
   Plus, ChevronDown, ChevronRight, Trash2, Edit2, X, Check,
   PlayCircle, FileText, ClipboardList, Video, Eye, EyeOff,
   GripVertical, BookOpen, CalendarDays, Link2, Link2Off,
   Upload, Loader2, AlertCircle, PenSquare, Lock, Unlock,
-  Clock, Users, Trophy, ChevronRight as ChevRight, ChevronLeft,
+  Clock, Users,
 } from "lucide-react";
 import { ClassSchedule } from "@/types";
 
@@ -349,12 +348,10 @@ export default function CurriculumTab({ classId, schedule }: { classId: string; 
     sessionId: string;
     lesson?: CurriculumLesson;
   } | null>(null);
-  const [resultsPanel, setResultsPanel] = useState<{
+  const [gradingView, setGradingView] = useState<{
     lessonId: string;
     lessonTitle: string;
-    results: StoredExamResult[];
   } | null>(null);
-  const [detailStudent, setDetailStudent] = useState<StoredExamResult | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -388,9 +385,11 @@ export default function CurriculumTab({ classId, schedule }: { classId: string; 
   // Merge-safe persist: apply the SAME pure mutation to local state AND to the
   // fresh document read right before writing (mutateCurriculum → kvUpdate),
   // so two tabs / concurrent edits don't overwrite each other's changes.
-  function persist(mutate: (chapters: CurriculumChapter[]) => CurriculumChapter[]) {
+  function persist(mutate: (chapters: CurriculumChapter[]) => CurriculumChapter[]): Promise<unknown> {
     setChapters(prev => mutate(prev));
-    mutateCurriculum(classId, mutate);
+    // Trả promise để caller (VD: Lưu bài thi) CHỜ ghi xong lên server —
+    // đóng modal/điều hướng trước khi ghi xong sẽ làm mất dữ liệu trên prod.
+    return mutateCurriculum(classId, mutate);
   }
 
   function toggle(id: string) {
@@ -463,8 +462,8 @@ export default function CurriculumTab({ classId, schedule }: { classId: string; 
   }
 
   // ── Lesson ops ──
-  function saveLesson(chapterId: string, sessionId: string, lesson: CurriculumLesson) {
-    persist(chs => chs.map(ch =>
+  function saveLesson(chapterId: string, sessionId: string, lesson: CurriculumLesson): Promise<unknown> {
+    return persist(chs => chs.map(ch =>
       ch.id === chapterId ? {
         ...ch,
         sessions: ch.sessions.map(s =>
@@ -675,7 +674,7 @@ export default function CurriculumTab({ classId, schedule }: { classId: string; 
                                         )}
                                         {examResults.length > 0 && (
                                           <button
-                                            onClick={() => setResultsPanel({ lessonId: lesson.id, lessonTitle: lesson.title, results: examResults })}
+                                            onClick={() => setGradingView({ lessonId: lesson.id, lessonTitle: lesson.title })}
                                             className="text-[10px] text-primary hover:underline flex items-center gap-0.5"
                                           >
                                             <Users className="h-2.5 w-2.5" />{examResults.length} bài nộp
@@ -785,263 +784,19 @@ export default function CurriculumTab({ classId, schedule }: { classId: string; 
         />
       )}
 
-      {/* Exam results panel */}
-      {resultsPanel && (() => {
-        // Get questions for this exam from loaded chapters
-        const examLesson = chapters.flatMap(ch => ch.sessions.flatMap(s => s.lessons)).find(l => l.id === resultsPanel.lessonId);
-        const questions  = examLesson?.exam_content?.questions ?? [];
-        const OPTS       = ["A", "B", "C", "D"];
-
-        function stripHtml(html: string) {
-          return html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
-        }
-
-        // null = not auto-gradable (essay — "chưa chấm")
-        function isCorrect(q: typeof questions[0], ans: Record<string, unknown>): boolean | null {
-          if (q.type === "multiple_choice") return ans.selected_option === q.correct_option;
-          if (q.type === "true_false") {
-            // Đúng sai nhiều mệnh đề: đúng khi TẤT CẢ mệnh đề trả lời chính xác
-            if (q.statements && q.statements.length > 0) {
-              const sa = ans.statement_answers as Record<number, boolean> | undefined;
-              return q.statements.every((st, i) => sa?.[i] === st.correct);
-            }
-            return ans.selected_value === q.correct_value;
-          }
-          if (q.type === "fill_blank")      return String(ans.selected_value ?? "").trim().toLowerCase() === String(q.correct_value ?? "").trim().toLowerCase();
-          return null;
-        }
-
-        const sorted = [...resultsPanel.results].sort((a, b) => (b.score / (b.total || 1)) - (a.score / (a.total || 1)));
-
+      {/* Exam grading — full-screen */}
+      {gradingView && (() => {
+        const examLesson = chapters.flatMap(ch => ch.sessions.flatMap(s => s.lessons)).find(l => l.id === gradingView.lessonId);
         return (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm">
-            <div className="bg-card w-full max-w-lg rounded-3xl border border-border shadow-xl flex flex-col max-h-[85vh]">
-
-              {/* Header */}
-              <div className="flex items-center gap-3 px-5 py-4 border-b border-border shrink-0">
-                {detailStudent ? (
-                  <button onClick={() => setDetailStudent(null)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground transition-colors">
-                    <ChevronLeft className="h-4 w-4" />
-                  </button>
-                ) : (
-                  <Trophy className="h-5 w-5 text-primary shrink-0" />
-                )}
-                <div className="flex-1 min-w-0">
-                  {detailStudent ? (
-                    <>
-                      <p className="text-sm font-semibold text-foreground truncate">{detailStudent.student_name || detailStudent.student_id}</p>
-                      <p className="text-xs text-muted-foreground">{resultsPanel.lessonTitle}</p>
-                    </>
-                  ) : (
-                    <>
-                      <p className="text-sm font-semibold text-foreground truncate">{resultsPanel.lessonTitle}</p>
-                      <p className="text-xs text-muted-foreground">{resultsPanel.results.length} học sinh đã nộp bài</p>
-                    </>
-                  )}
-                </div>
-                <button onClick={() => { setResultsPanel(null); setDetailStudent(null); }} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground transition-colors">
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-
-              {/* ── List view ── */}
-              {!detailStudent && (
-                <div className="overflow-y-auto flex-1 px-5 py-4 space-y-2">
-                  {resultsPanel.results.length === 0 ? (
-                    <p className="text-sm text-muted-foreground text-center py-8">Chưa có học sinh nộp bài.</p>
-                  ) : (
-                    <>
-                      {/* Stats */}
-                      {(() => {
-                        const scores = resultsPanel.results.map(r => r.total > 0 ? Math.round((r.score / r.total) * 100) : 0);
-                        const avg    = Math.round(scores.reduce((a, b) => a + b, 0) / scores.length);
-                        const passed = scores.filter(s => s >= 50).length;
-                        return (
-                          <div className="grid grid-cols-3 gap-2 mb-3">
-                            {[
-                              { label: "Trung bình", value: `${avg}%`,                              cls: "text-primary" },
-                              { label: "Đạt (≥50%)", value: passed,                                cls: "text-emerald-600 dark:text-emerald-400" },
-                              { label: "Chưa đạt",   value: resultsPanel.results.length - passed,  cls: "text-red-500 dark:text-red-400" },
-                            ].map(s => (
-                              <div key={s.label} className="bg-muted/50 rounded-xl p-2.5 text-center border border-border">
-                                <div className={`text-lg font-bold ${s.cls}`}>{s.value}</div>
-                                <div className="text-[10px] text-muted-foreground">{s.label}</div>
-                              </div>
-                            ))}
-                          </div>
-                        );
-                      })()}
-
-                      {/* Student rows — clickable */}
-                      {sorted.map((r, i) => {
-                        const pct    = r.total > 0 ? Math.round((r.score / r.total) * 100) : 0;
-                        const passed = pct >= 50;
-                        return (
-                          <button
-                            key={r.student_id}
-                            onClick={() => setDetailStudent(r)}
-                            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border border-border bg-background hover:border-primary/40 hover:bg-muted/30 transition-all text-left group"
-                          >
-                            <span className="text-xs font-bold text-muted-foreground w-5 shrink-0 text-center">{i + 1}</span>
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm font-medium text-foreground truncate">{r.student_name || r.student_id}</p>
-                              <p className="text-[11px] text-muted-foreground">
-                                {new Date(r.submitted_at).toLocaleString("vi-VN", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
-                              </p>
-                            </div>
-                            <div className="w-20 h-1.5 rounded-full bg-muted overflow-hidden shrink-0">
-                              <div className={`h-full rounded-full ${passed ? "bg-emerald-500" : "bg-red-400"}`} style={{ width: `${pct}%` }} />
-                            </div>
-                            <span className={`text-xs font-bold shrink-0 w-12 text-right ${passed ? "text-emerald-600 dark:text-emerald-400" : "text-red-500 dark:text-red-400"}`}>
-                              {r.score}/{r.total}đ
-                            </span>
-                            <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full shrink-0 ${passed ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"}`}>
-                              {pct}%
-                            </span>
-                            <ChevRight className="h-3.5 w-3.5 text-muted-foreground shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
-                          </button>
-                        );
-                      })}
-                    </>
-                  )}
-                </div>
-              )}
-
-              {/* ── Detail view ── */}
-              {detailStudent && (() => {
-                const pct    = detailStudent.total > 0 ? Math.round((detailStudent.score / detailStudent.total) * 100) : 0;
-                const passed = pct >= 50;
-                const answers = detailStudent.answers as Record<string, Record<string, unknown>>;
-
-                return (
-                  <div className="overflow-y-auto flex-1 px-5 py-4 space-y-3">
-                    {/* Score summary */}
-                    <div className={`flex items-center gap-4 p-4 rounded-2xl border-2 ${passed ? "border-emerald-200 bg-emerald-50 dark:bg-emerald-900/20 dark:border-emerald-800/50" : "border-red-200 bg-red-50 dark:bg-red-900/20 dark:border-red-800/50"}`}>
-                      <div className="flex-1">
-                        <p className={`text-2xl font-bold ${passed ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}`}>{pct}%</p>
-                        <p className="text-xs text-muted-foreground mt-0.5">{detailStudent.score}/{detailStudent.total} điểm · {passed ? "Đạt" : "Chưa đạt"}</p>
-                      </div>
-                      <div className="text-right text-xs text-muted-foreground">
-                        <p>Nộp lúc</p>
-                        <p className="font-medium text-foreground">{new Date(detailStudent.submitted_at).toLocaleString("vi-VN", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</p>
-                      </div>
-                    </div>
-
-                    {/* Per-question */}
-                    {questions.length === 0 && (
-                      <p className="text-xs text-muted-foreground text-center py-4">Không tìm thấy câu hỏi (đề thi có thể đã bị sửa).</p>
-                    )}
-                    {questions.map((q, idx) => {
-                      const ans     = answers[q.id] ?? {};
-                      const correct = isCorrect(q, ans);
-
-                      return (
-                        <div key={q.id} className={`rounded-2xl border p-3.5 space-y-2 ${correct ? "border-emerald-200 dark:border-emerald-800/50" : q.type === "essay" ? "border-amber-200 dark:border-amber-800/50" : "border-red-200 dark:border-red-800/50"}`}>
-                          {/* Question row */}
-                          <div className="flex items-start gap-2">
-                            <span className={`h-5 w-5 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5 ${correct ? "bg-emerald-500 text-white" : q.type === "essay" ? "bg-amber-400 text-white" : "bg-red-500 text-white"}`}>
-                              {correct ? "✓" : q.type === "essay" ? "~" : "✗"}
-                            </span>
-                            <div className="flex-1 min-w-0">
-                              <p className="text-xs font-semibold text-muted-foreground mb-0.5">Câu {idx + 1} · {q.score}đ</p>
-                              <div
-                                className="text-sm text-foreground leading-snug [&_p]:my-0.5 [&_img]:max-w-full [&_img]:rounded-lg [&_img]:my-1"
-                                dangerouslySetInnerHTML={{ __html: renderMathInHtml(q.content_html) }}
-                              />
-                            </div>
-                          </div>
-
-                          {/* Answer detail */}
-                          {q.type === "multiple_choice" && (
-                            <div className="space-y-1 pl-7">
-                              {(q.options ?? []).map((opt, i) => {
-                                const isStudentPick = ans.selected_option === i;
-                                const isCorrectOpt  = q.correct_option === i;
-                                if (!isStudentPick && !isCorrectOpt) return null;
-                                return (
-                                  <div key={i} className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs ${isCorrectOpt ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400" : "bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-400"}`}>
-                                    <span className={`h-4 w-4 rounded-full flex items-center justify-center text-[9px] font-bold shrink-0 ${isCorrectOpt ? "bg-emerald-500 text-white" : "bg-red-500 text-white"}`}>{OPTS[i]}</span>
-                                    <span
-                                      className="flex-1 truncate [&_p]:inline [&_img]:hidden"
-                                      dangerouslySetInnerHTML={{ __html: renderMathInHtml(opt) }}
-                                    />
-                                    <span className="font-semibold shrink-0">{isCorrectOpt ? "Đáp án" : "Bạn chọn"}</span>
-                                  </div>
-                                );
-                              })}
-                              {ans.selected_option === undefined && (
-                                <p className="text-xs text-muted-foreground italic pl-1">Chưa trả lời</p>
-                              )}
-                            </div>
-                          )}
-
-                          {q.type === "true_false" && (q.statements?.length ?? 0) > 0 && (
-                            <div className="pl-7 space-y-1">
-                              {q.statements!.map((st, i) => {
-                                const sa = ans.statement_answers as Record<number, boolean> | undefined;
-                                const picked = sa?.[i];
-                                const ok = picked === st.correct;
-                                return (
-                                  <div key={i} className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs ${ok ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400" : "bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-400"}`}>
-                                    <span className={`h-4 w-4 rounded-full flex items-center justify-center text-[9px] font-bold shrink-0 ${ok ? "bg-emerald-500 text-white" : "bg-red-500 text-white"}`}>
-                                      {String.fromCharCode(97 + i)}
-                                    </span>
-                                    <span className="flex-1 truncate">{st.text}</span>
-                                    <span className="font-semibold shrink-0">
-                                      HS: {picked === undefined ? "—" : picked ? "Đ" : "S"}{!ok && ` · ĐA: ${st.correct ? "Đ" : "S"}`}
-                                    </span>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          )}
-
-                          {q.type === "true_false" && !(q.statements?.length) && (
-                            <div className="pl-7 flex gap-2 text-xs">
-                              <span className={`px-2.5 py-1 rounded-lg ${ans.selected_value === "true" ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400" : ans.selected_value === "false" ? "bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-400" : "bg-muted text-muted-foreground"}`}>
-                                Học sinh: {ans.selected_value === "true" ? "✓ Đúng" : ans.selected_value === "false" ? "✗ Sai" : "Chưa trả lời"}
-                              </span>
-                              {!correct && (
-                                <span className="px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400">
-                                  Đáp án: {q.correct_value === "true" ? "✓ Đúng" : "✗ Sai"}
-                                </span>
-                              )}
-                            </div>
-                          )}
-
-                          {q.type === "fill_blank" && (
-                            <div className="pl-7 flex gap-2 flex-wrap text-xs">
-                              <span className={`px-2.5 py-1 rounded-lg ${correct ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400" : "bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-400"}`}>
-                                Học sinh: <strong>{String(ans.selected_value || "(trống)")}</strong>
-                              </span>
-                              {!correct && (
-                                <span className="px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400">
-                                  Đáp án: <strong>{q.correct_value}</strong>
-                                </span>
-                              )}
-                            </div>
-                          )}
-
-                          {q.type === "essay" && (
-                            <div className="pl-7 text-xs">
-                              {ans.essay_text ? (
-                                <div className="bg-muted/40 rounded-xl p-2.5 text-foreground whitespace-pre-wrap leading-relaxed">
-                                  {String(ans.essay_text)}
-                                </div>
-                              ) : (
-                                <p className="text-muted-foreground italic">Chưa trả lời</p>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                );
-              })()}
-
-            </div>
-          </div>
+          <ExamGradingView
+            classId={classId}
+            lessonId={gradingView.lessonId}
+            examTitle={gradingView.lessonTitle}
+            questions={examLesson?.exam_content?.questions ?? []}
+            initialResults={examResultsMap[gradingView.lessonId] ?? []}
+            onClose={() => setGradingView(null)}
+            onResultsChange={results => setExamResultsMap(prev => ({ ...prev, [gradingView.lessonId]: results }))}
+          />
         );
       })()}
     </div>

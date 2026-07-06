@@ -346,6 +346,97 @@ export function normalizeConventionText(raw: string): string {
   return parsedToText(r.questions, r.sectionsAt);
 }
 
+// ── Reverse converter: ExamQuestion[] → ParsedQuestion[] (để sửa lại đề đã lưu) ──
+
+function decodeEntities(s: string): string {
+  return s
+    .replace(/&nbsp;/g, " ")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&");
+}
+
+/**
+ * HTML đã lưu (content_html/explanation_html/options) → text quy ước:
+ * <p>/<br> → xuống dòng, <img src=URL> → [img:URL], bỏ thẻ khác, decode entity.
+ * $...$ vốn là text nên tự sống sót.
+ */
+export function htmlToConventionText(html: string): string {
+  if (!html) return "";
+  let s = html
+    // <img …src="URL"…> → [img:URL] (src có thể đứng ở bất kỳ vị trí attribute nào)
+    .replace(/<img\b[^>]*\bsrc\s*=\s*"([^"]*)"[^>]*>/gi, (_, url: string) => `[img:${decodeEntities(url)}]`)
+    .replace(/<img\b[^>]*\bsrc\s*=\s*'([^']*)'[^>]*>/gi, (_, url: string) => `[img:${decodeEntities(url)}]`)
+    // Ranh giới block → xuống dòng
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|h[1-6]|li|tr)>/gi, "\n")
+    // Bỏ mọi thẻ còn lại
+    .replace(/<[^>]+>/g, "");
+  s = decodeEntities(s);
+  // Gọn khoảng trắng: trim từng dòng, bỏ dòng trống thừa
+  return s
+    .split("\n")
+    .map(l => l.replace(/\s+/g, " ").trim())
+    .filter(l => l.length > 0)
+    .join("\n");
+}
+
+/** Như htmlToConventionText nhưng ép về một dòng (dùng cho phương án/mệnh đề). */
+function htmlToInlineText(html: string): string {
+  return htmlToConventionText(html).replace(/\n+/g, " ").trim();
+}
+
+/**
+ * ExamQuestion[] đã lưu → dạng ParsedQuestion[] có thể sửa tiếp + registry
+ * (công thức dài / ảnh được token hoá qua tokenizeConventionText).
+ */
+export function examQuestionsToParsed(questions: ExamQuestion[]): { parsed: ParsedQuestion[]; registry: ExamAssetRegistry } {
+  const { text, registry } = examQuestionsToText(questions);
+  return { parsed: parseExamText(text).questions, registry };
+}
+
+/**
+ * ExamQuestion[] đã lưu → văn bản quy ước + registry token [m:N]/[img:N].
+ * Dùng khi mở lại đề đã lưu trong trình soạn văn bản.
+ */
+export function examQuestionsToText(questions: ExamQuestion[]): { text: string; registry: ExamAssetRegistry } {
+  const parsed: ParsedQuestion[] = questions.map((q, i) => {
+    const content = htmlToConventionText(q.content_html);
+    const solution = htmlToConventionText(q.explanation_html ?? "") || undefined;
+    const base = { index: i + 1, content, solution, warnings: [] as string[] };
+
+    switch (q.type) {
+      case "multiple_choice":
+        return {
+          ...base, type: "multiple_choice" as const,
+          options: (q.options ?? []).map(htmlToInlineText),
+          correctOption: q.correct_option ?? 0,
+        };
+      case "true_false":
+        if (q.statements && q.statements.length > 0) {
+          return { ...base, type: "true_false" as const, statements: q.statements.map(st => ({ ...st })) };
+        }
+        // Legacy đúng/sai một lựa chọn → trắc nghiệm 2 phương án (vẫn chấm được)
+        return {
+          ...base, type: "multiple_choice" as const,
+          options: ["Đúng", "Sai"],
+          correctOption: q.correct_value === "false" ? 1 : 0,
+        };
+      case "fill_blank":
+        return { ...base, type: "fill_blank" as const, shortAnswer: q.correct_value ?? "" };
+      default: {
+        // Tự luận: nếu không có giải thích, dùng answer_html làm lời giải
+        const sol = base.solution ?? (htmlToConventionText(q.answer_html ?? "") || undefined);
+        return { ...base, type: "essay" as const, solution: sol };
+      }
+    }
+  });
+
+  return tokenizeConventionText(parsedToText(parsed));
+}
+
 export function parsedToExamQuestions(parsed: ParsedQuestion[], registry?: ExamAssetRegistry): ExamQuestion[] {
   return parsed.map((p, i) => {
     const base = {

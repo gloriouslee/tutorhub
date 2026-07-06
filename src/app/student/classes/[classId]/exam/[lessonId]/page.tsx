@@ -10,9 +10,10 @@ import { renderMathInHtml } from "@/lib/mathRender";
 import {
   Clock, CheckCircle2, XCircle, AlertTriangle, Check,
   ChevronLeft, Flag, RotateCcw, BookOpen, Circle,
-  ChevronRight, LayoutGrid, X,
+  ChevronRight, LayoutGrid, X, Image as ImageIcon, MessageSquare,
 } from "lucide-react";
 import { useStudentContext } from "@/hooks/useStudentContext";
+import { uploadClassFile } from "@/lib/upload";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -20,6 +21,8 @@ type StudentAnswer = {
   selected_option?: number;
   selected_value?: string;
   essay_text?: string;
+  // Ảnh bài làm tự luận (URL đã upload lên storage)
+  essay_images?: string[];
   // Đúng sai nhiều mệnh đề: chỉ số mệnh đề → lựa chọn Đ (true) / S (false)
   statement_answers?: Record<number, boolean>;
 };
@@ -29,6 +32,10 @@ type ExamResult = {
   score: number;
   total: number;
   submitted_at: string;
+  // Chấm thủ công của giáo viên (tự luận)
+  manual_scores?: Record<string, number>;
+  teacher_feedback?: string;
+  graded_at?: string;
 };
 
 // Mark lesson as watched (for curriculum progress)
@@ -47,7 +54,8 @@ function markExamComplete(studentId: string, lessonId: string) {
 
 function isAnswered(ans: StudentAnswer | undefined): boolean {
   if (!ans) return false;
-  return ans.selected_option !== undefined || !!ans.selected_value || !!ans.essay_text
+  return ans.selected_option !== undefined || !!ans.selected_value
+    || !!ans.essay_text?.trim() || (ans.essay_images?.length ?? 0) > 0
     || (!!ans.statement_answers && Object.keys(ans.statement_answers).length > 0);
 }
 
@@ -356,32 +364,130 @@ function FillInput({ answer, onAnswer }: { answer: StudentAnswer; onAnswer: (a: 
   );
 }
 
-function EssayInput({ answer, onAnswer }: { answer: StudentAnswer; onAnswer: (a: StudentAnswer) => void }) {
+const MAX_ESSAY_IMAGES = 5;
+
+function EssayInput({ answer, onAnswer, classId }: { answer: StudentAnswer; onAnswer: (a: StudentAnswer) => void; classId: string }) {
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState("");
+  const [dragOver, setDragOver] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const images = answer.essay_images ?? [];
+
+  async function handleFiles(files: FileList | File[]) {
+    const list = Array.from(files).filter(f => f.type.startsWith("image/"));
+    if (list.length === 0) return;
+    const room = MAX_ESSAY_IMAGES - images.length;
+    if (room <= 0) { setUploadError(`Tối đa ${MAX_ESSAY_IMAGES} ảnh.`); return; }
+    setUploading(true);
+    setUploadError("");
+    try {
+      const uploaded: string[] = [];
+      for (const file of list.slice(0, room)) {
+        const { url } = await uploadClassFile(file, classId, "homework");
+        uploaded.push(url);
+      }
+      onAnswer({ ...answer, essay_images: [...images, ...uploaded] });
+      if (list.length > room) setUploadError(`Chỉ tải được ${room} ảnh (tối đa ${MAX_ESSAY_IMAGES} ảnh).`);
+    } catch {
+      setUploadError("Tải ảnh thất bại. Vui lòng thử lại.");
+    } finally {
+      setUploading(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  }
+
+  function removeImage(i: number) {
+    onAnswer({ ...answer, essay_images: images.filter((_, idx) => idx !== i) });
+  }
+
   return (
-    <div className="mt-5">
-      <label className="text-sm text-muted-foreground mb-2 block">Bài làm của bạn:</label>
-      <textarea
-        value={answer.essay_text ?? ""}
-        onChange={e => onAnswer({ essay_text: e.target.value })}
-        rows={7}
-        placeholder="Nhập bài làm…"
-        className="w-full px-4 py-3 rounded-2xl border-2 border-border bg-card text-foreground text-sm resize-none outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all"
-      />
+    <div className="mt-5 space-y-4">
+      <div>
+        <label className="text-sm text-muted-foreground mb-2 block">Bài làm của em:</label>
+        <textarea
+          value={answer.essay_text ?? ""}
+          onChange={e => onAnswer({ ...answer, essay_text: e.target.value })}
+          rows={7}
+          placeholder="Bài làm của em..."
+          className="w-full px-4 py-3 rounded-2xl border-2 border-border bg-card text-foreground text-sm resize-none outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all"
+        />
+      </div>
+
+      {/* Ảnh bài làm */}
+      <div>
+        <label className="text-sm text-muted-foreground mb-2 block">Ảnh bài làm (tối đa {MAX_ESSAY_IMAGES} ảnh):</label>
+        <div
+          onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={e => { e.preventDefault(); setDragOver(false); void handleFiles(e.dataTransfer.files); }}
+          className={`rounded-2xl border-2 border-dashed p-4 text-center transition-all
+            ${dragOver ? "border-primary bg-primary/5" : "border-border bg-card"}`}
+        >
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            multiple
+            className="hidden"
+            onChange={e => { if (e.target.files) void handleFiles(e.target.files); }}
+          />
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="gap-2"
+            disabled={uploading || images.length >= MAX_ESSAY_IMAGES}
+            onClick={() => fileRef.current?.click()}
+          >
+            <ImageIcon className="h-4 w-4" />
+            {uploading ? "Đang tải ảnh…" : "Tải ảnh bài làm"}
+          </Button>
+          <p className="text-[11px] text-muted-foreground mt-2">Kéo thả ảnh vào đây hoặc bấm nút để chọn ảnh.</p>
+          {uploadError && <p className="text-xs text-red-500 mt-1.5">{uploadError}</p>}
+        </div>
+
+        {images.length > 0 && (
+          <div className="flex flex-wrap gap-2.5 mt-3">
+            {images.map((url, i) => (
+              <div key={url + i} className="relative group">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={url} alt={`Ảnh bài làm ${i + 1}`} className="h-24 w-24 object-cover rounded-xl border border-border" />
+                <button
+                  type="button"
+                  onClick={() => removeImage(i)}
+                  title="Xoá ảnh"
+                  className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-red-500 text-white flex items-center justify-center shadow-sm hover:bg-red-600 transition-colors"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
 
 // ── Result view ───────────────────────────────────────────────────────────────
 
-function ResultView({ questions, result, onRetry, examTitle }: {
+function ResultView({ questions, result, onRetry, examTitle, showSolution }: {
   questions: ExamQuestion[];
   result: ExamResult;
   onRetry: () => void;
   examTitle: string;
+  showSolution: boolean;
 }) {
   const router = useRouter();
-  const pct    = result.total > 0 ? Math.round((result.score / result.total) * 100) : 0;
+  const manualScores = result.manual_scores ?? {};
+  // Tổng điểm chấm tay (tự luận) — cộng vào điểm tự động
+  const manualSum = questions
+    .filter(q => q.type === "essay" && manualScores[q.id] !== undefined)
+    .reduce((s, q) => s + manualScores[q.id], 0);
+  const displayScore = result.score + manualSum;
+  const pct    = result.total > 0 ? Math.round((displayScore / result.total) * 100) : 0;
   const passed = pct >= 50;
+  const hasGraded = Object.keys(manualScores).length > 0;
 
   const isCorrect = (q: ExamQuestion, ans: StudentAnswer): boolean => {
     if (q.type === "multiple_choice") return ans.selected_option === q.correct_option;
@@ -395,7 +501,7 @@ function ResultView({ questions, result, onRetry, examTitle }: {
     const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n;
   });
 
-  const correctCount = questions.filter(q => isCorrect(q, result.answers[q.id] ?? {})).length;
+  const correctCount = questions.filter(q => q.type !== "essay" && isCorrect(q, result.answers[q.id] ?? {})).length;
   const wrongCount   = questions.filter(q => !isCorrect(q, result.answers[q.id] ?? {}) && q.type !== "essay").length;
 
   // Circular score arc
@@ -438,8 +544,13 @@ function ResultView({ questions, result, onRetry, examTitle }: {
                 {pct}%
               </span>
               <span className="text-xs text-muted-foreground mt-0.5">
-                {result.score}/{result.total} điểm
+                {displayScore}/{result.total} điểm
               </span>
+              {hasGraded && (
+                <span className="text-[10px] text-muted-foreground">
+                  ({result.score} tự động + {manualSum} tự luận)
+                </span>
+              )}
             </div>
           </div>
 
@@ -451,6 +562,21 @@ function ResultView({ questions, result, onRetry, examTitle }: {
             Nộp lúc {new Date(result.submitted_at).toLocaleString("vi-VN")}
           </p>
         </div>
+
+        {/* Nhận xét của giáo viên */}
+        {result.teacher_feedback && (
+          <div className="rounded-2xl border border-blue-200 dark:border-blue-800/50 bg-blue-50 dark:bg-blue-900/20 p-4">
+            <p className="flex items-center gap-1.5 text-xs font-semibold text-blue-700 dark:text-blue-400 mb-1.5">
+              <MessageSquare className="h-3.5 w-3.5" />Nhận xét của giáo viên
+            </p>
+            <p className="text-sm text-blue-900 dark:text-blue-200 whitespace-pre-wrap">{result.teacher_feedback}</p>
+            {result.graded_at && (
+              <p className="text-[10px] text-blue-600/70 dark:text-blue-400/60 mt-2">
+                Chấm lúc {new Date(result.graded_at).toLocaleString("vi-VN")}
+              </p>
+            )}
+          </div>
+        )}
 
         {/* Stats */}
         <div className="grid grid-cols-3 gap-3">
@@ -477,16 +603,28 @@ function ResultView({ questions, result, onRetry, examTitle }: {
               const OPTS    = ["A", "B", "C", "D"];
 
               return (
-                <div key={q.id} className={`rounded-2xl border overflow-hidden ${correct ? "border-emerald-200 dark:border-emerald-800/50" : q.type === "essay" ? "border-amber-200 dark:border-amber-800/50" : "border-red-200 dark:border-red-800/50"}`}>
+                <div key={q.id} className={`rounded-2xl border overflow-hidden ${q.type === "essay" ? "border-amber-200 dark:border-amber-800/50" : correct ? "border-emerald-200 dark:border-emerald-800/50" : "border-red-200 dark:border-red-800/50"}`}>
                   <button onClick={() => toggle(q.id)} className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-muted/30 transition-colors">
-                    {correct ? <CheckCircle2 className="h-5 w-5 text-emerald-500 shrink-0" />
-                      : q.type === "essay" ? <BookOpen className="h-5 w-5 text-amber-500 shrink-0" />
+                    {q.type === "essay" ? <BookOpen className="h-5 w-5 text-amber-500 shrink-0" />
+                      : correct ? <CheckCircle2 className="h-5 w-5 text-emerald-500 shrink-0" />
                       : <XCircle className="h-5 w-5 text-red-500 shrink-0" />}
                     <span className="text-xs font-semibold text-muted-foreground shrink-0 w-12">Câu {idx + 1}</span>
                     <span className="flex-1 text-sm font-medium text-foreground truncate"><RawText html={q.content_html} /></span>
-                    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full shrink-0 ${correct ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" : q.type === "essay" ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400" : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"}`}>
-                      {correct ? `+${q.score}đ` : q.type === "essay" ? "Tự luận" : "0đ"}
-                    </span>
+                    {q.type === "essay" ? (
+                      manualScores[q.id] !== undefined ? (
+                        <span className="text-xs font-semibold px-2 py-0.5 rounded-full shrink-0 bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">
+                          Điểm: {manualScores[q.id]}
+                        </span>
+                      ) : (
+                        <span className="text-xs font-semibold px-2 py-0.5 rounded-full shrink-0 bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
+                          Chưa chấm
+                        </span>
+                      )
+                    ) : (
+                      <span className={`text-xs font-semibold px-2 py-0.5 rounded-full shrink-0 ${correct ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"}`}>
+                        {correct ? `+${q.score}đ` : "0đ"}
+                      </span>
+                    )}
                     <ChevronRight className={`h-4 w-4 text-muted-foreground transition-transform shrink-0 ${open ? "rotate-90" : ""}`} />
                   </button>
 
@@ -533,10 +671,35 @@ function ResultView({ questions, result, onRetry, examTitle }: {
                           })}
                         </div>
                       )}
-                      {q.type === "essay" && ans.essay_text && (
-                        <div className="bg-muted/30 rounded-xl p-3">
-                          <p className="text-xs text-muted-foreground mb-1">Bài làm của bạn:</p>
-                          <p className="text-sm text-foreground whitespace-pre-wrap">{ans.essay_text}</p>
+                      {q.type === "essay" && (
+                        <div className="space-y-2">
+                          {(ans.essay_text || (ans.essay_images?.length ?? 0) > 0) ? (
+                            <div className="bg-muted/30 rounded-xl p-3 space-y-2">
+                              <p className="text-xs text-muted-foreground">Bài làm của bạn:</p>
+                              {ans.essay_text && (
+                                <p className="text-sm text-foreground whitespace-pre-wrap">{ans.essay_text}</p>
+                              )}
+                              {(ans.essay_images?.length ?? 0) > 0 && (
+                                <div className="flex flex-wrap gap-2">
+                                  {ans.essay_images!.map((url, i) => (
+                                    <a key={url + i} href={url} target="_blank" rel="noreferrer">
+                                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                                      <img src={url} alt={`Ảnh bài làm ${i + 1}`} className="h-28 w-28 object-cover rounded-xl border border-border hover:opacity-90 transition-opacity" />
+                                    </a>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <p className="text-xs text-muted-foreground italic">Chưa có bài làm.</p>
+                          )}
+                          {manualScores[q.id] !== undefined ? (
+                            <p className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+                              Giáo viên chấm: {manualScores[q.id]}/{q.score} điểm
+                            </p>
+                          ) : (
+                            <p className="text-xs font-semibold text-amber-600 dark:text-amber-400">Giáo viên chưa chấm câu này.</p>
+                          )}
                         </div>
                       )}
                       {q.type === "fill_blank" && (
@@ -550,10 +713,16 @@ function ResultView({ questions, result, onRetry, examTitle }: {
                         </div>
                       )}
                       {q.explanation_html && (
-                        <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800/50 rounded-xl p-3">
-                          <p className="text-xs font-semibold text-blue-700 dark:text-blue-400 mb-1.5">💡 Giải thích</p>
-                          <RichContent html={q.explanation_html} className="text-blue-900 dark:text-blue-200" />
-                        </div>
+                        showSolution ? (
+                          <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800/50 rounded-xl p-3">
+                            <p className="text-xs font-semibold text-blue-700 dark:text-blue-400 mb-1.5">💡 Giải thích</p>
+                            <RichContent html={q.explanation_html} className="text-blue-900 dark:text-blue-200" />
+                          </div>
+                        ) : (
+                          <p className="text-xs text-muted-foreground italic bg-muted/30 rounded-xl p-3">
+                            Giáo viên chưa mở lời giải cho bài thi này.
+                          </p>
+                        )
                       )}
                     </div>
                   )}
@@ -587,7 +756,7 @@ function calcScore(questions: ExamQuestion[], answers: Record<string, StudentAns
     if (q.type === "multiple_choice") correct = ans.selected_option === q.correct_option;
     else if (q.type === "true_false") correct = isTrueFalseCorrect(q, ans);
     else if (q.type === "fill_blank") correct = (ans.selected_value ?? "").trim().toLowerCase() === (q.correct_value ?? "").trim().toLowerCase();
-    else if (q.type === "essay") correct = true;
+    // Tự luận: không tự chấm — giáo viên chấm thủ công (manual_scores)
     return total + (correct ? q.score : 0);
   }, 0);
 }
@@ -768,7 +937,13 @@ export default function ExamPage() {
   );
 
   if (submitted && result) return (
-    <ResultView questions={questions} result={result} onRetry={retry} examTitle={lesson.title} />
+    <ResultView
+      questions={questions}
+      result={result}
+      onRetry={retry}
+      examTitle={lesson.title}
+      showSolution={lesson.exam_content?.show_solution_after_submit !== false}
+    />
   );
 
   if (examLocked) return (
@@ -883,7 +1058,7 @@ export default function ExamPage() {
             {q.type === "multiple_choice" && <MCOptions q={q} answer={ans} onAnswer={a => setAnswer(q.id, a)} />}
             {q.type === "true_false"      && <TFOptions q={q} answer={ans} onAnswer={a => setAnswer(q.id, a)} />}
             {q.type === "fill_blank"      && <FillInput answer={ans} onAnswer={a => setAnswer(q.id, a)} />}
-            {q.type === "essay"           && <EssayInput answer={ans} onAnswer={a => setAnswer(q.id, a)} />}
+            {q.type === "essay"           && <EssayInput answer={ans} onAnswer={a => setAnswer(q.id, a)} classId={classId} />}
           </div>
 
           {/* ── Bottom navigation ── */}
