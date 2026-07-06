@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { getCurriculum, saveExamResult, getExamResult, type CurriculumLesson, type ExamQuestion } from "@/lib/storage";
+import { getCurriculum, saveExamResult, getExamResult, kvUpdate, kvDelete, type CurriculumLesson, type ExamQuestion } from "@/lib/storage";
 import { Button } from "@/components/ui/button";
 import "katex/dist/katex.min.css";
 import {
@@ -530,7 +530,7 @@ export default function ExamPage() {
   const lessonId = params.lessonId as string;
   const router   = useRouter();
 
-  const { studentId, studentName } = useStudentContext();
+  const { studentId, studentName, ready } = useStudentContext();
 
   const [lesson,      setLesson]      = useState<CurriculumLesson | null>(null);
   const [questions,   setQuestions]   = useState<ExamQuestion[]>([]);
@@ -544,44 +544,67 @@ export default function ExamPage() {
   const [lockReason,  setLockReason]  = useState("");
 
   useEffect(() => {
+    // Chờ context sẵn sàng — tránh load nhầm kết quả của s1 mặc định
+    if (!ready) return;
+    let cancelled = false;
     (async () => {
     const chapters = await getCurriculum(classId);
     for (const ch of chapters)
       for (const sess of ch.sessions) {
         const found = sess.lessons.find(l => l.id === lessonId);
         if (found) {
+          if (cancelled) return;
           setLesson(found);
           setQuestions(found.exam_content?.questions ?? []);
 
-          // Check access control
+          // Check access control — cùng quy tắc với CurriculumView:
+          // mở nếu status === "open" HOẶC (draft nhưng đã tới giờ mở)
           const status = found.exam_status ?? "draft";
           const opensAt = found.exam_opens_at;
+          const now = new Date();
+          const isOpen = status === "open" || (status === "draft" && !!opensAt && new Date(opensAt) <= now);
           if (status === "closed") {
             setExamLocked(true); setLockReason("Bài thi đã kết thúc.");
-          } else if (status === "draft") {
-            setExamLocked(true); setLockReason("Bài thi chưa được mở.");
-          } else if (opensAt && new Date(opensAt) > new Date()) {
+          } else if (!isOpen) {
             setExamLocked(true);
-            setLockReason(`Bài thi sẽ mở lúc ${new Date(opensAt).toLocaleString("vi-VN")}.`);
+            setLockReason(opensAt && new Date(opensAt) > now
+              ? `Bài thi sẽ mở lúc ${new Date(opensAt).toLocaleString("vi-VN")}.`
+              : "Bài thi chưa được mở.");
+          } else {
+            setExamLocked(false); setLockReason("");
           }
 
           // Load previous result (scoped to this student)
           const prev = await getExamResult(classId, lessonId, studentId || "anon");
-          if (prev) { setResult(prev as unknown as ExamResult); setSubmitted(true); }
+          if (cancelled) return;
+          if (prev) {
+            setResult(prev as unknown as ExamResult);
+            setSubmitted(true);
+          } else {
+            // Không có kết quả cho học sinh này — reset state cũ (nếu có)
+            setResult(null);
+            setSubmitted(false);
+          }
           return;
         }
       }
     })();
-  }, [classId, lessonId, studentId]);
+    return () => { cancelled = true; };
+  }, [classId, lessonId, studentId, ready]);
 
   const timeLimit = lesson?.exam_content?.time_limit
     ? lesson.exam_content.time_limit * 60
     : null;
 
+  // Ref pattern: luôn gọi bản submit mới nhất (tránh stale closure với answers rỗng)
+  const submitRef = useRef(submit);
+  submitRef.current = submit;
+  const submittedRef = useRef(submitted);
+  submittedRef.current = submitted;
+
   const handleTimeUp = useCallback(() => {
-    if (!submitted) submit();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [submitted]);
+    if (!submittedRef.current) submitRef.current();
+  }, []);
 
   const remaining = useTimer(submitted ? null : timeLimit, handleTimeUp);
 
@@ -602,10 +625,13 @@ export default function ExamPage() {
     setShowConfirm(false);
   }
 
-  function retry() {
-    // Remove only this student's result
+  async function retry() {
+    // Remove only this student's result (cả DB lẫn cache local)
     const sid = studentId || "anon";
-    localStorage.removeItem(`tutorhub_exam_result_${classId}_${lessonId}_${sid}`);
+    await kvDelete(`tutorhub_exam_result_${classId}_${lessonId}_${sid}`);
+    // Gỡ khỏi sổ đăng ký bài nộp để giáo viên không thấy kết quả ma
+    await kvUpdate<string[]>(`tutorhub_exam_submissions_${classId}_${lessonId}`, [],
+      ids => ids.filter(id => id !== sid));
     setAnswers({});
     setResult(null);
     setSubmitted(false);

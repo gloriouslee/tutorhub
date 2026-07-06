@@ -131,7 +131,36 @@ export default function TeacherClassDetailPage() {
   // Student packages per class (persisted to localStorage)
   const [studentPackages, setStudentPackages] = useState<Record<string, StudentPackage>>({});
 
-  const cls = MOCK_CLASSES.find(c => c.id === classId);
+  // Teacher-created classes (persisted in localStorage) — normalized to the mock class shape
+  const [extraClass, setExtraClass] = useState<(typeof MOCK_CLASSES)[number] | null>(null);
+  const [extraClassLoaded, setExtraClassLoaded] = useState(false);
+  useEffect(() => {
+    kvGet<any[]>("tutorhub_teacher_classes", [])
+      .then(list => {
+        const found = list.find(c => c.id === classId);
+        if (found) {
+          setExtraClass({
+            id: found.id,
+            class_name: found.class_name ?? "Lớp học",
+            subject: found.subject ?? "",
+            grade: found.grade ?? 0,
+            learning_mode: found.learning_mode ?? "offline",
+            classroom: found.classroom ?? "",
+            description: found.description ?? "",
+            max_students: found.max_students ?? 15,
+            student_ids: found.student_ids ?? [],
+            schedule: found.schedule ?? [],
+            color: found.color ?? "#6366f1",
+            tutor_id: found.tutor_id ?? "t1",
+            zoom_link: found.zoom_link,
+          } as unknown as (typeof MOCK_CLASSES)[number]);
+        }
+        setExtraClassLoaded(true);
+      })
+      .catch(() => setExtraClassLoaded(true));
+  }, [classId]);
+
+  const cls = MOCK_CLASSES.find(c => c.id === classId) ?? extraClass ?? undefined;
 
   useEffect(() => {
     if (!cls) return;
@@ -269,11 +298,15 @@ export default function TeacherClassDetailPage() {
   if (!cls) {
     return (
       <PortalLayout role="teacher" userName="Thầy Hùng Toán" pageTitle="Lớp học">
+        {!extraClassLoaded ? (
+          <div className="py-20 text-center text-sm text-muted-foreground">Đang tải lớp học…</div>
+        ) : (
         <div className="flex flex-col items-center justify-center py-20">
           <BookOpen className="h-16 w-16 text-muted-foreground/30 mb-4" />
           <h2 className="text-lg font-semibold">Không tìm thấy lớp học</h2>
           <Link href="/teacher/classes"><Button variant="outline" className="mt-4"><ArrowLeft className="h-4 w-4 mr-2" />Quay lại</Button></Link>
         </div>
+        )}
       </PortalLayout>
     );
   }
@@ -475,6 +508,7 @@ export default function TeacherClassDetailPage() {
               linkSaved={linkSaved}
               setLinkSaved={setLinkSaved}
               onSaveOnlineLink={handleSaveOnlineLink}
+              onSaved={newSchedule => setCurrentSchedule(newSchedule)}
             />
           )}
 

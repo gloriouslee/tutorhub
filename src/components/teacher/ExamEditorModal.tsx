@@ -195,7 +195,7 @@ function OptionEditor({ content, onChange, placeholder, classId, correct }: {
           className={`h-5 w-5 flex items-center justify-center rounded text-[10px] transition-colors ${editor?.isActive("italic") ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"}`}>
           <Italic className="h-3 w-3" />
         </button>
-        <button onMouseDown={e => { e.preventDefault(); editor?.commands.insertContent("$公式$"); }}
+        <button onMouseDown={e => { e.preventDefault(); editor?.commands.insertContent("$x^2$"); }}
           className="h-5 w-5 flex items-center justify-center rounded text-muted-foreground hover:bg-muted transition-colors" title="Công thức ($...)">
           <Sigma className="h-3 w-3" />
         </button>
@@ -548,6 +548,7 @@ export default function ExamEditorModal({
     if (!title.trim()) return;
     const lessonId = initial?.id ?? uid();
     onSave({
+      ...(initial as CurriculumLesson | undefined),
       id:           lessonId,
       type:         "exam",
       title:        title.trim(),

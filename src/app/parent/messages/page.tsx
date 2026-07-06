@@ -7,6 +7,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Search, Send, Paperclip, Phone, Info, Check, CheckCheck } from "lucide-react";
+import { kvGet, kvSet } from "@/lib/storage";
 
 // Mock Data
 const CONTACTS = [
@@ -70,20 +71,19 @@ export default function ParentMessagesPage() {
 
   // Load persisted conversations on mount
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(LS_MESSAGES);
-      if (raw) {
-        const parsed = JSON.parse(raw);
+    (async () => {
+      try {
+        const parsed = await kvGet<typeof CONTACTS | null>(LS_MESSAGES, null);
         if (Array.isArray(parsed) && parsed.length > 0) setContacts(parsed);
-      }
-    } catch { /* ignore */ }
-    setHydrated(true);
+      } catch { /* ignore */ }
+      setHydrated(true);
+    })();
   }, []);
 
   // Persist conversations whenever they change
   useEffect(() => {
     if (!hydrated) return;
-    try { localStorage.setItem(LS_MESSAGES, JSON.stringify(contacts)); } catch { /* ignore */ }
+    kvSet(LS_MESSAGES, contacts).catch(() => { /* ignore */ });
   }, [contacts, hydrated]);
 
   const activeContact = contacts.find(c => c.id === activeContactId) || contacts[0];

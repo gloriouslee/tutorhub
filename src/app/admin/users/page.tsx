@@ -13,7 +13,7 @@ import {
   Eye, EyeOff, Shield,
 } from "lucide-react";
 import {
-  getManagedUsers, saveManagedUser, deleteManagedUser,
+  getManagedUsers, saveManagedUser, deleteManagedUser, kvSet,
   resetManagedUserPassword, toggleManagedUserDisabled,
   getStudentAccounts,
   type ManagedUser, type UserRole,
@@ -310,11 +310,14 @@ export default function AdminUsersPage() {
   useEffect(() => {
     (async () => {
       const stored = await getManagedUsers();
-      const seeded = await seedIfNeeded(stored);
-      if (seeded.length !== stored.length) {
-        localStorage.setItem("tutorhub_managed_users", JSON.stringify(seeded));
+      // Chỉ seed khi danh sách hoàn toàn trống — user đã xoá thì không bị thêm lại
+      if (stored.length === 0) {
+        const seeded = await seedIfNeeded([]);
+        await kvSet("tutorhub_managed_users", seeded);
+        setUsers(seeded);
+      } else {
+        setUsers(stored);
       }
-      setUsers(seeded);
     })();
   }, []);
 

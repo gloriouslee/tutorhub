@@ -48,7 +48,9 @@ interface ApproveModalProps {
 
 function ApproveModal({ enrollment, classes, onClose, onDone }: ApproveModalProps) {
   const defaultUsername = enrollment.email.toLowerCase();
-  const defaultPassword = enrollment.email.split("@")[0];
+  const localPart = enrollment.email.split("@")[0];
+  // Đảm bảo mật khẩu mặc định đủ dài (Supabase yêu cầu tối thiểu 6 ký tự)
+  const defaultPassword = localPart.length >= 8 ? localPart : `${localPart}@2026`;
 
   const [assignedClassId, setAssignedClassId] = useState(enrollment.requested_class_id);
   const [username, setUsername]               = useState(defaultUsername);
@@ -70,7 +72,12 @@ function ApproveModal({ enrollment, classes, onClose, onDone }: ApproveModalProp
       });
       onDone();
     } catch (err: unknown) {
-      setApproveError(err instanceof Error ? err.message : "Lỗi khi duyệt đơn");
+      const raw = err instanceof Error ? err.message : "";
+      setApproveError(
+        raw.includes("at least 6 characters")
+          ? "Mật khẩu tối thiểu 6 ký tự."
+          : raw || "Lỗi khi duyệt đơn"
+      );
       setSubmitting(false);
     }
   };

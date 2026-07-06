@@ -68,6 +68,10 @@ export default function LoginPage() {
       const supabase = createClient();
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (!error && data.user) {
+        // Xóa mọi cookie demo còn sót — nếu không, middleware sẽ ưu tiên
+        // demo_role cũ (vd. admin) và cấp sai quyền cho phiên đăng nhập thật
+        ["demo_role", "enrolled_student_id", "enrolled_student_name", "enrolled_student_class"]
+          .forEach(c => { document.cookie = `${c}=; path=/; max-age=0`; });
         const metaRole = data.user.user_metadata?.role as string | undefined;
         let role = metaRole;
         if (!role) {
@@ -83,7 +87,7 @@ export default function LoginPage() {
     const enrollments = await getEnrollments();
     const matched = enrollments.find(
       enr => enr.status === "approved" &&
-        enr.account_username === email &&
+        enr.account_username?.toLowerCase() === email.toLowerCase() &&
         enr.account_password === password
     );
     if (matched) {

@@ -14,6 +14,24 @@ import { LessonIcon, TypeBadge, type OwnedCourse } from "./materialsShared";
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default function PlayerView({ course, isPackageLocked, onBack }: { course: OwnedCourse; isPackageLocked: boolean; onBack: () => void }) {
+  // Guard: khóa học chưa có chương/bài học — tránh crash khi truy cập [0]
+  const hasLessons = course.chapters.length > 0 && course.chapters.some(ch => ch.lessons.length > 0);
+  if (!hasLessons) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 text-center space-y-4">
+        <BookOpen className="h-12 w-12 text-muted-foreground opacity-40" />
+        <p className="text-sm font-medium text-foreground">Khóa học chưa có nội dung</p>
+        <p className="text-xs text-muted-foreground">Giáo viên đang cập nhật bài học. Vui lòng quay lại sau.</p>
+        <Button variant="outline" size="sm" onClick={onBack}>
+          <ArrowLeft className="h-4 w-4 mr-1" /> Quay lại
+        </Button>
+      </div>
+    );
+  }
+  return <PlayerViewInner course={course} isPackageLocked={isPackageLocked} onBack={onBack} />;
+}
+
+function PlayerViewInner({ course, isPackageLocked, onBack }: { course: OwnedCourse; isPackageLocked: boolean; onBack: () => void }) {
   const allLessons = course.chapters.flatMap(ch => ch.lessons);
 
   // If package-locked, only preview lessons are accessible

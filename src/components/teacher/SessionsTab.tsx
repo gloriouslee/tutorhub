@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { MOCK_ATTENDANCE } from "@/lib/mock-data";
-import { kvSet, type CurriculumSession as CurriculumSessionData } from "@/lib/storage";
+import { kvUpdate, type CurriculumSession as CurriculumSessionData } from "@/lib/storage";
 import {
   Clock, FileText, Save, CheckCircle2, CalendarDays, CheckSquare,
   UserCheck, UserX, Map,
@@ -106,9 +106,16 @@ function InlineAttendancePanel({
       status,
       saved_at: new Date().toISOString(),
     }));
-    const others = savedRecords.filter(r => !(r.class_id === classId && r.date === date));
-    const updated = [...others, ...newRecs];
-    try { await kvSet("tutorhub_teacher_attendance", updated); } catch {}
+    let updated: SavedAttendanceRecord[] = [
+      ...savedRecords.filter(r => !(r.class_id === classId && r.date === date)),
+      ...newRecs,
+    ];
+    try {
+      updated = await kvUpdate<SavedAttendanceRecord[]>("tutorhub_teacher_attendance", [], fresh => [
+        ...fresh.filter(r => !(r.class_id === classId && r.date === date)),
+        ...newRecs,
+      ]);
+    } catch {}
     onSaved(updated);
     setSaved(true);
     setTimeout(() => setSaved(false), 2500);

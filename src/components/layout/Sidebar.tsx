@@ -89,6 +89,8 @@ function currentStudentId(): string {
     const match = document.cookie.match(/(?:^|;\s*)enrolled_student_id=([^;]+)/);
     if (match) return decodeURIComponent(match[1]);
   } catch { /* SSR or cookie access blocked */ }
+  // TODO: học viên đăng nhập bằng Supabase session (không có cookie enrolled_student_id)
+  // sẽ rơi về "s1" — cần đọc id từ session/useStudentContext để chính xác.
   return "s1";
 }
 
@@ -120,7 +122,7 @@ async function computeBadges(role: UserRole): Promise<Record<string, number>> {
         && !deletedIds.has(n.id))
       .length;
     const scheduleNotifs: { is_read: boolean }[] =
-      JSON.parse(ls("tutorhub_schedule_notifications") ?? "[]");
+      await kvGet("tutorhub_schedule_notifications", []);
     const schedUnread = scheduleNotifs.filter(n => !n.is_read).length;
     const totalUnread = mockUnread + schedUnread;
     if (totalUnread > 0) result["/student/notifications"] = totalUnread;

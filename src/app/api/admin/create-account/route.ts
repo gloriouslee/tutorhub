@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { isAdminRequest } from "@/lib/api-auth";
 
 const ALLOWED_ROLES = ["student", "teacher", "parent"] as const;
 
 // Tạo tài khoản Supabase Auth khi admin khởi tạo học viên/giáo viên thủ công.
 // Chạy server-side với service role key.
 export async function POST(req: NextRequest) {
+  if (!(await isAdminRequest(req))) {
+    return NextResponse.json({ error: "Chỉ admin mới được tạo tài khoản." }, { status: 403 });
+  }
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
   if (!serviceKey.startsWith("ey") && !serviceKey.startsWith("sb_secret")) {
     return NextResponse.json(

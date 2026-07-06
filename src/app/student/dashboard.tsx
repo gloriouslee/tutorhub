@@ -83,10 +83,19 @@ export default function StudentDashboard() {
       : null
     );
 
-    // Notifications
+    // Notifications — trừ các thông báo đã đọc/đã xóa (giống trang thông báo)
+    const parseSet = (key: string): Set<string> => {
+      try { return new Set<string>(JSON.parse(localStorage.getItem(key) ?? "[]")); }
+      catch { return new Set<string>(); }
+    };
     getNotifications().then(all => {
+      const readIds    = parseSet("tutorhub_notif_read");
+      const deletedIds = parseSet("tutorhub_notif_deleted");
       setUnreadCount(all.filter(n =>
-        (n.target_role === "student" || n.target_role === "all") && !n.is_read
+        (n.target_role === "student" || n.target_role === "all")
+        && !n.is_read
+        && !readIds.has(n.id)
+        && !deletedIds.has(n.id)
       ).length);
     });
 

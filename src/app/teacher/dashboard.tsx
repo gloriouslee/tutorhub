@@ -87,7 +87,7 @@ export default function TeacherDashboard() {
   }, [classIds.join(",")]);
 
   // All unique student IDs across teacher's classes
-  const allStudentIds = [...new Set(baseMockClasses.flatMap(c => c.student_ids ?? []))];
+  const allStudentIds = [...new Set(allClasses.flatMap(c => c.student_ids ?? []))];
   const myStudents = MOCK_STUDENTS.filter(s => allStudentIds.includes(s.id));
 
   const todaySessions = getTodaySessions(allClasses);
@@ -152,7 +152,7 @@ export default function TeacherDashboard() {
             )}
             {allClasses.map(cls => (
               <Card key={cls.id} className="hover:shadow-md transition-shadow cursor-pointer group"
-                onClick={() => isTeacherCreated(cls.id) ? undefined : router.push(`/teacher/classes/${cls.id}`)}>
+                onClick={() => router.push(`/teacher/classes/${cls.id}`)}>
                 <CardContent className="p-4">
                   <div className="flex items-start gap-4">
                     <div className="h-11 w-11 rounded-xl flex items-center justify-center text-white shrink-0"
@@ -183,12 +183,10 @@ export default function TeacherDashboard() {
                         </span>
                       </div>
                     </div>
-                    {!isTeacherCreated(cls.id) && (
-                      <Button size="sm" variant="ghost" className="shrink-0 opacity-0 group-hover:opacity-100"
-                        onClick={e => { e.stopPropagation(); router.push(`/teacher/classes/${cls.id}`); }}>
-                        Quản lý
-                      </Button>
-                    )}
+                    <Button size="sm" variant="ghost" className="shrink-0 opacity-0 group-hover:opacity-100"
+                      onClick={e => { e.stopPropagation(); router.push(`/teacher/classes/${cls.id}`); }}>
+                      Quản lý
+                    </Button>
                   </div>
                 </CardContent>
               </Card>
@@ -212,7 +210,7 @@ export default function TeacherDashboard() {
                 todaySessions.map(({ cls, schedule }, i) => (
                   <div key={`${cls.id}_${i}`}
                     className="flex items-center gap-3 p-2.5 rounded-xl bg-muted/40 hover:bg-muted/70 cursor-pointer transition-colors"
-                    onClick={() => !isTeacherCreated(cls.id) && router.push(`/teacher/classes/${cls.id}`)}>
+                    onClick={() => router.push(`/teacher/classes/${cls.id}`)}>
                     <div className="h-8 w-8 rounded-lg flex items-center justify-center text-white shrink-0 text-xs font-bold"
                       style={{ background: cls.color ?? "#f59e0b" }}>
                       {cls.class_name.charAt(0)}

@@ -15,10 +15,11 @@ import { DAYS_VI } from "./classDetail.types";
 
 // ── Schedule Editor ──────────────────────────────────────────────────────────
 
-function ScheduleEditor({ classId, className, initialSchedule }: {
+function ScheduleEditor({ classId, className, initialSchedule, onSaved }: {
   classId: string;
   className: string;
   initialSchedule: ClassSchedule[];
+  onSaved?: (schedule: ClassSchedule[]) => void;
 }) {
   const [rows, setRows] = useState<ClassSchedule[]>(initialSchedule);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "success" | "error">("idle");
@@ -53,6 +54,7 @@ function ScheduleEditor({ classId, className, initialSchedule }: {
         message: notifMessage.trim() || `Lịch học lớp ${className} đã được cập nhật: ${scheduleText}.`,
       });
 
+      onSaved?.(rows);
       setSaveState("success");
       setDirty(false);
       setShowNotifField(false);
@@ -208,6 +210,7 @@ export default function ScheduleTab({
   linkSaved,
   setLinkSaved,
   onSaveOnlineLink,
+  onSaved,
 }: {
   classId: string;
   className: string;
@@ -219,6 +222,7 @@ export default function ScheduleTab({
   linkSaved: boolean;
   setLinkSaved: (v: boolean) => void;
   onSaveOnlineLink: () => void;
+  onSaved?: (schedule: ClassSchedule[]) => void;
 }) {
   return (
     <div className="max-w-2xl space-y-8">
@@ -233,6 +237,7 @@ export default function ScheduleTab({
           classId={classId}
           className={className}
           initialSchedule={currentSchedule}
+          onSaved={onSaved}
         />
       </div>
 

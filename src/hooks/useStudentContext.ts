@@ -3,6 +3,18 @@
 import { useState, useEffect } from "react";
 import { MOCK_CLASSES } from "@/lib/mock-data";
 import { createClient } from "@/lib/supabase/client";
+import { getClasses } from "@/lib/storage";
+
+// Tìm lớp theo id trong dữ liệu thật (Supabase, gồm lớp admin tạo);
+// fallback về MOCK_CLASSES khi offline.
+async function findClassById(classId: string): Promise<typeof MOCK_CLASSES> {
+  try {
+    const all = await getClasses();
+    const found = all.filter(c => c.id === classId);
+    if (found.length > 0) return found as unknown as typeof MOCK_CLASSES;
+  } catch { /* offline */ }
+  return MOCK_CLASSES.filter(c => c.id === classId);
+}
 
 export interface StudentContext {
   studentId:       string;
@@ -40,15 +52,15 @@ export function useStudentContext(): StudentContext {
       const enrolledName  = getCookie("enrolled_student_name");
       const enrolledClass = getCookie("enrolled_student_class");
       if (enrolledId && enrolledName) {
-        setCtx({
-          studentId:       enrolledId,
-          studentName:     enrolledName,
-          myClasses:       enrolledClass
-            ? MOCK_CLASSES.filter(c => c.id === enrolledClass)
-            : [],
-          assignedClassId: enrolledClass,
-          ready:           true,
-        });
+        (async () => {
+          setCtx({
+            studentId:       enrolledId,
+            studentName:     enrolledName,
+            myClasses:       enrolledClass ? await findClassById(enrolledClass) : [],
+            assignedClassId: enrolledClass,
+            ready:           true,
+          });
+        })();
       } else {
         // Pure demo mode — keep default s1 context
         setCtx(prev => ({ ...prev, ready: true }));
@@ -58,7 +70,7 @@ export function useStudentContext(): StudentContext {
 
     // No demo cookie — check real Supabase session (enrolled student login)
     const supabase = createClient();
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (session?.user) {
         const user = session.user;
         const meta = user.user_metadata ?? {};
@@ -69,9 +81,7 @@ export function useStudentContext(): StudentContext {
             studentId:       meta.student_id
               ?? (meta.enrollment_id ? `enr_${meta.enrollment_id}` : user.id),
             studentName:     meta.full_name ?? user.email ?? "Học viên",
-            myClasses:       assignedClassId
-              ? MOCK_CLASSES.filter(c => c.id === assignedClassId)
-              : [],
+            myClasses:       assignedClassId ? await findClassById(assignedClassId) : [],
             assignedClassId,
             ready:           true,
           });

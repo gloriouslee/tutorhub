@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { formatDate, formatCurrency } from "@/lib/utils";
 import { useStudentContext } from "@/hooks/useStudentContext";
+import { loadTeacherCourses, teacherCourseToPaidPackage } from "@/components/student/materialsShared";
 
 const PACKAGES: Record<string, { id: string; title: string; price: number }> = {
   pp1: { id: "pp1", title: "Toán 12 — Siêu Ôn Luyện THPT Quốc Gia",    price: 299000 },
@@ -66,9 +67,20 @@ function PaymentsContent() {
     getInvoices().then(list => setInvoices(list.filter(inv => inv.child_id === STUDENT.id)));
     // Filter by this student only
     getTransactions().then(txs => setPkgTransactions(txs.filter(t => t.student_id === STUDENT.id)));
-    if (pkgParam && PACKAGES[pkgParam]) {
-      const pkg = PACKAGES[pkgParam];
-      setModalTarget({ kind: "package", pkgId: pkg.id, title: pkg.title, amount: pkg.price });
+    if (pkgParam) {
+      if (PACKAGES[pkgParam]) {
+        const pkg = PACKAGES[pkgParam];
+        setModalTarget({ kind: "package", pkgId: pkg.id, title: pkg.title, amount: pkg.price });
+      } else {
+        // Gói do giáo viên tạo — tra trong teacher courses
+        loadTeacherCourses().then(courses => {
+          const tc = courses.find(c => c.id === pkgParam);
+          if (tc) {
+            const pkg = teacherCourseToPaidPackage(tc);
+            setModalTarget({ kind: "package", pkgId: pkg.id, title: pkg.title, amount: pkg.price });
+          }
+        });
+      }
     }
   }, [pkgParam, studentId]);
 
@@ -84,7 +96,10 @@ function PaymentsContent() {
     await new Promise(r => setTimeout(r, 600));
 
     if (modalTarget.kind === "invoice") {
-      await updateInvoiceStatus(modalTarget.invoice.id, "pending_verification", "student");
+      await updateInvoiceStatus(
+        modalTarget.invoice.id, "pending_verification", "student",
+        modalTarget.invoice.id === "ALL" ? STUDENT.id : undefined,
+      );
       const list = await getInvoices();
       setInvoices(list.filter(inv => inv.child_id === STUDENT.id));
     } else {

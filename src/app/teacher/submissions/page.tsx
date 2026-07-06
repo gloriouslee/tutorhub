@@ -17,7 +17,7 @@ import {
   updateGrade as supabaseUpdateGrade,
   type SubmissionRecord,
 } from "@/lib/supabase/submissions";
-import { kvGet, kvSet } from "@/lib/storage";
+import { kvGet, kvUpdate } from "@/lib/storage";
 
 // ── Data types ────────────────────────────────────────────────────────────────
 // Use SubmissionRecord from Supabase lib; extend with student_name for display
@@ -42,8 +42,11 @@ async function loadSubmissions(): Promise<Submission[]> {
   } catch { return DEFAULT_SUBMISSIONS; }
 }
 
-async function saveSubmissions(subs: Submission[]) {
-  await kvSet(SUBMISSION_KEY, subs);
+// Atomic-ish update: patch only the graded submission in the freshest stored list.
+async function updateSubmission(subId: string, patch: Partial<Submission>): Promise<Submission[]> {
+  return kvUpdate<Submission[]>(SUBMISSION_KEY, DEFAULT_SUBMISSIONS, fresh =>
+    fresh.map(s => (s.id === subId ? { ...s, ...patch } : s))
+  );
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -174,13 +177,9 @@ function TeacherSubmissionsPageInner() {
       teacherFileName = teacherFile.name;
     }
 
-    const updated = submissions.map(s =>
-      s.id === subId
-        ? { ...s, score, feedback: feedback || undefined, status: "graded" as const, graded_at: new Date().toISOString(), teacher_file_url: teacherFileUrl, teacher_file_name: teacherFileName }
-        : s
-    );
-    setSubmissions(updated);
-    await saveSubmissions(updated);
+    const patch = { score, feedback: feedback || undefined, status: "graded" as const, graded_at: new Date().toISOString(), teacher_file_url: teacherFileUrl, teacher_file_name: teacherFileName };
+    setSubmissions(prev => prev.map(s => (s.id === subId ? { ...s, ...patch } : s)));
+    try { await updateSubmission(subId, patch); } catch {}
     setGrading(null);
     setTeacherFile(null);
 

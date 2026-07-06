@@ -265,10 +265,17 @@ function StudentDetailPanel({
     () => MOCK_HOMEWORK.filter(h => studentClassIds.includes(h.class_id)),
     [studentClassIds]
   );
-  const allSubmissions: Submission[] = [
-    ...MOCK_SUBMISSIONS.filter(s => s.student_id === student.id),
-    ...lsSubmissions.filter(s => s.student_id === student.id),
-  ];
+  // kv submissions take precedence over mocks with the same homework_id+student_id
+  const allSubmissions: Submission[] = (() => {
+    const kv = lsSubmissions.filter(s => s.student_id === student.id);
+    const seen = new Set(kv.map(s => `${s.homework_id}|${s.student_id}`));
+    return [
+      ...kv,
+      ...MOCK_SUBMISSIONS.filter(
+        s => s.student_id === student.id && !seen.has(`${s.homework_id}|${s.student_id}`)
+      ),
+    ];
+  })();
   const submittedHwIds = new Set(allSubmissions.map(s => s.homework_id));
   const hwSubmitted = homework.filter(h => submittedHwIds.has(h.id)).length;
   const hwRate = homework.length ? Math.round((hwSubmitted / homework.length) * 100) : null;

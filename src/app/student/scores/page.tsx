@@ -8,7 +8,7 @@ import { SectionHeader, ProgressBar } from "@/components/shared";
 import { MOCK_EXAM_SCORES, MOCK_CLASSES, MOCK_TEACHERS } from "@/lib/mock-data";
 import { GraduationCap, TrendingUp, Trophy, Target, BookOpen, ChevronDown, Pencil, Check, X } from "lucide-react";
 import { useStudentContext } from "@/hooks/useStudentContext";
-import { getExamScoresByStudent, getCurriculum, type StoredExamScore } from "@/lib/storage";
+import { getExamScoresByStudent, getCurriculum, getExamResult, type StoredExamScore } from "@/lib/storage";
 import { formatDate } from "@/lib/utils";
 import {
   ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
@@ -63,36 +63,36 @@ export default function StudentScoresPage() {
     } catch {}
     getExamScoresByStudent(studentId).then(setStoredScores);
 
-    // Merge results from exams the student actually took (tutorhub_exam_result_* keys)
+    // Merge results from exams the student actually took — đọc qua storage
+    // (kv-routed) thay vì quét raw localStorage. Mỗi lớp chỉ gọi getCurriculum 1 lần.
     (async () => {
-      const prefix = "tutorhub_exam_result_";
-      const suffix = `_${studentId}`;
       const found: StoredExamScore[] = [];
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (!key || !key.startsWith(prefix) || !key.endsWith(suffix)) continue;
-        try {
-          const rec = JSON.parse(localStorage.getItem(key) || "");
-          const middle   = key.slice(prefix.length, key.length - suffix.length);
-          const classId  = middle.split("_")[0];
-          const lessonId = middle.slice(classId.length + 1);
-          const lesson = (await getCurriculum(classId))
-            .flatMap(ch => ch.sessions)
-            .flatMap(sess => sess.lessons)
-            .find(l => l.id === lessonId);
+      for (const cls of myClasses) {
+        const chapters = await getCurriculum(cls.id);
+        const examLessons = chapters
+          .flatMap(ch => ch.sessions)
+          .flatMap(sess => sess.lessons)
+          .filter(l => l.type === "exam");
+        const results = await Promise.all(
+          examLessons.map(l => getExamResult(cls.id, l.id, studentId))
+        );
+        examLessons.forEach((lesson, i) => {
+          const rec = results[i];
+          if (!rec) return;
           found.push({
-            id:         key,
+            id:         `tutorhub_exam_result_${cls.id}_${lesson.id}_${studentId}`,
             student_id: studentId,
-            class_id:   classId,
-            exam_name:  lesson?.title ?? "Bài kiểm tra trực tuyến",
+            class_id:   cls.id,
+            exam_name:  lesson.title ?? "Bài kiểm tra trực tuyến",
             score:      rec.score,
             max_score:  rec.total,
             exam_date:  rec.submitted_at,
           });
-        } catch { /* ignore malformed entries */ }
+        });
       }
       setTakenExams(found);
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [studentId, gpaTarget_KEY]);
 
   function startEdit() {
@@ -145,7 +145,8 @@ export default function StudentScoresPage() {
       ? Number((clsScores.reduce((a, s) => a + norm(s), 0) / clsScores.length).toFixed(1))
       : 0;
     const teacher   = MOCK_TEACHERS.find(t => t.id === cls.tutor_id);
-    return { subject: cls.subject.split(" ").slice(0, 2).join(" "), score: clsAvg, fullMark: 10, teacher: teacher?.full_name };
+    // Dùng tên lớp làm nhãn — các lớp có thể cùng môn học (trùng key React)
+    return { id: cls.id, subject: cls.class_name, score: clsAvg, fullMark: 10, teacher: teacher?.full_name };
   });
 
   // Per-class breakdown for sidebar
@@ -387,7 +388,7 @@ export default function StudentScoresPage() {
                   /* Bar-style fallback for < 3 subjects */
                   <div className="space-y-4 py-2 px-3">
                     {radarData.map(d => (
-                      <div key={d.subject} className="space-y-1.5">
+                      <div key={d.id} className="space-y-1.5">
                         <div className="flex justify-between text-sm">
                           <span className="font-medium text-foreground">{d.subject}</span>
                           <span className="font-bold text-primary">{d.score}/10</span>

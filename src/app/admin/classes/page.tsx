@@ -13,6 +13,11 @@ import { useSearchParams } from "next/navigation";
 import { getClasses, saveClasses, getTeachers, getStudents, setClassTeacherOverride } from "@/lib/storage";
 import { Class, Teacher, Student } from "@/types";
 
+const DAY_VI: Record<string, string> = {
+  Monday: "Thứ Hai", Tuesday: "Thứ Ba", Wednesday: "Thứ Tư",
+  Thursday: "Thứ Năm", Friday: "Thứ Sáu", Saturday: "Thứ Bảy", Sunday: "Chủ Nhật",
+};
+
 function AdminClassesPageInner() {
   const searchParams = useSearchParams();
   const teacherParam = searchParams.get("teacher") ?? "";
@@ -124,8 +129,9 @@ function AdminClassesPageInner() {
               subject: formData.subject,
               learning_mode: formData.learning_mode,
               tutor_id: formData.tutor_id,
-              classroom: formData.learning_mode === "offline" ? formData.classroom : undefined,
-              zoom_link: formData.learning_mode !== "offline" ? formData.zoom_link : undefined,
+              // null (không phải undefined) để cột DB được xóa khi đổi hình thức học
+              classroom: (formData.learning_mode === "offline" ? formData.classroom : null) as unknown as string | undefined,
+              zoom_link: (formData.learning_mode !== "offline" ? formData.zoom_link : null) as unknown as string | undefined,
               schedule: scheduleData,
               description: formData.description,
               max_students: Number(formData.max_students),
@@ -138,7 +144,7 @@ function AdminClassesPageInner() {
       await setClassTeacherOverride(editingClass.id, formData.tutor_id);
     } else {
       // Add
-      const newId = `c${classes.length + 1}-${Math.floor(Math.random() * 1000)}`;
+      const newId = `c${Date.now()}`;
       const newClass: Class = {
         id: newId,
         class_name: formData.class_name,
@@ -280,7 +286,7 @@ function AdminClassesPageInner() {
                           <div>
                             {cls.schedule.map((sch, sIdx) => (
                               <span key={sIdx} className="block text-foreground font-medium">
-                                {sch.day}: {sch.start_time} - {sch.end_time}
+                                {DAY_VI[sch.day] ?? sch.day}: {sch.start_time} - {sch.end_time}
                               </span>
                             ))}
                           </div>

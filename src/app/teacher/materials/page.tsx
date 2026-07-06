@@ -740,12 +740,16 @@ function CourseCard({
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default function TeacherMaterialsPage() {
-  const [courses, setCourses] = useState<Course[]>(SEED_COURSES);
+  const [courses, setCourses] = useState<Course[]>([]);
+  const [loaded, setLoaded] = useState(false);
   const [editing, setEditing] = useState<Course | null>(null);
 
-  useEffect(() => { loadCourses().then(setCourses); }, []);
+  useEffect(() => {
+    loadCourses().then(list => { setCourses(list); setLoaded(true); });
+  }, []);
 
   const createCourse = () => {
+    if (!loaded) return;
     const c: Course = {
       id: uid(), title: "", subject: "Toán học", grade: 12,
       type: "class", description: "", chapters: [], published: false,
@@ -755,16 +759,19 @@ export default function TeacherMaterialsPage() {
     setEditing(c);
   };
 
-  const updateCourse = (updated: Course) =>
+  const updateCourse = (updated: Course) => {
+    if (!loaded) return;
     setCourses(prev => { const next = prev.map(c => c.id === updated.id ? updated : c); saveCourses(next); return next; });
+  };
 
   const deleteCourse = (id: string) => {
+    if (!loaded) return;
     setCourses(prev => { const next = prev.filter(c => c.id !== id); saveCourses(next); return next; });
     if (editing?.id === id) setEditing(null);
   };
 
   return (
-    <PortalLayout role="teacher" userName="" pageTitle="Tài liệu">
+    <PortalLayout role="teacher" userName="Thầy Hùng Toán" pageTitle="Tài liệu">
       <div className="max-w-4xl mx-auto">
         {editing ? (
           <CourseEditor
@@ -782,7 +789,7 @@ export default function TeacherMaterialsPage() {
                   Xây dựng nội dung theo cấu trúc chương → bài học, bật preview cho học viên xem thử
                 </p>
               </div>
-              <Button className="gap-1.5" onClick={createCourse}>
+              <Button className="gap-1.5" onClick={createCourse} disabled={!loaded}>
                 <Plus className="h-4 w-4" /> Tạo khóa học mới
               </Button>
             </div>
@@ -795,7 +802,9 @@ export default function TeacherMaterialsPage() {
             </div>
 
             {/* Course list */}
-            {courses.length === 0 ? (
+            {!loaded ? (
+              <div className="py-16 text-center text-sm text-muted-foreground">Đang tải khóa học…</div>
+            ) : courses.length === 0 ? (
               <div
                 onClick={createCourse}
                 className="border-2 border-dashed border-border rounded-xl py-16 text-center cursor-pointer hover:border-primary/50 hover:bg-muted/20 transition-colors"

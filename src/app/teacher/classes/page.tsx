@@ -540,10 +540,6 @@ export default function TeacherClassesPage() {
                         >
                           <Video className="h-3.5 w-3.5 mr-1.5" /> Mở Online
                         </Button>
-                      ) : isNew ? (
-                        <Button size="sm" variant="outline" className="flex-1 text-muted-foreground" disabled>
-                          <Video className="h-3.5 w-3.5 mr-1.5" /> Thêm link
-                        </Button>
                       ) : (
                         <Link href={`/teacher/classes/${cls.id}?tab=schedule`} className="flex-1">
                           <Button size="sm" variant="outline" className="w-full gap-1.5 text-muted-foreground">
@@ -551,17 +547,11 @@ export default function TeacherClassesPage() {
                           </Button>
                         </Link>
                       )}
-                      {isNew ? (
-                        <Button size="sm" variant="outline" className="gap-1.5 text-muted-foreground" disabled>
+                      <Link href={`/teacher/classes/${cls.id}`}>
+                        <Button size="sm" variant="outline" className="gap-1.5">
                           <Settings className="h-3.5 w-3.5" /> Quản lý
                         </Button>
-                      ) : (
-                        <Link href={`/teacher/classes/${cls.id}`}>
-                          <Button size="sm" variant="outline" className="gap-1.5">
-                            <Settings className="h-3.5 w-3.5" /> Quản lý
-                          </Button>
-                        </Link>
-                      )}
+                      </Link>
                     </div>
                   </CardContent>
                 </Card>

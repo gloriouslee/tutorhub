@@ -62,7 +62,7 @@ export default function AdminSettingsPage() {
   };
 
   const handleResetDatabase = async () => {
-    if (confirm("Cảnh báo: Thao tác này sẽ xóa toàn bộ dữ liệu đã chỉnh sửa và khôi phục dữ liệu mẫu ban đầu. Tiếp tục?")) {
+    if (confirm("Cảnh báo: Thao tác này sẽ xóa cache cục bộ trên máy này và khôi phục dữ liệu mẫu ban đầu (không ảnh hưởng dữ liệu trên server). Tiếp tục?")) {
       await resetAllStorage();
     }
   };
@@ -227,7 +227,7 @@ export default function AdminSettingsPage() {
                       <CardContent className="p-4 space-y-3">
                         <div className="space-y-1">
                           <h6 className="text-sm font-bold text-foreground">Khôi phục dữ liệu mẫu</h6>
-                          <p className="text-xs text-muted-foreground">Xóa toàn bộ cache và khôi phục trạng thái ban đầu.</p>
+                          <p className="text-xs text-muted-foreground">Xóa cache cục bộ trên máy này và khôi phục dữ liệu mẫu (không xóa dữ liệu trên server).</p>
                         </div>
                         <Button type="button" variant="outline" className="w-full flex items-center justify-center gap-1.5 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20 font-semibold" onClick={handleResetDatabase}>
                           <RotateCcw className="h-4 w-4" /> Khôi phục mặc định

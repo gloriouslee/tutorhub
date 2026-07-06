@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SectionHeader } from "@/components/shared";
 import { MOCK_HOMEWORK, MOCK_CLASSES } from "@/lib/mock-data";
-import { kvGet, kvSet } from "@/lib/storage";
+import { kvGet, kvUpdate } from "@/lib/storage";
 import { FileText, Plus, Calendar, CheckCircle2, Clock, X, Trash2, Edit2, ArrowRight, BookOpen } from "lucide-react";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -61,8 +61,16 @@ async function loadHw(seedIds: string[]): Promise<Homework[]> {
   } catch { return []; }
 }
 
-async function saveHw(hw: Homework[]) {
-  await kvSet(HW_KEY, hw);
+// Atomic read-modify-write: only touch the affected item, keep the rest fresh.
+async function upsertHw(item: Homework, fallback: Homework[]): Promise<Homework[]> {
+  return kvUpdate<Homework[]>(HW_KEY, fallback, fresh => {
+    const exists = fresh.some(h => h.id === item.id);
+    return exists ? fresh.map(h => (h.id === item.id ? item : h)) : [item, ...fresh];
+  });
+}
+
+async function removeHw(id: string, fallback: Homework[]): Promise<Homework[]> {
+  return kvUpdate<Homework[]>(HW_KEY, fallback, fresh => fresh.filter(h => h.id !== id));
 }
 
 async function loadSubs(): Promise<Submission[]> {
@@ -139,34 +147,30 @@ export default function TeacherHomeworkPage() {
     if (!fDue)          { setFErr("Vui lòng chọn hạn nộp."); return; }
     setFErr("");
 
-    let updated: Homework[];
-    if (editTarget) {
-      updated = homeworks.map(h =>
-        h.id === editTarget.id
-          ? { ...h, title: fTitle.trim(), class_id: fClass, due_date: fDue, description: fDesc }
-          : h
-      );
-    } else {
-      const newHw: Homework = {
-        id:          `h-${Date.now()}`,
-        class_id:    fClass,
-        title:       fTitle.trim(),
-        description: fDesc,
-        due_date:    fDue,
-        created_at:  toLocalDateKey(new Date()),
-      };
-      updated = [newHw, ...homeworks];
-    }
-    setHomeworks(updated);
-    saveHw(updated);
+    const item: Homework = editTarget
+      ? { ...editTarget, title: fTitle.trim(), class_id: fClass, due_date: fDue, description: fDesc }
+      : {
+          id:          `h-${Date.now()}`,
+          class_id:    fClass,
+          title:       fTitle.trim(),
+          description: fDesc,
+          due_date:    fDue,
+          created_at:  toLocalDateKey(new Date()),
+        };
+    upsertHw(item, homeworks).then(setHomeworks).catch(() => {
+      setHomeworks(prev => {
+        const exists = prev.some(h => h.id === item.id);
+        return exists ? prev.map(h => (h.id === item.id ? item : h)) : [item, ...prev];
+      });
+    });
     setModalOpen(false);
   }
 
   function handleDelete(id: string) {
     if (!confirm("Bạn có chắc muốn xoá bài tập này không?")) return;
-    const updated = homeworks.filter(h => h.id !== id);
-    setHomeworks(updated);
-    saveHw(updated);
+    removeHw(id, homeworks).then(setHomeworks).catch(() => {
+      setHomeworks(prev => prev.filter(h => h.id !== id));
+    });
   }
 
   // Submission stats per homework

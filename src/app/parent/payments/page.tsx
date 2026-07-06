@@ -12,7 +12,7 @@ import {
 import { MOCK_STUDENTS } from "@/lib/mock-data";
 import { formatCurrency } from "@/lib/utils";
 import {
-  DollarSign, CreditCard, Receipt, Clock, CheckCircle2,
+  DollarSign, CreditCard, Clock, CheckCircle2,
   AlertCircle, ArrowRight, X, QrCode, UploadCloud, Users,
 } from "lucide-react";
 
@@ -67,7 +67,14 @@ export default function ParentPaymentsPage() {
     if (!modalInvoice || !receiptFile) return;
     setSubmitting(true);
     await new Promise(r => setTimeout(r, 600));
-    await updateInvoiceStatus(modalInvoice.id, "pending_verification", "parent");
+    if (modalInvoice.id === "ALL") {
+      // Chỉ đụng hóa đơn của các con mình — gọi theo từng child id
+      for (const cid of childIds) {
+        await updateInvoiceStatus("ALL", "pending_verification", "parent", cid);
+      }
+    } else {
+      await updateInvoiceStatus(modalInvoice.id, "pending_verification", "parent");
+    }
     await load();
     setSubmitting(false);
     closeModal();
@@ -122,9 +129,6 @@ export default function ParentPaymentsPage() {
                     onClick={openPayAll}
                   >
                     <CreditCard className="h-5 w-5 mr-2" /> Thanh toán gộp tất cả
-                  </Button>
-                  <Button size="lg" className="bg-white/10 hover:bg-white/20 text-white border border-white/20 backdrop-blur-md hover:-translate-y-1 transition-all rounded-xl">
-                    <Receipt className="h-5 w-5 mr-2" /> Xem chính sách
                   </Button>
                 </div>
               </CardContent>

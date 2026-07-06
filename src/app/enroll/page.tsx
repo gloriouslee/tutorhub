@@ -50,6 +50,7 @@ export default function EnrollPage() {
   const [errors, setErrors]   = useState<FieldError>({});
   const [submitted, setSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState("");
 
   const set = (key: keyof FormData) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     setForm(prev => ({ ...prev, [key]: e.target.value }));
@@ -61,19 +62,24 @@ export default function EnrollPage() {
     const errs = validate(form);
     if (Object.keys(errs).length > 0) { setErrors(errs); return; }
     setSubmitting(true);
-    await new Promise(r => setTimeout(r, 600));
-    createEnrollment({
-      full_name:          form.full_name.trim(),
-      email:              form.email.trim().toLowerCase(),
-      dob:                form.dob,
-      school:             form.school.trim(),
-      grade:              form.grade,
-      requested_class_id: form.requested_class_id,
-      parent_phone:       form.parent_phone.trim(),
-      note:               form.note.trim() || undefined,
-    });
-    setSubmitting(false);
-    setSubmitted(true);
+    setSubmitError("");
+    try {
+      await createEnrollment({
+        full_name:          form.full_name.trim(),
+        email:              form.email.trim().toLowerCase(),
+        dob:                form.dob,
+        school:             form.school.trim(),
+        grade:              form.grade,
+        requested_class_id: form.requested_class_id,
+        parent_phone:       form.parent_phone.trim(),
+        note:               form.note.trim() || undefined,
+      });
+      setSubmitted(true);
+    } catch {
+      setSubmitError("Không thể gửi đơn đăng ký. Vui lòng thử lại sau.");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   if (submitted) {
@@ -235,6 +241,9 @@ export default function EnrollPage() {
               </div>
 
               <div className="pt-2">
+                {submitError && (
+                  <p className="text-sm text-red-500 text-center mb-3">{submitError}</p>
+                )}
                 <Button type="submit" className="w-full h-12 text-base font-semibold" disabled={submitting}>
                   {submitting ? (
                     <><span className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full inline-block mr-2" />Đang gửi...</>
