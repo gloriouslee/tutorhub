@@ -12,9 +12,10 @@ import "katex/dist/katex.min.css";
 import { Button } from "@/components/ui/button";
 import type { ExamContent, ExamQuestion, CurriculumLesson } from "@/lib/storage";
 import { uploadClassFile } from "@/lib/upload";
-import { parseExamText, parsedToText, parsedToExamQuestions, tokenizeConventionText, resolveRegistryTokens, MATH_TOKEN_RE, type ParseResult, type ParsedQuestion, type ExamAssetRegistry } from "@/lib/examTextParser";
+import { parseExamText, parsedToText, parsedToExamQuestions, tokenizeConventionText, resolveRegistryTokens, normalizeConventionText, MATH_TOKEN_RE, type ParseResult, type ParsedQuestion, type ExamAssetRegistry } from "@/lib/examTextParser";
 import { renderMathInHtml, hasMath } from "@/lib/mathRender";
-import { docxHtmlToConventionText, FORMULA_PLACEHOLDER_SRC, FORMULA_MARKER } from "@/lib/docxToText";
+import { docxHtmlToConventionText, stripExamBoilerplate, FORMULA_PLACEHOLDER_SRC, FORMULA_MARKER } from "@/lib/docxToText";
+import ConventionEditor from "@/components/teacher/ConventionEditor";
 import {
   X, Check, Clock, Eye, EyeOff, Plus, Trash2,
   Bold, Italic, List, ListOrdered, AlignLeft, AlignCenter,
@@ -960,12 +961,14 @@ function TextImportPanel({ text, setText, registry, setRegistry, onAppend, onRep
         return { src: FORMULA_PLACEHOLDER_SRC };
       });
       const { value } = await mammoth.convertToHtml({ arrayBuffer }, { convertImage });
-      const converted = docxHtmlToConventionText(value);
+      // Bỏ phần rác đầu đề (tên trường, "Thời gian làm bài…", "Họ tên thí sinh…"…)
+      const converted = stripExamBoilerplate(docxHtmlToConventionText(value));
       setFormulaCount(converted.split(FORMULA_MARKER).length - 1);
       // Token hoá: $LaTeX$ dài → [m:N], [img:url] → [img:N]; nội dung đầy đủ vào registry
       const tokenized = tokenizeConventionText(converted);
       setRegistry(tokenized.registry);
-      setText(tokenized.text);
+      // Chuẩn hoá bố cục (mỗi phương án một dòng, đánh số nhất quán) — an toàn với token
+      setText(normalizeConventionText(tokenized.text));
     } catch {
       alert("Không đọc được file Word. Vui lòng kiểm tra file .docx.");
     } finally {
@@ -1055,6 +1058,24 @@ function TextImportPanel({ text, setText, registry, setRegistry, onAppend, onRep
               {importing ? "Đang đọc file…" : "Nhập từ file Word (.docx)"}
             </Button>
             <button
+              onClick={() => {
+                const normalized = normalizeConventionText(text);
+                if (normalized !== text) {
+                  // Cùng cơ chế cờ nguồn như khi sửa thẻ: text đã ở dạng chuẩn,
+                  // parse ngay lập tức để hai bên đồng bộ, khỏi chờ debounce
+                  sourceRef.current = "cards";
+                  setParsed(normalized.trim() ? parseExamText(normalized) : null);
+                  setText(normalized);
+                }
+              }}
+              disabled={!text.trim()}
+              title="Sắp xếp lại văn bản về bố cục chuẩn (mỗi phương án một dòng, đánh số nhất quán)"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-border text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-50 disabled:pointer-events-none"
+            >
+              <Check className="h-3.5 w-3.5" />
+              Chuẩn hóa
+            </button>
+            <button
               onClick={() => setGuideOpen(o => !o)}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${guideOpen ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:bg-muted hover:text-foreground"}`}
             >
@@ -1082,12 +1103,11 @@ function TextImportPanel({ text, setText, registry, setRegistry, onAppend, onRep
             </div>
           )}
 
-          <textarea
+          <ConventionEditor
             value={text}
-            onChange={e => setText(e.target.value)}
-            spellCheck={false}
+            onChange={setText}
             placeholder={"Câu 1. Giá trị của 2 + 2 là\nA. 3   *B. 4   C. 5   D. 6\nLời giải\n2 + 2 = 4 nên chọn B.\n\nCâu 2. Cho hàm số y = x². Xét các mệnh đề:\n*a) Hàm số đồng biến trên (0; +∞)\nb) Hàm số đồng biến trên R\n…"}
-            className="flex-1 min-h-0 w-full bg-background p-4 font-mono text-xs leading-relaxed text-foreground outline-none resize-none"
+            questionCount={questions.length}
           />
         </div>
       </div>

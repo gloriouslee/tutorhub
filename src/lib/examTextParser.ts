@@ -33,6 +33,8 @@ export interface ParsedQuestion {
 export interface ParseResult {
   questions: ParsedQuestion[];
   sections: string[];                 // các dòng "Phần ..." gặp được
+  // Vị trí tiêu đề phần: đứng trước câu hỏi thứ index (0-based) — để serialize lại đúng chỗ
+  sectionsAt: { index: number; text: string }[];
   errors: string[];                   // lỗi mức toàn cục
 }
 
@@ -142,12 +144,21 @@ export function parseExamText(raw: string): ParseResult {
   const lines = text.split("\n");
 
   const sections: string[] = [];
+  const sectionsAt: { index: number; text: string }[] = [];
   const errors: string[] = [];
   // Gom các dòng thành block theo "Câu N."
   const blocks: { index: number; lines: string[] }[] = [];
   let current: { index: number; lines: string[] } | null = null;
 
   for (const line of lines) {
+    // "Phần ..." ở bất kỳ đâu = ranh giới nhóm: đóng câu hiện tại,
+    // không để tiêu đề phần lọt vào lời giải câu trước
+    if (SECTION_RE.test(line)) {
+      if (current) { blocks.push(current); current = null; }
+      sections.push(line.trim());
+      sectionsAt.push({ index: blocks.length, text: line.trim() });
+      continue;
+    }
     const qm = line.match(QUESTION_RE);
     if (qm) {
       if (current) blocks.push(current);
@@ -155,7 +166,6 @@ export function parseExamText(raw: string): ParseResult {
       continue;
     }
     if (!current) {
-      if (SECTION_RE.test(line)) sections.push(line.trim());
       // các dòng khác trước "Câu 1" bỏ qua (tiêu đề, hướng dẫn)
       continue;
     }
@@ -168,7 +178,7 @@ export function parseExamText(raw: string): ParseResult {
   }
 
   const questions = blocks.map(b => parseOneQuestion(b.index, b.lines.join("\n")));
-  return { questions, sections, errors };
+  return { questions, sections, sectionsAt, errors };
 }
 
 // ── Chuyển kết quả parse sang ExamQuestion của hệ thống ─────────────────────
@@ -280,7 +290,10 @@ export function tokenizeConventionText(raw: string): { text: string; registry: E
 // ── Serializer: ParsedQuestion[] → văn bản theo quy ước ──────────────────────
 // Cho phép sửa trực tiếp trên preview (bên trái) rồi ghi ngược lại textarea.
 
-export function parsedToText(questions: ParsedQuestion[]): string {
+export function parsedToText(
+  questions: ParsedQuestion[],
+  sectionsAt?: { index: number; text: string }[]
+): string {
   const blocks = questions.map((q, i) => {
     const lines: string[] = [`Câu ${i + 1}. ${q.content}`.trimEnd()];
     if (q.type === "multiple_choice" && q.options) {
@@ -309,7 +322,28 @@ export function parsedToText(questions: ParsedQuestion[]): string {
     }
     return lines.join("\n");
   });
+  // Chèn lại tiêu đề phần đúng vị trí (trước câu hỏi thứ index)
+  if (sectionsAt?.length) {
+    const out: string[] = [];
+    for (let i = 0; i < blocks.length; i++) {
+      sectionsAt.filter(s => s.index === i).forEach(s => out.push(s.text));
+      out.push(blocks[i]);
+    }
+    sectionsAt.filter(s => s.index >= blocks.length).forEach(s => out.push(s.text));
+    return out.join("\n\n");
+  }
   return blocks.join("\n\n");
+}
+
+/**
+ * Chuẩn hoá văn bản quy ước: parse rồi serialize lại theo cấu trúc chuẩn —
+ * mỗi phương án một dòng, đánh số câu liên tục, tiêu đề phần đúng vị trí.
+ * Nếu parse lỗi hoặc không có câu nào, trả nguyên văn bản gốc.
+ */
+export function normalizeConventionText(raw: string): string {
+  const r = parseExamText(raw);
+  if (r.errors.length > 0 || r.questions.length === 0) return raw;
+  return parsedToText(r.questions, r.sectionsAt);
 }
 
 export function parsedToExamQuestions(parsed: ParsedQuestion[], registry?: ExamAssetRegistry): ExamQuestion[] {

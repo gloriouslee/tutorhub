@@ -10,6 +10,35 @@
 // Hàm thuần (không side effect) để dễ test.
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Các dòng boilerplate đầu đề thi (header trường/môn/thí sinh...) — loại bỏ
+// khi import vì không thuộc nội dung câu hỏi.
+const BOILERPLATE_RES: RegExp[] = [
+  /^\{[^}]*\}$/,                                   // {thông tin trường}, {môn thi}
+  /\.docx?\s*$/i,                                   // dòng tên file
+  /^Thời gian làm bài/i,
+  /^-{3,}\s*$/,                                     // dòng gạch ngang
+  /^Họ\s*(và)?\s*tên\s*(thí sinh|học sinh)/i,
+  /^Số báo danh/i,
+  /^Mã đề/i,
+  /^(ĐỀ|Đề)\s+(THI|thi|KIỂM TRA|kiểm tra|SỐ|số)/,
+  /^(SỞ|TRƯỜNG|PHÒNG)\s/i,                          // Sở GD&ĐT, Trường THPT...
+  /^\(?Không kể thời gian/i,
+  /^[.…]{5,}\s*$/,                             // dòng toàn dấu chấm
+];
+
+/** Bỏ các dòng boilerplate TRƯỚC câu hỏi/phần đầu tiên (nội dung đề giữ nguyên). */
+export function stripExamBoilerplate(text: string): string {
+  const lines = text.split("\n");
+  const firstContent = lines.findIndex(l => /^\s*(Câu\s+\d|Phần\s|PHẦN\s)/.test(l));
+  if (firstContent <= 0) return text;
+  const head = lines.slice(0, firstContent).filter(l => {
+    const t = l.trim();
+    if (!t) return false;
+    return !BOILERPLATE_RES.some(re => re.test(t));
+  });
+  return [...head, ...lines.slice(firstContent)].join("\n");
+}
+
 /** src đặc biệt do handler ảnh của mammoth trả về khi gặp công thức dạng ảnh. */
 export const FORMULA_PLACEHOLDER_SRC = "placeholder:formula";
 
