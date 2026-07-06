@@ -19,6 +19,8 @@ type StudentAnswer = {
   selected_option?: number;
   selected_value?: string;
   essay_text?: string;
+  // Đúng sai nhiều mệnh đề: chỉ số mệnh đề → lựa chọn Đ (true) / S (false)
+  statement_answers?: Record<number, boolean>;
 };
 
 type ExamResult = {
@@ -44,7 +46,18 @@ function markExamComplete(studentId: string, lessonId: string) {
 
 function isAnswered(ans: StudentAnswer | undefined): boolean {
   if (!ans) return false;
-  return ans.selected_option !== undefined || !!ans.selected_value || !!ans.essay_text;
+  return ans.selected_option !== undefined || !!ans.selected_value || !!ans.essay_text
+    || (!!ans.statement_answers && Object.keys(ans.statement_answers).length > 0);
+}
+
+// Đúng sai nhiều mệnh đề: đúng khi TẤT CẢ mệnh đề được trả lời chính xác
+function statementsCorrect(q: ExamQuestion, ans: StudentAnswer): boolean {
+  return (q.statements ?? []).every((st, i) => ans.statement_answers?.[i] === st.correct);
+}
+
+function isTrueFalseCorrect(q: ExamQuestion, ans: StudentAnswer): boolean {
+  if (q.statements && q.statements.length > 0) return statementsCorrect(q, ans);
+  return ans.selected_value === q.correct_value; // legacy Đúng/Sai đơn
 }
 
 function RichContent({ html, className = "" }: { html: string; className?: string }) {
@@ -275,7 +288,38 @@ function MCOptions({ q, answer, onAnswer }: { q: ExamQuestion; answer: StudentAn
   );
 }
 
-function TFOptions({ answer, onAnswer }: { answer: StudentAnswer; onAnswer: (a: StudentAnswer) => void }) {
+function TFOptions({ q, answer, onAnswer }: { q: ExamQuestion; answer: StudentAnswer; onAnswer: (a: StudentAnswer) => void }) {
+  // Đúng sai nhiều mệnh đề a) b) c) d)
+  if (q.statements && q.statements.length > 0) {
+    const picked = answer.statement_answers ?? {};
+    const pick = (i: number, v: boolean) =>
+      onAnswer({ ...answer, statement_answers: { ...picked, [i]: v } });
+    return (
+      <div className="space-y-2.5 mt-5">
+        <p className="text-sm text-muted-foreground">Chọn Đúng hoặc Sai cho từng mệnh đề:</p>
+        {q.statements.map((st, i) => (
+          <div key={i} className="flex items-center gap-3 p-3.5 rounded-2xl border-2 border-border bg-card">
+            <span className="text-sm font-bold text-muted-foreground w-5 shrink-0">{String.fromCharCode(97 + i)})</span>
+            <span className="flex-1 text-sm text-foreground">{st.text}</span>
+            <div className="flex gap-1.5 shrink-0">
+              <button
+                onClick={() => pick(i, true)}
+                className={`px-3.5 py-1.5 rounded-xl border-2 text-xs font-semibold transition-all ${picked[i] === true
+                  ? "border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400"
+                  : "border-border text-muted-foreground hover:border-emerald-400"}`}
+              >✓ Đúng</button>
+              <button
+                onClick={() => pick(i, false)}
+                className={`px-3.5 py-1.5 rounded-xl border-2 text-xs font-semibold transition-all ${picked[i] === false
+                  ? "border-red-500 bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-400"
+                  : "border-border text-muted-foreground hover:border-red-400"}`}
+              >✗ Sai</button>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
   return (
     <div className="flex gap-4 mt-5">
       {(["true", "false"] as const).map(v => (
@@ -340,7 +384,7 @@ function ResultView({ questions, result, onRetry, examTitle }: {
 
   const isCorrect = (q: ExamQuestion, ans: StudentAnswer): boolean => {
     if (q.type === "multiple_choice") return ans.selected_option === q.correct_option;
-    if (q.type === "true_false")      return ans.selected_value === q.correct_value;
+    if (q.type === "true_false")      return isTrueFalseCorrect(q, ans);
     if (q.type === "fill_blank")      return (ans.selected_value ?? "").trim().toLowerCase() === (q.correct_value ?? "").trim().toLowerCase();
     return true;
   };
@@ -464,6 +508,30 @@ function ResultView({ questions, result, onRetry, examTitle }: {
                           })}
                         </div>
                       )}
+                      {q.type === "true_false" && (q.statements?.length ?? 0) > 0 && (
+                        <div className="space-y-2">
+                          {q.statements!.map((st, i) => {
+                            const picked = ans.statement_answers?.[i];
+                            const ok = picked === st.correct;
+                            return (
+                              <div key={i} className={`flex items-start gap-2 px-3 py-2 rounded-xl text-sm border ${ok ? "bg-emerald-50 border-emerald-200 dark:bg-emerald-900/20 dark:border-emerald-800/50" : "bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800/50"}`}>
+                                <span className={`h-5 w-5 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5 ${ok ? "bg-emerald-500 text-white" : "bg-red-500 text-white"}`}>
+                                  {String.fromCharCode(97 + i)}
+                                </span>
+                                <span className="flex-1 text-foreground">{st.text}</span>
+                                <span className="text-[11px] shrink-0 text-right">
+                                  <span className={ok ? "text-emerald-600 dark:text-emerald-400 font-semibold" : "text-red-500 dark:text-red-400 font-semibold"}>
+                                    Bạn: {picked === undefined ? "—" : picked ? "Đúng" : "Sai"}
+                                  </span>
+                                  {!ok && (
+                                    <span className="block text-emerald-600 dark:text-emerald-400">Đáp án: {st.correct ? "Đúng" : "Sai"}</span>
+                                  )}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                       {q.type === "essay" && ans.essay_text && (
                         <div className="bg-muted/30 rounded-xl p-3">
                           <p className="text-xs text-muted-foreground mb-1">Bài làm của bạn:</p>
@@ -516,7 +584,7 @@ function calcScore(questions: ExamQuestion[], answers: Record<string, StudentAns
     if (!ans) return total;
     let correct = false;
     if (q.type === "multiple_choice") correct = ans.selected_option === q.correct_option;
-    else if (q.type === "true_false") correct = ans.selected_value === q.correct_value;
+    else if (q.type === "true_false") correct = isTrueFalseCorrect(q, ans);
     else if (q.type === "fill_blank") correct = (ans.selected_value ?? "").trim().toLowerCase() === (q.correct_value ?? "").trim().toLowerCase();
     else if (q.type === "essay") correct = true;
     return total + (correct ? q.score : 0);
@@ -812,7 +880,7 @@ export default function ExamPage() {
 
             {/* Answer area */}
             {q.type === "multiple_choice" && <MCOptions q={q} answer={ans} onAnswer={a => setAnswer(q.id, a)} />}
-            {q.type === "true_false"      && <TFOptions answer={ans} onAnswer={a => setAnswer(q.id, a)} />}
+            {q.type === "true_false"      && <TFOptions q={q} answer={ans} onAnswer={a => setAnswer(q.id, a)} />}
             {q.type === "fill_blank"      && <FillInput answer={ans} onAnswer={a => setAnswer(q.id, a)} />}
             {q.type === "essay"           && <EssayInput answer={ans} onAnswer={a => setAnswer(q.id, a)} />}
           </div>

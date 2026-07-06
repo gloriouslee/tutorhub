@@ -797,7 +797,14 @@ export default function CurriculumTab({ classId, schedule }: { classId: string; 
         // null = not auto-gradable (essay — "chưa chấm")
         function isCorrect(q: typeof questions[0], ans: Record<string, unknown>): boolean | null {
           if (q.type === "multiple_choice") return ans.selected_option === q.correct_option;
-          if (q.type === "true_false")      return ans.selected_value === q.correct_value;
+          if (q.type === "true_false") {
+            // Đúng sai nhiều mệnh đề: đúng khi TẤT CẢ mệnh đề trả lời chính xác
+            if (q.statements && q.statements.length > 0) {
+              const sa = ans.statement_answers as Record<number, boolean> | undefined;
+              return q.statements.every((st, i) => sa?.[i] === st.correct);
+            }
+            return ans.selected_value === q.correct_value;
+          }
           if (q.type === "fill_blank")      return String(ans.selected_value ?? "").trim().toLowerCase() === String(q.correct_value ?? "").trim().toLowerCase();
           return null;
         }
@@ -960,7 +967,28 @@ export default function CurriculumTab({ classId, schedule }: { classId: string; 
                             </div>
                           )}
 
-                          {q.type === "true_false" && (
+                          {q.type === "true_false" && (q.statements?.length ?? 0) > 0 && (
+                            <div className="pl-7 space-y-1">
+                              {q.statements!.map((st, i) => {
+                                const sa = ans.statement_answers as Record<number, boolean> | undefined;
+                                const picked = sa?.[i];
+                                const ok = picked === st.correct;
+                                return (
+                                  <div key={i} className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs ${ok ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400" : "bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-400"}`}>
+                                    <span className={`h-4 w-4 rounded-full flex items-center justify-center text-[9px] font-bold shrink-0 ${ok ? "bg-emerald-500 text-white" : "bg-red-500 text-white"}`}>
+                                      {String.fromCharCode(97 + i)}
+                                    </span>
+                                    <span className="flex-1 truncate">{st.text}</span>
+                                    <span className="font-semibold shrink-0">
+                                      HS: {picked === undefined ? "—" : picked ? "Đ" : "S"}{!ok && ` · ĐA: ${st.correct ? "Đ" : "S"}`}
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+
+                          {q.type === "true_false" && !(q.statements?.length) && (
                             <div className="pl-7 flex gap-2 text-xs">
                               <span className={`px-2.5 py-1 rounded-lg ${ans.selected_value === "true" ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400" : ans.selected_value === "false" ? "bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-400" : "bg-muted text-muted-foreground"}`}>
                                 Học sinh: {ans.selected_value === "true" ? "✓ Đúng" : ans.selected_value === "false" ? "✗ Sai" : "Chưa trả lời"}

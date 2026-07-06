@@ -12,11 +12,13 @@ import "katex/dist/katex.min.css";
 import { Button } from "@/components/ui/button";
 import type { ExamContent, ExamQuestion, CurriculumLesson } from "@/lib/storage";
 import { uploadClassFile } from "@/lib/upload";
+import { parseExamText, parsedToExamQuestions, type ParseResult } from "@/lib/examTextParser";
 import {
   X, Check, Clock, Eye, EyeOff, Plus, Trash2,
   Bold, Italic, List, ListOrdered, AlignLeft, AlignCenter,
   AlignRight, Image as ImageIcon, Sigma, Heading2, Heading3,
-  Minus, Undo, Redo, GripVertical, Tag,
+  Minus, Undo, Redo, GripVertical, Tag, FileUp, ChevronDown,
+  AlertTriangle, FileText, PencilLine,
 } from "lucide-react";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -262,6 +264,39 @@ function AnswerPanel({ q, update, classId }: {
   }
 
   if (q.type === "true_false") {
+    // Đúng sai nhiều mệnh đề (a/b/c/d) — soạn từ văn bản
+    if (q.statements && q.statements.length > 0) {
+      const statements = q.statements;
+      const setStatement = (i: number, patch: Partial<{ text: string; correct: boolean }>) => {
+        update({ statements: statements.map((st, idx) => idx === i ? { ...st, ...patch } : st) });
+      };
+      return (
+        <div className="space-y-1.5">
+          <p className="text-[11px] text-muted-foreground mb-2">Đúng sai nhiều mệnh đề — nhấn Đ/S để đặt đáp án cho từng mệnh đề</p>
+          {statements.map((st, i) => (
+            <div key={q.id + "_st_" + i} className={`flex items-center gap-2 px-2.5 py-1.5 rounded-xl border transition-colors ${st.correct ? "border-emerald-400 bg-emerald-50 dark:bg-emerald-900/20" : "border-border bg-background"}`}>
+              <span className="text-xs font-bold text-muted-foreground w-5 shrink-0">{String.fromCharCode(97 + i)})</span>
+              <input
+                value={st.text}
+                onChange={e => setStatement(i, { text: e.target.value })}
+                placeholder={`Mệnh đề ${String.fromCharCode(97 + i)}…`}
+                className="flex-1 min-w-0 h-8 px-2 rounded-lg border border-transparent bg-transparent text-sm outline-none focus:border-border focus:bg-background text-foreground"
+              />
+              <div className="flex gap-1 shrink-0">
+                <button
+                  onClick={() => setStatement(i, { correct: true })}
+                  className={`px-2.5 h-7 rounded-lg text-xs font-semibold border transition-colors ${st.correct ? "border-emerald-500 bg-emerald-500 text-white" : "border-border text-muted-foreground hover:border-emerald-400"}`}
+                >Đ</button>
+                <button
+                  onClick={() => setStatement(i, { correct: false })}
+                  className={`px-2.5 h-7 rounded-lg text-xs font-semibold border transition-colors ${!st.correct ? "border-red-500 bg-red-500 text-white" : "border-border text-muted-foreground hover:border-red-400"}`}
+                >S</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      );
+    }
     return (
       <div className="flex gap-3">
         {(["true", "false"] as const).map(v => (
@@ -509,6 +544,206 @@ function QCard({ q, index, selected, onSelect, onDelete }: {
   );
 }
 
+// ── Text import panel ("Soạn từ văn bản / Import Word") ──────────────────────
+
+const PARSED_TYPE_META: Record<string, { label: string; cls: string }> = {
+  multiple_choice: { label: "Trắc nghiệm", cls: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" },
+  true_false:      { label: "Đúng sai",    cls: "bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400" },
+  fill_blank:      { label: "Trả lời ngắn",cls: "bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400" },
+  essay:           { label: "Tự luận",     cls: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400" },
+};
+
+function FormatGuide() {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="rounded-xl border border-border bg-muted/20">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center gap-2 px-3 py-2 text-xs font-semibold text-foreground hover:bg-muted/40 transition-colors rounded-xl"
+      >
+        <ChevronDown className={`h-3.5 w-3.5 text-muted-foreground transition-transform ${open ? "" : "-rotate-90"}`} />
+        Hướng dẫn định dạng
+      </button>
+      {open && (
+        <div className="px-4 pb-3 text-xs text-muted-foreground space-y-2 leading-relaxed">
+          <p>• Mỗi câu bắt đầu bằng <code className="bg-muted px-1 rounded font-mono">Câu 1.</code>, <code className="bg-muted px-1 rounded font-mono">Câu 2.</code>…</p>
+          <p>• Đề bài nằm <strong className="text-foreground">TRÊN</strong> dòng <code className="bg-muted px-1 rounded font-mono">Lời giải</code>, phần giải thích nằm <strong className="text-foreground">DƯỚI</strong>.</p>
+          <p>• <strong className="text-foreground">Trắc nghiệm:</strong> các phương án <code className="bg-muted px-1 rounded font-mono">A.</code> <code className="bg-muted px-1 rounded font-mono">B.</code> <code className="bg-muted px-1 rounded font-mono">C.</code> <code className="bg-muted px-1 rounded font-mono">D.</code> — thêm dấu <code className="bg-muted px-1 rounded font-mono">*</code> trước đáp án đúng (VD: <code className="bg-muted px-1 rounded font-mono">*C. 12</code>).</p>
+          <p>• <strong className="text-foreground">Đúng sai:</strong> các mệnh đề <code className="bg-muted px-1 rounded font-mono">a)</code> <code className="bg-muted px-1 rounded font-mono">b)</code> <code className="bg-muted px-1 rounded font-mono">c)</code> <code className="bg-muted px-1 rounded font-mono">d)</code> — thêm dấu <code className="bg-muted px-1 rounded font-mono">*</code> trước mệnh đề <strong className="text-foreground">đúng</strong>.</p>
+          <p>• <strong className="text-foreground">Trả lời ngắn:</strong> sau dòng <code className="bg-muted px-1 rounded font-mono">Lời giải</code> có dòng <code className="bg-muted px-1 rounded font-mono">Đáp án: &lt;con số&gt;</code>.</p>
+          <p>• Câu không khớp định dạng nào → <strong className="text-foreground">tự luận</strong>.</p>
+          <p>• Dòng <code className="bg-muted px-1 rounded font-mono">Phần …</code> trước câu hỏi được coi là tiêu đề nhóm.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TextImportPanel({ onAppend, onReplace }: {
+  onAppend: (qs: ExamQuestion[]) => void;
+  onReplace: (qs: ExamQuestion[]) => void;
+}) {
+  const [text,      setText]      = useState("");
+  const [parsed,    setParsed]    = useState<ParseResult | null>(null);
+  const [importing, setImporting] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  // Debounced live parse
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setParsed(text.trim() ? parseExamText(text) : null);
+    }, 350);
+    return () => clearTimeout(t);
+  }, [text]);
+
+  const handleDocx = async (file: File) => {
+    setImporting(true);
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const mammoth = await import("mammoth");
+      const { value } = await mammoth.extractRawText({ arrayBuffer });
+      setText(value);
+    } catch {
+      alert("Không đọc được file Word. Vui lòng kiểm tra file .docx.");
+    } finally {
+      setImporting(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  };
+
+  const questions = parsed?.questions ?? [];
+  const hasErrors = (parsed?.errors.length ?? 0) > 0;
+  const canImport = !hasErrors && questions.length > 0;
+  const typeCounts = questions.reduce<Record<string, number>>((acc, q) => {
+    acc[q.type] = (acc[q.type] ?? 0) + 1;
+    return acc;
+  }, {});
+
+  const convert = () => parsedToExamQuestions(questions);
+
+  return (
+    <div className="flex flex-col lg:flex-row h-full min-h-0">
+      {/* ── Left: input ── */}
+      <div className="flex-1 min-w-0 flex flex-col border-r border-border p-4 gap-3 overflow-y-auto">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <p className="text-sm font-semibold text-foreground">Dán nội dung đề thi</p>
+          <div>
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              className="hidden"
+              onChange={e => { const f = e.target.files?.[0]; if (f) handleDocx(f); }}
+            />
+            <Button size="sm" variant="outline" onClick={() => fileRef.current?.click()} disabled={importing}>
+              <FileUp className="h-3.5 w-3.5 mr-1.5" />
+              {importing ? "Đang đọc file…" : "Nhập từ file Word (.docx)"}
+            </Button>
+          </div>
+        </div>
+
+        <FormatGuide />
+
+        <textarea
+          value={text}
+          onChange={e => setText(e.target.value)}
+          spellCheck={false}
+          placeholder={"Câu 1. Giá trị của 2 + 2 là\nA. 3   *B. 4   C. 5   D. 6\nLời giải\n2 + 2 = 4 nên chọn B.\n\nCâu 2. Cho hàm số y = x². Xét các mệnh đề:\n*a) Hàm số đồng biến trên (0; +∞)\nb) Hàm số đồng biến trên R\n…"}
+          className="flex-1 min-h-[260px] w-full rounded-xl border border-border bg-background p-3 font-mono text-xs leading-relaxed text-foreground outline-none focus:ring-2 focus:ring-primary/40 resize-none"
+        />
+      </div>
+
+      {/* ── Right: live preview ── */}
+      <div className="w-full lg:w-[26rem] shrink-0 flex flex-col min-h-0 bg-muted/10">
+        <div className="px-4 py-2.5 border-b border-border shrink-0 flex items-center gap-2 flex-wrap">
+          <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+            Xem trước ({questions.length} câu)
+          </span>
+          {Object.entries(typeCounts).map(([t, n]) => (
+            <span key={t} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${PARSED_TYPE_META[t].cls}`}>
+              {PARSED_TYPE_META[t].label}: {n}
+            </span>
+          ))}
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
+          {parsed?.errors.map((err, i) => (
+            <div key={"err" + i} className="flex items-start gap-2 px-3 py-2 rounded-xl border border-red-200 bg-red-50 dark:bg-red-900/20 dark:border-red-800/50 text-xs text-red-700 dark:text-red-400">
+              <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+              <span>{err}</span>
+            </div>
+          ))}
+          {(parsed?.sections.length ?? 0) > 0 && (
+            <p className="text-[10px] text-muted-foreground px-1">Tiêu đề nhóm: {parsed!.sections.join(" · ")}</p>
+          )}
+          {!parsed && (
+            <p className="text-xs text-muted-foreground text-center py-10">Dán văn bản hoặc nhập file Word để xem trước câu hỏi.</p>
+          )}
+          {questions.map((pq, i) => {
+            const meta = PARSED_TYPE_META[pq.type];
+            return (
+              <div key={i} className="rounded-xl border border-border bg-card p-3 space-y-1.5">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-foreground">Câu {pq.index}</span>
+                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${meta.cls}`}>{meta.label}</span>
+                </div>
+                <p className="text-xs text-foreground whitespace-pre-wrap leading-relaxed">{pq.content}</p>
+                {pq.options && (
+                  <div className="space-y-0.5">
+                    {pq.options.map((opt, oi) => (
+                      <p key={oi} className={`text-xs px-2 py-1 rounded-lg ${pq.correctOption === oi ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400 font-medium" : "text-muted-foreground"}`}>
+                        {["A", "B", "C", "D"][oi] ?? String(oi + 1)}. {opt} {pq.correctOption === oi && "✓"}
+                      </p>
+                    ))}
+                  </div>
+                )}
+                {pq.statements && (
+                  <div className="space-y-0.5">
+                    {pq.statements.map((st, si) => (
+                      <p key={si} className="text-xs px-2 py-1 rounded-lg flex items-start gap-1.5 text-muted-foreground">
+                        <span className={`font-bold shrink-0 ${st.correct ? "text-emerald-600 dark:text-emerald-400" : "text-red-500 dark:text-red-400"}`}>
+                          {st.correct ? "Đ" : "S"}
+                        </span>
+                        <span>{String.fromCharCode(97 + si)}) {st.text}</span>
+                      </p>
+                    ))}
+                  </div>
+                )}
+                {pq.shortAnswer !== undefined && (
+                  <p className="text-xs text-emerald-700 dark:text-emerald-400">Đáp án: <strong>{pq.shortAnswer}</strong></p>
+                )}
+                {pq.solution && (
+                  <p className="text-[11px] text-muted-foreground border-t border-border/60 pt-1.5 whitespace-pre-wrap">💡 {pq.solution}</p>
+                )}
+                {pq.warnings.map((w, wi) => (
+                  <p key={wi} className="flex items-start gap-1.5 text-[11px] text-amber-600 dark:text-amber-400">
+                    <AlertTriangle className="h-3 w-3 shrink-0 mt-0.5" />{w}
+                  </p>
+                ))}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Actions */}
+        <div className="p-3 border-t border-border shrink-0 flex flex-col gap-2">
+          <Button variant="gradient" size="sm" disabled={!canImport} onClick={() => onAppend(convert())}>
+            <Plus className="h-3.5 w-3.5 mr-1.5" />Thêm {questions.length} câu vào đề
+          </Button>
+          <Button
+            variant="outline" size="sm" disabled={!canImport}
+            onClick={() => {
+              if (confirm("Thay thế TOÀN BỘ câu hỏi hiện có bằng các câu vừa soạn?")) onReplace(convert());
+            }}
+          >
+            <Trash2 className="h-3.5 w-3.5 mr-1.5" />Thay thế toàn bộ
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main modal ────────────────────────────────────────────────────────────────
 
 export default function ExamEditorModal({
@@ -532,6 +767,28 @@ export default function ExamEditorModal({
       : [emptyQuestion(0)]
   );
   const [selectedId, setSelectedId] = useState(questions[0].id);
+  const [mode,       setMode]       = useState<"manual" | "text">("manual");
+
+  // Nếu đề chỉ có 1 câu trống mặc định thì bỏ nó khi thêm câu từ văn bản
+  const isPlaceholderOnly = (qs: ExamQuestion[]) =>
+    qs.length === 1 && !qs[0].content_html.trim() && (qs[0].options ?? []).every(o => !o.trim());
+
+  const appendParsed = (qs: ExamQuestion[]) => {
+    if (qs.length === 0) return;
+    setQuestions(prev => {
+      const base = isPlaceholderOnly(prev) ? [] : prev;
+      return [...base, ...qs].map((q, i) => ({ ...q, order: i }));
+    });
+    setSelectedId(qs[0].id);
+    setMode("manual");
+  };
+
+  const replaceParsed = (qs: ExamQuestion[]) => {
+    if (qs.length === 0) return;
+    setQuestions(qs.map((q, i) => ({ ...q, order: i })));
+    setSelectedId(qs[0].id);
+    setMode("manual");
+  };
 
   const totalScore = questions.reduce((s, q) => s + (q.score || 0), 0);
   const selectedQ  = questions.find(q => q.id === selectedId) ?? questions[0];
@@ -627,7 +884,28 @@ export default function ExamEditorModal({
         </div>
       </div>
 
-      {/* ── Body: sidebar + editor ── */}
+      {/* ── Mode toggle ── */}
+      <div className="flex items-center gap-1 px-4 py-1.5 border-b border-border bg-muted/10 shrink-0">
+        {([
+          { key: "manual" as const, label: "Soạn thủ công",                 icon: PencilLine },
+          { key: "text"   as const, label: "Soạn từ văn bản / Import Word", icon: FileText },
+        ]).map(t => (
+          <button
+            key={t.key}
+            onClick={() => setMode(t.key)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${mode === t.key ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
+          >
+            <t.icon className="h-3.5 w-3.5" />{t.label}
+          </button>
+        ))}
+      </div>
+
+      {mode === "text" ? (
+        <div className="flex-1 min-h-0">
+          <TextImportPanel onAppend={appendParsed} onReplace={replaceParsed} />
+        </div>
+      ) : (
+      /* ── Body: sidebar + editor ── */
       <div className="flex flex-1 min-h-0">
         {/* Left sidebar */}
         <div className="w-56 shrink-0 border-r border-border flex flex-col bg-muted/10">
@@ -681,6 +959,7 @@ export default function ExamEditorModal({
           </div>
         </div>
       </div>
+      )}
     </div>,
     document.body
   );

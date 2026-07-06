@@ -502,6 +502,9 @@ export interface ExamQuestion {
   options?: string[];        // A/B/C/D text (multiple_choice)
   correct_option?: number;   // 0-based index (multiple_choice)
   correct_value?: string;    // "true"/"false" or exact text (true_false / fill_blank)
+  // Đúng sai nhiều mệnh đề (chuẩn THPT mới): mỗi mệnh đề a/b/c/d là Đ hoặc S.
+  // Khi có statements, correct_value bị bỏ qua.
+  statements?: { text: string; correct: boolean }[];
   answer_html?: string;      // TipTap HTML — đáp án tự luận
   explanation_html?: string; // TipTap HTML — giải thích
   score: number;
