@@ -86,6 +86,12 @@ function RichContent({ html, className = "" }: { html: string; className?: strin
   );
 }
 
+// Text thuần có thể chứa $LaTeX$ (mệnh đề Đúng/Sai) → escape rồi render KaTeX
+function MathText({ text, className = "" }: { text: string; className?: string }) {
+  const escaped = (text || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return <span className={className} dangerouslySetInnerHTML={{ __html: renderMathInHtml(escaped) }} />;
+}
+
 function RawText({ html }: { html: string }) {
   return <span>{html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 60)}</span>;
 }
@@ -309,7 +315,7 @@ function TFOptions({ q, answer, onAnswer }: { q: ExamQuestion; answer: StudentAn
         {q.statements.map((st, i) => (
           <div key={i} className="flex items-center gap-3 p-3.5 rounded-2xl border-2 border-border bg-card">
             <span className="text-sm font-bold text-muted-foreground w-5 shrink-0">{String.fromCharCode(97 + i)})</span>
-            <span className="flex-1 text-sm text-foreground">{st.text}</span>
+            <MathText text={st.text} className="flex-1 text-sm text-foreground" />
             <div className="flex gap-1.5 shrink-0">
               <button
                 onClick={() => pick(i, true)}
@@ -657,7 +663,7 @@ function ResultView({ questions, result, onRetry, examTitle, showSolution }: {
                                 <span className={`h-5 w-5 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5 ${ok ? "bg-emerald-500 text-white" : "bg-red-500 text-white"}`}>
                                   {String.fromCharCode(97 + i)}
                                 </span>
-                                <span className="flex-1 text-foreground">{st.text}</span>
+                                <MathText text={st.text} className="flex-1 text-foreground" />
                                 <span className="text-[11px] shrink-0 text-right">
                                   <span className={ok ? "text-emerald-600 dark:text-emerald-400 font-semibold" : "text-red-500 dark:text-red-400 font-semibold"}>
                                     Bạn: {picked === undefined ? "—" : picked ? "Đúng" : "Sai"}

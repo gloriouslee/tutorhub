@@ -310,7 +310,9 @@ export default function ExamGradingView({
                               <span className={`h-4 w-4 rounded-full flex items-center justify-center text-[9px] font-bold shrink-0 ${ok ? "bg-emerald-500 text-white" : "bg-red-500 text-white"}`}>
                                 {String.fromCharCode(97 + i)}
                               </span>
-                              <span className="flex-1">{st.text}</span>
+                              <span className="flex-1" dangerouslySetInnerHTML={{
+                                __html: renderMathInHtml(st.text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")),
+                              }} />
                               <span className="font-semibold shrink-0">
                                 HS: {picked === undefined ? "—" : picked ? "Đ" : "S"}{!ok && ` · ĐA: ${st.correct ? "Đ" : "S"}`}
                               </span>
