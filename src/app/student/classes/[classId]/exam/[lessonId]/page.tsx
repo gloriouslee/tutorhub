@@ -783,6 +783,8 @@ export default function ExamPage() {
   const [lockReason,  setLockReason]  = useState("");
   // null = đang kiểm tra quyền truy cập
   const [accessDenied, setAccessDenied] = useState<boolean | null>(null);
+  // true = đề thi lấy từ API server (đã lọc đáp án) → nộp bài cũng qua API
+  const serverModeRef = useRef(false);
 
   useEffect(() => {
     // Chờ context sẵn sàng — tránh load nhầm kết quả của s1 mặc định
@@ -804,6 +806,59 @@ export default function ExamPage() {
     if (cancelled) return;
     setAccessDenied(!allowed);
     if (!allowed) return;
+
+    // ── Đường chính: lấy đề từ API server (đáp án đã bị lọc) ──
+    // 501 (chưa cấu hình service key) / lỗi mạng → fallback luồng client cũ.
+    const sid = studentId || "anon";
+    let useFallback = true;
+    try {
+      const res = await fetch(
+        `/api/exam/${classId}/${lessonId}?studentId=${encodeURIComponent(sid)}`
+      );
+      if (res.status === 403) {
+        const data = await res.json();
+        if (cancelled) return;
+        serverModeRef.current = true;
+        useFallback = false;
+        setLesson({ id: lessonId, type: "exam", title: "Bài thi", is_published: true });
+        setExamLocked(true);
+        setLockReason(
+          data.reason === "unpublished" ? "Bài thi chưa được công bố."
+          : data.reason === "closed" ? "Bài thi đã kết thúc."
+          : data.opens_at && new Date(data.opens_at) > new Date()
+            ? `Bài thi sẽ mở lúc ${new Date(data.opens_at).toLocaleString("vi-VN")}.`
+            : "Bài thi chưa được mở.");
+      } else if (res.ok) {
+        const data = await res.json();
+        if (cancelled) return;
+        serverModeRef.current = true;
+        useFallback = false;
+        setLesson({
+          id: lessonId,
+          type: "exam",
+          title: data.title,
+          is_published: true,
+          exam_content: {
+            questions: data.questions ?? [],
+            time_limit: data.time_limit ?? undefined,
+            show_solution_after_submit: data.show_solution_after_submit,
+          },
+        });
+        setQuestions((data.questions ?? []) as ExamQuestion[]);
+        setExamLocked(false);
+        setLockReason("");
+        if (data.submitted && data.result) {
+          setResult(data.result as ExamResult);
+          setSubmitted(true);
+        } else {
+          setResult(null);
+          setSubmitted(false);
+        }
+      }
+      // 404/500... → fallback client bên dưới
+    } catch { /* offline / route không chạy → fallback client */ }
+    if (!useFallback || cancelled) return;
+    serverModeRef.current = false;
 
     const chapters = await getCurriculum(classId);
     for (const ch of chapters)
@@ -873,11 +928,41 @@ export default function ExamPage() {
   }
 
   async function submit() {
+    const sid = studentId || "anon";
+    // ── Đường chính: server chấm điểm (client không có đáp án) ──
+    if (serverModeRef.current) {
+      try {
+        const res = await fetch(`/api/exam/${classId}/${lessonId}/submit`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ studentId: sid, studentName, answers }),
+        });
+        if (res.ok || res.status === 409) {
+          let data = res.ok ? await res.json() : null;
+          if (!data) {
+            // 409 — đã có kết quả trên server: tải lại để hiển thị
+            const again = await fetch(`/api/exam/${classId}/${lessonId}?studentId=${encodeURIComponent(sid)}`);
+            if (again.ok) data = await again.json();
+          }
+          if (data?.result) {
+            if (Array.isArray(data.questions) && data.questions.length > 0) {
+              setQuestions(data.questions as ExamQuestion[]);
+            }
+            markExamComplete(sid, lessonId);
+            setResult(data.result as ExamResult);
+            setSubmitted(true);
+            setShowConfirm(false);
+            return;
+          }
+        }
+        // Lỗi khác (501/500...) → fallback client bên dưới
+      } catch { /* offline → fallback client */ }
+    }
+
     const score = calcScore(questions, answers);
     const total = questions.reduce((s, q) => s + q.score, 0);
     const submitted_at = new Date().toISOString();
     const res: ExamResult = { answers, score, total, submitted_at };
-    const sid = studentId || "anon";
     await saveExamResult(classId, lessonId, sid, studentName, { score, total, submitted_at, answers: answers as Record<string, unknown> });
     markExamComplete(sid, lessonId);
     setResult(res);
@@ -924,18 +1009,6 @@ export default function ExamPage() {
     </div>
   );
 
-  if (questions.length === 0) return (
-    <div className="min-h-screen flex items-center justify-center bg-background">
-      <div className="text-center space-y-4 px-4">
-        <AlertTriangle className="h-12 w-12 text-amber-500 mx-auto" />
-        <p className="text-base font-semibold text-foreground">Bài thi chưa có câu hỏi</p>
-        <Button variant="outline" onClick={() => router.back()}>
-          <ChevronLeft className="h-4 w-4 mr-1" />Quay lại
-        </Button>
-      </div>
-    </div>
-  );
-
   if (submitted && result) return (
     <ResultView
       questions={questions}
@@ -946,6 +1019,7 @@ export default function ExamPage() {
     />
   );
 
+  // Kiểm tra khóa TRƯỚC "chưa có câu hỏi" — đề bị khóa từ server không kèm câu hỏi
   if (examLocked) return (
     <div className="min-h-screen flex items-center justify-center bg-background">
       <div className="text-center space-y-4 px-4 max-w-sm">
@@ -954,6 +1028,18 @@ export default function ExamPage() {
         </div>
         <p className="text-base font-semibold text-foreground">Bài thi chưa khả dụng</p>
         <p className="text-sm text-muted-foreground">{lockReason}</p>
+        <Button variant="outline" onClick={() => router.back()}>
+          <ChevronLeft className="h-4 w-4 mr-1" />Quay lại
+        </Button>
+      </div>
+    </div>
+  );
+
+  if (questions.length === 0) return (
+    <div className="min-h-screen flex items-center justify-center bg-background">
+      <div className="text-center space-y-4 px-4">
+        <AlertTriangle className="h-12 w-12 text-amber-500 mx-auto" />
+        <p className="text-base font-semibold text-foreground">Bài thi chưa có câu hỏi</p>
         <Button variant="outline" onClick={() => router.back()}>
           <ChevronLeft className="h-4 w-4 mr-1" />Quay lại
         </Button>
