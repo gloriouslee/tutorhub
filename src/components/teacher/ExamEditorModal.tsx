@@ -597,8 +597,50 @@ function MathHint({ text, registry, className = "" }: { text: string; registry?:
   );
 }
 
-function AutoGrowTextarea({ value, onChange, placeholder, className }: {
+// Text quy ước → HTML render đầy đủ (token registry + $...$ KaTeX + [img:url])
+function fieldToHtml(text: string, registry: ExamAssetRegistry): string {
+  const resolved = resolveRegistryTokens(text || "", registry);
+  const esc = resolved.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const withImgs = esc.replace(/\[img:(https?:\/\/[^\]\s]+|data:image\/[^\]\s]+)\]/g,
+    (_, url) => `<img src="${url.replace(/"/g, "&quot;")}" alt="hình" class="inline-block max-h-48 rounded-lg my-1" />`);
+  return renderMathInHtml(withImgs).replace(/\n/g, "<br/>");
+}
+
+// Trường "render trước, bấm để sửa" (kiểu Azota): mặc định hiện công thức/ảnh
+// đã render; click vào → textarea nguồn; blur → quay lại bản render.
+function RenderedField({ value, onChange, registry, placeholder, className = "", textClassName = "" }: {
+  value: string; onChange: (v: string) => void; registry: ExamAssetRegistry;
+  placeholder?: string; className?: string; textClassName?: string;
+}) {
+  const [editing, setEditing] = useState(false);
+  if (editing) {
+    return (
+      <AutoGrowTextarea
+        value={value}
+        onChange={onChange}
+        placeholder={placeholder}
+        className={`${textClassName} border-primary/40 bg-background`}
+        autoFocus
+        onBlur={() => setEditing(false)}
+      />
+    );
+  }
+  return (
+    <div
+      onClick={() => setEditing(true)}
+      title="Nhấn để sửa"
+      className={`min-h-[30px] px-2 py-1.5 rounded-lg border border-transparent hover:border-border hover:bg-background/60 cursor-text text-sm leading-relaxed text-foreground transition-colors ${className}`}
+    >
+      {value.trim()
+        ? <span dangerouslySetInnerHTML={{ __html: fieldToHtml(value, registry) }} />
+        : <span className="text-muted-foreground">{placeholder}</span>}
+    </div>
+  );
+}
+
+function AutoGrowTextarea({ value, onChange, placeholder, className, autoFocus, onBlur }: {
   value: string; onChange: (v: string) => void; placeholder?: string; className?: string;
+  autoFocus?: boolean; onBlur?: () => void;
 }) {
   const ref = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
@@ -615,6 +657,8 @@ function AutoGrowTextarea({ value, onChange, placeholder, className }: {
       onChange={e => onChange(e.target.value)}
       placeholder={placeholder}
       spellCheck={false}
+      autoFocus={autoFocus}
+      onBlur={onBlur}
       className={`w-full resize-none rounded-lg border border-transparent bg-transparent px-2 py-1.5 text-sm leading-relaxed text-foreground outline-none focus:border-border focus:bg-background transition-colors ${className ?? ""}`}
     />
   );
@@ -719,14 +763,15 @@ function ParsedQuestionCard({ q, num, update, registry, onUpdateTex }: {
         ))}
       </div>
 
-      {/* Nội dung câu hỏi */}
-      <AutoGrowTextarea
+      {/* Nội dung câu hỏi — render sẵn, nhấn để sửa nguồn */}
+      <RenderedField
         value={q.content}
         onChange={v => update({ content: v })}
+        registry={registry}
         placeholder="Nội dung câu hỏi…"
         className="font-medium"
+        textClassName="font-medium"
       />
-      <MathHint text={q.content} registry={registry} />
 
       {/* Trắc nghiệm A-D */}
       {q.type === "multiple_choice" && q.options && (
@@ -743,18 +788,20 @@ function ParsedQuestionCard({ q, num, update, registry, onUpdateTex }: {
                 >
                   {["A", "B", "C", "D"][oi] ?? String(oi + 1)}
                 </button>
-                <input
-                  value={opt}
-                  onChange={e => {
-                    const opts = [...q.options!];
-                    opts[oi] = e.target.value;
-                    update({ options: opts });
-                  }}
-                  placeholder={`Lựa chọn ${["A", "B", "C", "D"][oi] ?? oi + 1}…`}
-                  className="flex-1 min-w-0 h-7 px-1.5 rounded-md border border-transparent bg-transparent text-sm outline-none focus:border-border focus:bg-background text-foreground"
-                />
+                <div className="flex-1 min-w-0">
+                  <RenderedField
+                    value={opt}
+                    onChange={v => {
+                      const opts = [...q.options!];
+                      opts[oi] = v;
+                      update({ options: opts });
+                    }}
+                    registry={registry}
+                    placeholder={`Lựa chọn ${["A", "B", "C", "D"][oi] ?? oi + 1}…`}
+                    className="min-h-[26px] py-0.5"
+                  />
+                </div>
               </div>
-              <MathHint text={opt} registry={registry} className="mt-0.5 ml-8" />
               </div>
             );
           })}
@@ -768,12 +815,15 @@ function ParsedQuestionCard({ q, num, update, registry, onUpdateTex }: {
             <div key={si}>
             <div className={`flex items-center gap-2 px-2 py-1 rounded-lg border transition-colors ${st.correct ? "border-emerald-400 bg-emerald-50 dark:bg-emerald-900/20" : "border-border bg-background"}`}>
               <span className="text-xs font-bold text-muted-foreground w-4 shrink-0">{String.fromCharCode(97 + si)})</span>
-              <input
-                value={st.text}
-                onChange={e => update({ statements: q.statements!.map((s, idx) => idx === si ? { ...s, text: e.target.value } : s) })}
-                placeholder={`Mệnh đề ${String.fromCharCode(97 + si)}…`}
-                className="flex-1 min-w-0 h-7 px-1.5 rounded-md border border-transparent bg-transparent text-sm outline-none focus:border-border focus:bg-background text-foreground"
-              />
+              <div className="flex-1 min-w-0">
+                <RenderedField
+                  value={st.text}
+                  onChange={v => update({ statements: q.statements!.map((s, idx) => idx === si ? { ...s, text: v } : s) })}
+                  registry={registry}
+                  placeholder={`Mệnh đề ${String.fromCharCode(97 + si)}…`}
+                  className="min-h-[26px] py-0.5"
+                />
+              </div>
               <div className="flex gap-1 shrink-0">
                 <button
                   onClick={() => update({ statements: q.statements!.map((s, idx) => idx === si ? { ...s, correct: true } : s) })}
@@ -785,7 +835,6 @@ function ParsedQuestionCard({ q, num, update, registry, onUpdateTex }: {
                 >S</button>
               </div>
             </div>
-            <MathHint text={st.text} registry={registry} className="mt-0.5 ml-8" />
             </div>
           ))}
         </div>
@@ -814,17 +863,18 @@ function ParsedQuestionCard({ q, num, update, registry, onUpdateTex }: {
           Lời giải{q.solution ? "" : " (trống)"}
         </button>
         {solutionOpen ? (
-          <>
-            <AutoGrowTextarea
-              value={q.solution ?? ""}
-              onChange={v => update({ solution: v || undefined })}
-              placeholder="Lời giải / giải thích…"
-              className="mt-1 text-xs"
-            />
-            <MathHint text={q.solution ?? ""} registry={registry} className="mt-0.5" />
-          </>
+          <RenderedField
+            value={q.solution ?? ""}
+            onChange={v => update({ solution: v || undefined })}
+            registry={registry}
+            placeholder="Lời giải / giải thích…"
+            className="mt-1 text-xs"
+            textClassName="text-xs"
+          />
         ) : q.solution ? (
-          <p className="text-[11px] text-muted-foreground truncate mt-0.5 px-2">💡 {q.solution}</p>
+          <p className="text-[11px] text-muted-foreground mt-0.5 px-2 line-clamp-1">
+            💡 <span dangerouslySetInnerHTML={{ __html: fieldToHtml(q.solution, registry) }} />
+          </p>
         ) : null}
       </div>
 
