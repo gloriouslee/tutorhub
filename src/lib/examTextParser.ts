@@ -181,6 +181,41 @@ function toHtml(s: string): string {
   return s.split("\n").filter(l => l.trim()).map(l => `<p>${esc(l.trim())}</p>`).join("");
 }
 
+// ── Serializer: ParsedQuestion[] → văn bản theo quy ước ──────────────────────
+// Cho phép sửa trực tiếp trên preview (bên trái) rồi ghi ngược lại textarea.
+
+export function parsedToText(questions: ParsedQuestion[]): string {
+  const blocks = questions.map((q, i) => {
+    const lines: string[] = [`Câu ${i + 1}. ${q.content}`.trimEnd()];
+    if (q.type === "multiple_choice" && q.options) {
+      q.options.forEach((opt, j) => {
+        const letter = String.fromCharCode(65 + j); // A, B, C, D
+        lines.push(`${j === q.correctOption ? "*" : ""}${letter}. ${opt}`);
+      });
+    }
+    if (q.type === "true_false" && q.statements) {
+      q.statements.forEach((st, j) => {
+        const letter = String.fromCharCode(97 + j); // a, b, c, d
+        lines.push(`${st.correct ? "*" : ""}${letter}) ${st.text}`);
+      });
+    }
+    const hasSolution = q.solution || q.type === "fill_blank";
+    if (hasSolution) {
+      lines.push("Lời giải");
+      if (q.solution) {
+        // Với trả lời ngắn, bỏ dòng "Đáp án:" cũ trong solution (sẽ ghi lại bên dưới)
+        const sol = q.type === "fill_blank"
+          ? q.solution.split("\n").filter(l => !SHORT_ANS_RE.test(l)).join("\n").trim()
+          : q.solution;
+        if (sol) lines.push(sol);
+      }
+      if (q.type === "fill_blank") lines.push(`Đáp án: ${q.shortAnswer ?? ""}`);
+    }
+    return lines.join("\n");
+  });
+  return blocks.join("\n\n");
+}
+
 export function parsedToExamQuestions(parsed: ParsedQuestion[]): ExamQuestion[] {
   return parsed.map((p, i) => {
     const base = {

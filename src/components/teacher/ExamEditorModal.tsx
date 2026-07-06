@@ -12,7 +12,7 @@ import "katex/dist/katex.min.css";
 import { Button } from "@/components/ui/button";
 import type { ExamContent, ExamQuestion, CurriculumLesson } from "@/lib/storage";
 import { uploadClassFile } from "@/lib/upload";
-import { parseExamText, parsedToExamQuestions, type ParseResult } from "@/lib/examTextParser";
+import { parseExamText, parsedToText, parsedToExamQuestions, type ParseResult, type ParsedQuestion } from "@/lib/examTextParser";
 import {
   X, Check, Clock, Eye, EyeOff, Plus, Trash2,
   Bold, Italic, List, ListOrdered, AlignLeft, AlignCenter,
@@ -553,15 +553,14 @@ const PARSED_TYPE_META: Record<string, { label: string; cls: string }> = {
   essay:           { label: "Tự luận",     cls: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400" },
 };
 
-function FormatGuide() {
-  const [open, setOpen] = useState(false);
+function FormatGuide({ open, onToggle }: { open: boolean; onToggle: () => void }) {
   return (
-    <div className="rounded-xl border border-border bg-muted/20">
+    <div className={`rounded-xl border border-border bg-card shadow-lg ${open ? "" : "hidden"}`}>
       <button
-        onClick={() => setOpen(o => !o)}
+        onClick={onToggle}
         className="w-full flex items-center gap-2 px-3 py-2 text-xs font-semibold text-foreground hover:bg-muted/40 transition-colors rounded-xl"
       >
-        <ChevronDown className={`h-3.5 w-3.5 text-muted-foreground transition-transform ${open ? "" : "-rotate-90"}`} />
+        <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
         Hướng dẫn định dạng
       </button>
       {open && (
@@ -579,22 +578,187 @@ function FormatGuide() {
   );
 }
 
-function TextImportPanel({ onAppend, onReplace }: {
+function AutoGrowTextarea({ value, onChange, placeholder, className }: {
+  value: string; onChange: (v: string) => void; placeholder?: string; className?: string;
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "0px";
+    el.style.height = `${el.scrollHeight + 2}px`;
+  }, [value]);
+  return (
+    <textarea
+      ref={ref}
+      rows={2}
+      value={value}
+      onChange={e => onChange(e.target.value)}
+      placeholder={placeholder}
+      spellCheck={false}
+      className={`w-full resize-none rounded-lg border border-transparent bg-transparent px-2 py-1.5 text-sm leading-relaxed text-foreground outline-none focus:border-border focus:bg-background transition-colors ${className ?? ""}`}
+    />
+  );
+}
+
+// Một thẻ câu hỏi có thể chỉnh sửa trực tiếp (kiểu Azota)
+function ParsedQuestionCard({ q, num, update }: {
+  q: ParsedQuestion; num: number;
+  update: (patch: Partial<ParsedQuestion>) => void;
+}) {
+  const meta = PARSED_TYPE_META[q.type];
+  const [solutionOpen, setSolutionOpen] = useState(false);
+
+  return (
+    <div className="rounded-xl border border-border bg-card p-3 space-y-2">
+      {/* Header */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-xs font-bold px-2.5 py-1 rounded-lg bg-primary/10 text-primary">Câu {num}</span>
+        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${meta.cls}`}>{meta.label}</span>
+        {q.warnings.map((w, wi) => (
+          <span key={wi} className="flex items-center gap-1 text-[11px] text-amber-600 dark:text-amber-400">
+            <AlertTriangle className="h-3 w-3 shrink-0" />{w}
+          </span>
+        ))}
+      </div>
+
+      {/* Nội dung câu hỏi */}
+      <AutoGrowTextarea
+        value={q.content}
+        onChange={v => update({ content: v })}
+        placeholder="Nội dung câu hỏi…"
+        className="font-medium"
+      />
+
+      {/* Trắc nghiệm A-D */}
+      {q.type === "multiple_choice" && q.options && (
+        <div className="space-y-1">
+          {q.options.map((opt, oi) => {
+            const correct = q.correctOption === oi;
+            return (
+              <div key={oi} className={`flex items-center gap-2 px-2 py-1 rounded-lg border transition-colors ${correct ? "border-emerald-400 bg-emerald-50 dark:bg-emerald-900/20" : "border-border bg-background"}`}>
+                <button
+                  onClick={() => update({ correctOption: oi })}
+                  title="Nhấn để chọn đáp án đúng"
+                  className={`h-6 w-6 rounded-full border-2 flex items-center justify-center shrink-0 text-[11px] font-bold transition-colors ${correct ? "border-emerald-500 bg-emerald-500 text-white" : "border-border text-muted-foreground hover:border-emerald-400"}`}
+                >
+                  {["A", "B", "C", "D"][oi] ?? String(oi + 1)}
+                </button>
+                <input
+                  value={opt}
+                  onChange={e => {
+                    const opts = [...q.options!];
+                    opts[oi] = e.target.value;
+                    update({ options: opts });
+                  }}
+                  placeholder={`Lựa chọn ${["A", "B", "C", "D"][oi] ?? oi + 1}…`}
+                  className="flex-1 min-w-0 h-7 px-1.5 rounded-md border border-transparent bg-transparent text-sm outline-none focus:border-border focus:bg-background text-foreground"
+                />
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Đúng sai a-d */}
+      {q.type === "true_false" && q.statements && (
+        <div className="space-y-1">
+          {q.statements.map((st, si) => (
+            <div key={si} className={`flex items-center gap-2 px-2 py-1 rounded-lg border transition-colors ${st.correct ? "border-emerald-400 bg-emerald-50 dark:bg-emerald-900/20" : "border-border bg-background"}`}>
+              <span className="text-xs font-bold text-muted-foreground w-4 shrink-0">{String.fromCharCode(97 + si)})</span>
+              <input
+                value={st.text}
+                onChange={e => update({ statements: q.statements!.map((s, idx) => idx === si ? { ...s, text: e.target.value } : s) })}
+                placeholder={`Mệnh đề ${String.fromCharCode(97 + si)}…`}
+                className="flex-1 min-w-0 h-7 px-1.5 rounded-md border border-transparent bg-transparent text-sm outline-none focus:border-border focus:bg-background text-foreground"
+              />
+              <div className="flex gap-1 shrink-0">
+                <button
+                  onClick={() => update({ statements: q.statements!.map((s, idx) => idx === si ? { ...s, correct: true } : s) })}
+                  className={`px-2 h-6 rounded-full text-[11px] font-semibold border transition-colors ${st.correct ? "border-emerald-500 bg-emerald-500 text-white" : "border-border text-muted-foreground hover:border-emerald-400"}`}
+                >Đ</button>
+                <button
+                  onClick={() => update({ statements: q.statements!.map((s, idx) => idx === si ? { ...s, correct: false } : s) })}
+                  className={`px-2 h-6 rounded-full text-[11px] font-semibold border transition-colors ${!st.correct ? "border-red-500 bg-red-500 text-white" : "border-border text-muted-foreground hover:border-red-400"}`}
+                >S</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Trả lời ngắn */}
+      {q.type === "fill_blank" && (
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-medium text-muted-foreground shrink-0">Đáp án:</span>
+          <input
+            value={q.shortAnswer ?? ""}
+            onChange={e => update({ shortAnswer: e.target.value })}
+            placeholder="Đáp án…"
+            className="w-40 h-7 px-2 rounded-lg border border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-900/20 text-sm text-emerald-700 dark:text-emerald-400 font-medium outline-none focus:ring-2 focus:ring-emerald-400/40"
+          />
+        </div>
+      )}
+
+      {/* Lời giải (collapsible) */}
+      <div className="border-t border-border/60 pt-1.5">
+        <button
+          onClick={() => setSolutionOpen(o => !o)}
+          className="flex items-center gap-1 text-[11px] font-medium text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <ChevronDown className={`h-3 w-3 transition-transform ${solutionOpen ? "" : "-rotate-90"}`} />
+          Lời giải{q.solution ? "" : " (trống)"}
+        </button>
+        {solutionOpen ? (
+          <AutoGrowTextarea
+            value={q.solution ?? ""}
+            onChange={v => update({ solution: v || undefined })}
+            placeholder="Lời giải / giải thích…"
+            className="mt-1 text-xs"
+          />
+        ) : q.solution ? (
+          <p className="text-[11px] text-muted-foreground truncate mt-0.5 px-2">💡 {q.solution}</p>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function TextImportPanel({ text, setText, onAppend, onReplace }: {
+  text: string;
+  setText: (t: string) => void;
   onAppend: (qs: ExamQuestion[]) => void;
   onReplace: (qs: ExamQuestion[]) => void;
 }) {
-  const [text,      setText]      = useState("");
-  const [parsed,    setParsed]    = useState<ParseResult | null>(null);
+  const [parsed,    setParsed]    = useState<ParseResult | null>(() => text.trim() ? parseExamText(text) : null);
   const [importing, setImporting] = useState(false);
+  const [guideOpen, setGuideOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  // Nguồn thay đổi gần nhất: "text" (gõ bên phải) hay "cards" (sửa thẻ bên trái).
+  // Khi sửa từ thẻ, text đã được serialize từ parsed → bỏ qua lượt parse kế tiếp để tránh vòng lặp.
+  const sourceRef = useRef<"text" | "cards">("text");
 
-  // Debounced live parse
+  // Phải → trái: gõ ở textarea → debounce 350ms → parse → cập nhật thẻ
   useEffect(() => {
+    if (sourceRef.current === "cards") {
+      sourceRef.current = "text";
+      return;
+    }
     const t = setTimeout(() => {
       setParsed(text.trim() ? parseExamText(text) : null);
     }, 350);
     return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [text]);
+
+  // Trái → phải: sửa thẻ → cập nhật parsed ngay + serialize vào textarea
+  const updateQuestion = (i: number, patch: Partial<ParsedQuestion>) => {
+    if (!parsed) return;
+    const questions = parsed.questions.map((q, idx) => idx === i ? { ...q, ...patch } : q);
+    setParsed({ ...parsed, questions });
+    sourceRef.current = "cards";
+    setText(parsedToText(questions));
+  };
 
   const handleDocx = async (file: File) => {
     setImporting(true);
@@ -622,12 +786,61 @@ function TextImportPanel({ onAppend, onReplace }: {
   const convert = () => parsedToExamQuestions(questions);
 
   return (
-    <div className="flex flex-col lg:flex-row h-full min-h-0">
-      {/* ── Left: input ── */}
-      <div className="flex-1 min-w-0 flex flex-col border-r border-border p-4 gap-3 overflow-y-auto">
-        <div className="flex items-center justify-between gap-2 flex-wrap">
-          <p className="text-sm font-semibold text-foreground">Dán nội dung đề thi</p>
-          <div>
+    <div className="flex flex-col h-full min-h-0">
+      <div className="flex flex-col lg:flex-row flex-1 min-h-0">
+        {/* ── LEFT: thẻ câu hỏi live (≈55%) ── */}
+        <div className="lg:w-[55%] w-full flex flex-col min-h-0 border-r border-border bg-muted/10">
+          <div className="px-4 py-2.5 border-b border-border shrink-0 flex items-center gap-2 flex-wrap">
+            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+              Câu hỏi ({questions.length})
+            </span>
+            {Object.entries(typeCounts).map(([t, n]) => (
+              <span key={t} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${PARSED_TYPE_META[t].cls}`}>
+                {PARSED_TYPE_META[t].label}: {n}
+              </span>
+            ))}
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
+            {parsed?.errors.map((err, i) => (
+              <div key={"err" + i} className="flex items-start gap-2 px-3 py-2 rounded-xl border border-red-200 bg-red-50 dark:bg-red-900/20 dark:border-red-800/50 text-xs text-red-700 dark:text-red-400">
+                <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                <span>{err}</span>
+              </div>
+            ))}
+            {(parsed?.sections.length ?? 0) > 0 && (
+              <p className="text-[10px] text-muted-foreground px-1">Tiêu đề nhóm: {parsed!.sections.join(" · ")}</p>
+            )}
+            {!parsed && (
+              <p className="text-xs text-muted-foreground text-center py-10">
+                Dán văn bản vào ô bên phải hoặc nhập file Word — câu hỏi sẽ hiện ở đây và có thể sửa trực tiếp.
+              </p>
+            )}
+            {questions.map((pq, i) => (
+              <ParsedQuestionCard key={i} q={pq} num={i + 1} update={patch => updateQuestion(i, patch)} />
+            ))}
+          </div>
+
+          {/* Actions */}
+          <div className="p-3 border-t border-border shrink-0 flex gap-2">
+            <Button className="flex-1" variant="gradient" size="sm" disabled={!canImport} onClick={() => onAppend(convert())}>
+              <Plus className="h-3.5 w-3.5 mr-1.5" />Thêm {questions.length} câu vào đề
+            </Button>
+            <Button
+              className="flex-1" variant="outline" size="sm" disabled={!canImport}
+              onClick={() => {
+                if (confirm("Thay thế TOÀN BỘ câu hỏi hiện có bằng các câu vừa soạn?")) onReplace(convert());
+              }}
+            >
+              <Trash2 className="h-3.5 w-3.5 mr-1.5" />Thay thế toàn bộ
+            </Button>
+          </div>
+        </div>
+
+        {/* ── RIGHT: soạn thảo văn bản thô (≈45%) ── */}
+        <div className="lg:w-[45%] w-full flex flex-col min-h-0 relative">
+          {/* Toolbar */}
+          <div className="flex items-center gap-2 px-3 py-2 border-b border-border shrink-0 flex-wrap">
             <input
               ref={fileRef}
               type="file"
@@ -639,105 +852,29 @@ function TextImportPanel({ onAppend, onReplace }: {
               <FileUp className="h-3.5 w-3.5 mr-1.5" />
               {importing ? "Đang đọc file…" : "Nhập từ file Word (.docx)"}
             </Button>
+            <button
+              onClick={() => setGuideOpen(o => !o)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${guideOpen ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:bg-muted hover:text-foreground"}`}
+            >
+              <ChevronDown className={`h-3.5 w-3.5 transition-transform ${guideOpen ? "" : "-rotate-90"}`} />
+              Hướng dẫn định dạng
+            </button>
           </div>
-        </div>
 
-        <FormatGuide />
-
-        <textarea
-          value={text}
-          onChange={e => setText(e.target.value)}
-          spellCheck={false}
-          placeholder={"Câu 1. Giá trị của 2 + 2 là\nA. 3   *B. 4   C. 5   D. 6\nLời giải\n2 + 2 = 4 nên chọn B.\n\nCâu 2. Cho hàm số y = x². Xét các mệnh đề:\n*a) Hàm số đồng biến trên (0; +∞)\nb) Hàm số đồng biến trên R\n…"}
-          className="flex-1 min-h-[260px] w-full rounded-xl border border-border bg-background p-3 font-mono text-xs leading-relaxed text-foreground outline-none focus:ring-2 focus:ring-primary/40 resize-none"
-        />
-      </div>
-
-      {/* ── Right: live preview ── */}
-      <div className="w-full lg:w-[26rem] shrink-0 flex flex-col min-h-0 bg-muted/10">
-        <div className="px-4 py-2.5 border-b border-border shrink-0 flex items-center gap-2 flex-wrap">
-          <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-            Xem trước ({questions.length} câu)
-          </span>
-          {Object.entries(typeCounts).map(([t, n]) => (
-            <span key={t} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${PARSED_TYPE_META[t].cls}`}>
-              {PARSED_TYPE_META[t].label}: {n}
-            </span>
-          ))}
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
-          {parsed?.errors.map((err, i) => (
-            <div key={"err" + i} className="flex items-start gap-2 px-3 py-2 rounded-xl border border-red-200 bg-red-50 dark:bg-red-900/20 dark:border-red-800/50 text-xs text-red-700 dark:text-red-400">
-              <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-              <span>{err}</span>
+          {/* Guide overlay */}
+          {guideOpen && (
+            <div className="absolute top-12 left-3 right-3 z-10">
+              <FormatGuide open onToggle={() => setGuideOpen(false)} />
             </div>
-          ))}
-          {(parsed?.sections.length ?? 0) > 0 && (
-            <p className="text-[10px] text-muted-foreground px-1">Tiêu đề nhóm: {parsed!.sections.join(" · ")}</p>
           )}
-          {!parsed && (
-            <p className="text-xs text-muted-foreground text-center py-10">Dán văn bản hoặc nhập file Word để xem trước câu hỏi.</p>
-          )}
-          {questions.map((pq, i) => {
-            const meta = PARSED_TYPE_META[pq.type];
-            return (
-              <div key={i} className="rounded-xl border border-border bg-card p-3 space-y-1.5">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-semibold text-foreground">Câu {pq.index}</span>
-                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${meta.cls}`}>{meta.label}</span>
-                </div>
-                <p className="text-xs text-foreground whitespace-pre-wrap leading-relaxed">{pq.content}</p>
-                {pq.options && (
-                  <div className="space-y-0.5">
-                    {pq.options.map((opt, oi) => (
-                      <p key={oi} className={`text-xs px-2 py-1 rounded-lg ${pq.correctOption === oi ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400 font-medium" : "text-muted-foreground"}`}>
-                        {["A", "B", "C", "D"][oi] ?? String(oi + 1)}. {opt} {pq.correctOption === oi && "✓"}
-                      </p>
-                    ))}
-                  </div>
-                )}
-                {pq.statements && (
-                  <div className="space-y-0.5">
-                    {pq.statements.map((st, si) => (
-                      <p key={si} className="text-xs px-2 py-1 rounded-lg flex items-start gap-1.5 text-muted-foreground">
-                        <span className={`font-bold shrink-0 ${st.correct ? "text-emerald-600 dark:text-emerald-400" : "text-red-500 dark:text-red-400"}`}>
-                          {st.correct ? "Đ" : "S"}
-                        </span>
-                        <span>{String.fromCharCode(97 + si)}) {st.text}</span>
-                      </p>
-                    ))}
-                  </div>
-                )}
-                {pq.shortAnswer !== undefined && (
-                  <p className="text-xs text-emerald-700 dark:text-emerald-400">Đáp án: <strong>{pq.shortAnswer}</strong></p>
-                )}
-                {pq.solution && (
-                  <p className="text-[11px] text-muted-foreground border-t border-border/60 pt-1.5 whitespace-pre-wrap">💡 {pq.solution}</p>
-                )}
-                {pq.warnings.map((w, wi) => (
-                  <p key={wi} className="flex items-start gap-1.5 text-[11px] text-amber-600 dark:text-amber-400">
-                    <AlertTriangle className="h-3 w-3 shrink-0 mt-0.5" />{w}
-                  </p>
-                ))}
-              </div>
-            );
-          })}
-        </div>
 
-        {/* Actions */}
-        <div className="p-3 border-t border-border shrink-0 flex flex-col gap-2">
-          <Button variant="gradient" size="sm" disabled={!canImport} onClick={() => onAppend(convert())}>
-            <Plus className="h-3.5 w-3.5 mr-1.5" />Thêm {questions.length} câu vào đề
-          </Button>
-          <Button
-            variant="outline" size="sm" disabled={!canImport}
-            onClick={() => {
-              if (confirm("Thay thế TOÀN BỘ câu hỏi hiện có bằng các câu vừa soạn?")) onReplace(convert());
-            }}
-          >
-            <Trash2 className="h-3.5 w-3.5 mr-1.5" />Thay thế toàn bộ
-          </Button>
+          <textarea
+            value={text}
+            onChange={e => setText(e.target.value)}
+            spellCheck={false}
+            placeholder={"Câu 1. Giá trị của 2 + 2 là\nA. 3   *B. 4   C. 5   D. 6\nLời giải\n2 + 2 = 4 nên chọn B.\n\nCâu 2. Cho hàm số y = x². Xét các mệnh đề:\n*a) Hàm số đồng biến trên (0; +∞)\nb) Hàm số đồng biến trên R\n…"}
+            className="flex-1 min-h-0 w-full bg-background p-4 font-mono text-xs leading-relaxed text-foreground outline-none resize-none"
+          />
         </div>
       </div>
     </div>
@@ -768,6 +905,8 @@ export default function ExamEditorModal({
   );
   const [selectedId, setSelectedId] = useState(questions[0].id);
   const [mode,       setMode]       = useState<"manual" | "text">("manual");
+  // Văn bản thô của chế độ "Soạn từ văn bản" — giữ ở đây để không mất khi chuyển qua lại giữa 2 chế độ
+  const [importText, setImportText] = useState("");
 
   // Nếu đề chỉ có 1 câu trống mặc định thì bỏ nó khi thêm câu từ văn bản
   const isPlaceholderOnly = (qs: ExamQuestion[]) =>
@@ -902,7 +1041,7 @@ export default function ExamEditorModal({
 
       {mode === "text" ? (
         <div className="flex-1 min-h-0">
-          <TextImportPanel onAppend={appendParsed} onReplace={replaceParsed} />
+          <TextImportPanel text={importText} setText={setImportText} onAppend={appendParsed} onReplace={replaceParsed} />
         </div>
       ) : (
       /* ── Body: sidebar + editor ── */
