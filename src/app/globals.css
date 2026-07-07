@@ -110,6 +110,19 @@
     outline-offset: 2px;
     border-radius: 4px;
   }
+
+  /* Tailwind v4 resets native <button> to cursor:default. Restore the
+     pointer cursor on interactive elements so anything clickable reads as
+     clickable on hover. Disabled controls keep the default arrow. */
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  a[href],
+  label[for],
+  select:not(:disabled),
+  summary,
+  [data-clickable] {
+    cursor: pointer;
+  }
 }
 
 @layer utilities {

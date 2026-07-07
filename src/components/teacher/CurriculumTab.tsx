@@ -277,7 +277,7 @@ function LessonModal({
           <label className="flex items-center gap-2.5 cursor-pointer select-none">
             <div
               onClick={() => setPublished(p => !p)}
-              className={`h-5 w-9 rounded-full transition-colors relative ${published ? "bg-primary" : "bg-muted-foreground/30"}`}
+              className={`h-5 w-9 rounded-full transition-colors relative cursor-pointer hover:opacity-90 ${published ? "bg-primary" : "bg-muted-foreground/30"}`}
             >
               <div className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${published ? "translate-x-4" : "translate-x-0.5"}`} />
             </div>

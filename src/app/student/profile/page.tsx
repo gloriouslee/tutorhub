@@ -230,7 +230,7 @@ export default function StudentProfilePage() {
               <div className="h-24 bg-gradient-to-r from-primary/80 to-primary" />
               <CardContent className="p-6 pt-0 flex flex-col items-center text-center relative">
                 <div
-                  className="relative -mt-12 mb-4 cursor-pointer group"
+                  className="relative -mt-12 mb-4 cursor-pointer group transition-transform hover:scale-105"
                   onClick={() => fileRef.current?.click()}
                 >
                   <Avatar className="h-24 w-24 border-4 border-card shadow-sm">
