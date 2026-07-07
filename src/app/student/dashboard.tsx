@@ -242,8 +242,8 @@ export default function StudentDashboard() {
               <p className="text-sm text-muted-foreground mt-1 capitalize">{todayStr}</p>
             </div>
             <Link href="/student/schedule">
-              <Button variant="outline" className="hidden sm:flex border-primary/20 text-primary hover:bg-primary/5">
-                Toàn bộ lịch <ArrowRight className="ml-2 h-4 w-4" />
+              <Button variant="outline" className="group hidden sm:flex border-primary/20 text-primary hover:bg-primary/5">
+                Toàn bộ lịch <ArrowRight className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-0.5" />
               </Button>
             </Link>
           </div>
@@ -329,10 +329,12 @@ export default function StudentDashboard() {
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <h2 className="text-xl font-bold text-foreground">Bài tập cần nộp</h2>
-              <Link href="/student/homework">
-                <Button variant="ghost" size="sm" className="text-primary text-xs">
-                  Xem tất cả <ArrowRight className="h-3.5 w-3.5 ml-1" />
-                </Button>
+              <Link
+                href="/student/homework"
+                className="group inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-primary hover:bg-primary/10 transition-colors"
+              >
+                Xem tất cả
+                <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
               </Link>
             </div>
 

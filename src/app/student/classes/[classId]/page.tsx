@@ -480,8 +480,8 @@ export default function StudentClassDetailPage() {
                   <CardHeader>
                     <div className="flex items-center justify-between">
                       <CardTitle className="text-sm">Bài giảng gần đây</CardTitle>
-                      <Button size="sm" variant="ghost" className="text-xs" onClick={() => setActiveTab("lectures")}>
-                        Xem tất cả <ChevronRight className="h-3.5 w-3.5 ml-1" />
+                      <Button size="sm" variant="ghost" className="group text-xs text-primary hover:text-primary hover:bg-primary/10" onClick={() => setActiveTab("lectures")}>
+                        Xem tất cả <ChevronRight className="h-3.5 w-3.5 ml-1 transition-transform group-hover:translate-x-0.5" />
                       </Button>
                     </div>
                   </CardHeader>
