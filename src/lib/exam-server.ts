@@ -7,6 +7,8 @@ import type {
   ExamQuestion,
   StoredExamResult,
 } from "@/lib/storage";
+import { calcAutoScore, calcMaxScore, type StudentAnswer } from "@/lib/exam-scoring";
+export type { StudentAnswer };
 
 export function getServiceKey(): string | null {
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
@@ -95,37 +97,18 @@ export function sanitizeQuestions(questions: ExamQuestion[]): SanitizedQuestion[
   });
 }
 
-// ── Grading (đồng bộ với calcScore phía client) ──────────────────────────────
-
-export type StudentAnswer = {
-  selected_option?: number;
-  selected_value?: string;
-  essay_text?: string;
-  essay_images?: string[];
-  statement_answers?: Record<number, boolean>;
-};
-
-function isTrueFalseCorrect(q: ExamQuestion, ans: StudentAnswer): boolean {
-  if (q.statements && q.statements.length > 0)
-    return q.statements.every((st, i) => ans.statement_answers?.[i] === st.correct);
-  return ans.selected_value === q.correct_value;
-}
+// ── Grading — dùng chung thang điểm với client (exam-scoring.ts) ─────────────
 
 export function calcScoreServer(
   questions: ExamQuestion[],
   answers: Record<string, StudentAnswer>
 ): number {
-  return questions.reduce((total, q) => {
-    const ans = answers[q.id];
-    if (!ans) return total;
-    let correct = false;
-    if (q.type === "multiple_choice") correct = ans.selected_option === q.correct_option;
-    else if (q.type === "true_false") correct = isTrueFalseCorrect(q, ans);
-    else if (q.type === "fill_blank")
-      correct = (ans.selected_value ?? "").trim().toLowerCase() === (q.correct_value ?? "").trim().toLowerCase();
-    // Tự luận: 0 điểm tự động — giáo viên chấm tay (manual_scores)
-    return total + (correct ? q.score : 0);
-  }, 0);
+  return calcAutoScore(questions, answers);
+}
+
+// Tổng điểm tối đa của bài (Đúng/Sai = 1đ, Trả lời ngắn = 0.5đ, còn lại = q.score).
+export function calcTotalServer(questions: ExamQuestion[]): number {
+  return calcMaxScore(questions);
 }
 
 // ── KV ids (khớp kvRoute trong storage.ts: prefix bị cắt, phần còn lại là id) ─

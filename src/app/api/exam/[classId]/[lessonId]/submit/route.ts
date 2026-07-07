@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   getServiceKey, serviceClient, findExamLesson, checkExamAccess,
-  sanitizeQuestions, calcScoreServer, kvGetServer, kvSetServer,
+  sanitizeQuestions, calcScoreServer, calcTotalServer, kvGetServer, kvSetServer,
   examResultId, examSubmissionsId,
   type StoredExamResult, type StudentAnswer,
 } from "@/lib/exam-server";
@@ -71,7 +71,7 @@ export async function POST(
 
     const questions = lesson.exam_content?.questions ?? [];
     const score = calcScoreServer(questions, answers);
-    const total = questions.reduce((s, q) => s + q.score, 0);
+    const total = calcTotalServer(questions);
     const result: StoredExamResult = {
       student_id: studentId,
       student_name: studentName,

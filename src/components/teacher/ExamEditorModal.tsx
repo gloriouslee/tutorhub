@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import type { CurriculumLesson } from "@/lib/storage";
 import { uploadClassFile } from "@/lib/upload";
 import { parseExamText, parsedToText, parsedToExamQuestions, tokenizeConventionText, resolveRegistryTokens, normalizeConventionText, examQuestionsToText, MATH_TOKEN_RE, type ParseResult, type ParsedQuestion, type ExamAssetRegistry } from "@/lib/examTextParser";
+import { calcMaxScore, TRUE_FALSE_MAX, FILL_BLANK_SCORE } from "@/lib/exam-scoring";
 import { renderMathInHtml } from "@/lib/mathRender";
 import { docxHtmlToConventionText, stripExamBoilerplate, FORMULA_PLACEHOLDER_SRC, FORMULA_MARKER } from "@/lib/docxToText";
 import ConventionEditor from "@/components/teacher/ConventionEditor";
@@ -224,15 +225,27 @@ function ParsedQuestionCard({ q, num, update, registry, onUpdateTex }: {
       <div className="flex items-center gap-2 flex-wrap">
         <span className="text-xs font-bold px-2.5 py-1 rounded-lg bg-primary/10 text-primary">Câu {num}</span>
         <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${meta.cls}`}>{meta.label}</span>
-        <span className="flex items-center gap-1 text-[11px] text-muted-foreground ml-auto" title="Điểm của câu này">
-          <input
-            type="number" min={0.25} step={0.25}
-            value={q.score ?? 1}
-            onChange={e => update({ score: e.target.value === "" ? undefined : Math.max(0.25, parseFloat(e.target.value) || 1) })}
-            className="w-14 h-6 px-1.5 rounded-md border border-border bg-background text-xs text-center text-foreground outline-none focus:ring-2 focus:ring-primary/40"
-          />
-          điểm
-        </span>
+        {q.type === "true_false" ? (
+          <span className="flex items-center gap-1 text-[11px] text-muted-foreground ml-auto" title="Đúng/Sai chấm theo số ý đúng: 1 ý=0.1 · 2 ý=0.25 · 3 ý=0.5 · 4 ý=1đ">
+            <span className="px-1.5 py-0.5 rounded-md bg-muted font-semibold text-foreground">{TRUE_FALSE_MAX}đ</span>
+            theo số ý đúng
+          </span>
+        ) : q.type === "fill_blank" ? (
+          <span className="flex items-center gap-1 text-[11px] text-muted-foreground ml-auto" title="Trả lời ngắn: mỗi câu đúng 0.5đ">
+            <span className="px-1.5 py-0.5 rounded-md bg-muted font-semibold text-foreground">{FILL_BLANK_SCORE}đ</span>
+            mỗi câu
+          </span>
+        ) : (
+          <span className="flex items-center gap-1 text-[11px] text-muted-foreground ml-auto" title="Điểm của câu này">
+            <input
+              type="number" min={0.25} step={0.25}
+              value={q.score ?? 1}
+              onChange={e => update({ score: e.target.value === "" ? undefined : Math.max(0.25, parseFloat(e.target.value) || 1) })}
+              className="w-14 h-6 px-1.5 rounded-md border border-border bg-background text-xs text-center text-foreground outline-none focus:ring-2 focus:ring-primary/40"
+            />
+            điểm
+          </span>
+        )}
         {q.warnings.map((w, wi) => (
           <span key={wi} className="flex items-center gap-1 text-[11px] text-amber-600 dark:text-amber-400">
             <AlertTriangle className="h-3 w-3 shrink-0" />{w}
@@ -680,10 +693,10 @@ export default function ExamEditorModal({
               </button>
             )}
           </div>
-          <div className="hidden sm:flex items-center gap-1.5 border border-border rounded-lg px-2.5 py-1.5" title="Tổng điểm các câu (chỉnh điểm từng câu trên thẻ câu hỏi)">
+          <div className="hidden sm:flex items-center gap-1.5 border border-border rounded-lg px-2.5 py-1.5" title="Tổng điểm các câu (Đúng/Sai = 1đ, Trả lời ngắn = 0.5đ, còn lại theo điểm từng câu)">
             <span className="text-xs text-muted-foreground">Tổng:</span>
             <span className="text-xs font-semibold text-foreground">
-              {questions.reduce((s, q) => s + (q.score ?? 1), 0)}đ
+              {calcMaxScore(questions)}đ
             </span>
           </div>
           <button

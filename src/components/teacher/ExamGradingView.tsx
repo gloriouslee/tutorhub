@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { Button } from "@/components/ui/button";
 import { gradeExamResult, type StoredExamResult, type ExamQuestion } from "@/lib/storage";
+import { maxQuestionScore, calcMaxScore, autoQuestionScore, countCorrectStatements } from "@/lib/exam-scoring";
 import { renderMathInHtml } from "@/lib/mathRender";
 import "katex/dist/katex.min.css";
 import {
@@ -88,7 +89,7 @@ export default function ExamGradingView({
 
   const selected = results.find(r => r.student_id === selectedId) ?? null;
   const selectedIdx = results.findIndex(r => r.student_id === selectedId);
-  const maxTotal = useMemo(() => questions.reduce((a, q) => a + (q.score || 0), 0), [questions]);
+  const maxTotal = useMemo(() => calcMaxScore(questions), [questions]);
 
   function selectStudent(r: StoredExamResult) {
     setSelectedId(r.student_id);
@@ -242,6 +243,9 @@ export default function ExamGradingView({
                 const ans = (selected.answers as Record<string, StudentAnswer>)[q.id] ?? {};
                 const correct = isCorrect(q, ans);
                 const isEssay = q.type === "essay";
+                const qMax    = maxQuestionScore(q);
+                const qEarned = isEssay ? 0 : autoQuestionScore(q, ans);
+                const qPartial = !isEssay && qEarned > 0 && qEarned < qMax;
 
                 return (
                   <div
@@ -251,18 +255,23 @@ export default function ExamGradingView({
                         ? "border-amber-200 dark:border-amber-800/50"
                         : correct
                           ? "border-emerald-200 dark:border-emerald-800/50"
-                          : "border-red-200 dark:border-red-800/50"
+                          : qPartial
+                            ? "border-amber-200 dark:border-amber-800/50"
+                            : "border-red-200 dark:border-red-800/50"
                     }`}
                   >
                     {/* Question */}
                     <div className="flex items-start gap-2.5">
                       <span className={`h-5 w-5 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5 ${
-                        isEssay ? "bg-amber-400 text-white" : correct ? "bg-emerald-500 text-white" : "bg-red-500 text-white"
+                        isEssay ? "bg-amber-400 text-white" : correct ? "bg-emerald-500 text-white" : qPartial ? "bg-amber-400 text-white" : "bg-red-500 text-white"
                       }`}>
-                        {isEssay ? "~" : correct ? "✓" : "✗"}
+                        {isEssay ? "~" : correct ? "✓" : qPartial ? "±" : "✗"}
                       </span>
                       <div className="flex-1 min-w-0">
-                        <p className="text-xs font-semibold text-muted-foreground mb-1">Câu {idx + 1} · {q.score}đ</p>
+                        <p className="text-xs font-semibold text-muted-foreground mb-1">
+                          Câu {idx + 1} · {qMax}đ
+                          {!isEssay && <span className={`ml-1.5 font-bold ${correct ? "text-emerald-600 dark:text-emerald-400" : qPartial ? "text-amber-600 dark:text-amber-400" : "text-red-500 dark:text-red-400"}`}>(+{qEarned}đ)</span>}
+                        </p>
                         <div
                           className="text-sm text-foreground leading-snug [&_p]:my-0.5 [&_img]:max-w-full [&_img]:rounded-lg [&_img]:my-1"
                           dangerouslySetInnerHTML={{ __html: renderMathInHtml(q.content_html) }}
@@ -300,6 +309,9 @@ export default function ExamGradingView({
                     {/* True/false with statements */}
                     {q.type === "true_false" && (q.statements?.length ?? 0) > 0 && (
                       <div className="pl-8 space-y-1">
+                        <p className="text-[11px] text-muted-foreground">
+                          Đúng {countCorrectStatements(q, ans)}/{q.statements!.length} mệnh đề · +{qEarned}đ/{qMax}đ
+                        </p>
                         {q.statements!.map((st, i) => {
                           const picked = ans.statement_answers?.[i];
                           const ok = picked === st.correct;

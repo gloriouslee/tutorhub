@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { useStudentContext } from "@/hooks/useStudentContext";
 import { uploadClassFile } from "@/lib/upload";
+import { autoQuestionScore, maxQuestionScore, calcAutoScore, calcMaxScore, countCorrectStatements } from "@/lib/exam-scoring";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -617,12 +618,17 @@ function ResultView({ questions, result, onRetry, examTitle, showSolution, allow
               const correct = isCorrect(q, ans);
               const open    = expanded.has(q.id);
               const OPTS    = ["A", "B", "C", "D"];
+              // Điểm thực nhận / tối đa (Đúng/Sai có thể được điểm thành phần)
+              const earned  = q.type === "essay" ? 0 : autoQuestionScore(q, ans);
+              const maxPts  = maxQuestionScore(q);
+              const partial = q.type !== "essay" && earned > 0 && earned < maxPts;
 
               return (
-                <div key={q.id} className={`rounded-2xl border overflow-hidden ${q.type === "essay" ? "border-amber-200 dark:border-amber-800/50" : correct ? "border-emerald-200 dark:border-emerald-800/50" : "border-red-200 dark:border-red-800/50"}`}>
+                <div key={q.id} className={`rounded-2xl border overflow-hidden ${q.type === "essay" ? "border-amber-200 dark:border-amber-800/50" : correct ? "border-emerald-200 dark:border-emerald-800/50" : partial ? "border-amber-200 dark:border-amber-800/50" : "border-red-200 dark:border-red-800/50"}`}>
                   <button onClick={() => toggle(q.id)} className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-muted/30 transition-colors">
                     {q.type === "essay" ? <BookOpen className="h-5 w-5 text-amber-500 shrink-0" />
                       : correct ? <CheckCircle2 className="h-5 w-5 text-emerald-500 shrink-0" />
+                      : partial ? <AlertTriangle className="h-5 w-5 text-amber-500 shrink-0" />
                       : <XCircle className="h-5 w-5 text-red-500 shrink-0" />}
                     <span className="text-xs font-semibold text-muted-foreground shrink-0 w-12">Câu {idx + 1}</span>
                     <span className="flex-1 text-sm font-medium text-foreground truncate"><RawText html={q.content_html} /></span>
@@ -637,8 +643,8 @@ function ResultView({ questions, result, onRetry, examTitle, showSolution, allow
                         </span>
                       )
                     ) : (
-                      <span className={`text-xs font-semibold px-2 py-0.5 rounded-full shrink-0 ${correct ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"}`}>
-                        {correct ? `+${q.score}đ` : "0đ"}
+                      <span className={`text-xs font-semibold px-2 py-0.5 rounded-full shrink-0 ${correct ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" : partial ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400" : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"}`}>
+                        {earned > 0 ? `+${earned}đ` : "0đ"}{partial ? `/${maxPts}đ` : ""}
                       </span>
                     )}
                     <ChevronRight className={`h-4 w-4 text-muted-foreground transition-transform shrink-0 ${open ? "rotate-90" : ""}`} />
@@ -665,6 +671,10 @@ function ResultView({ questions, result, onRetry, examTitle, showSolution, allow
                       )}
                       {q.type === "true_false" && (q.statements?.length ?? 0) > 0 && (
                         <div className="space-y-2">
+                          <p className="text-[11px] text-muted-foreground">
+                            Đúng {countCorrectStatements(q, ans)}/{q.statements!.length} mệnh đề · Được <strong className="text-foreground">{earned}đ</strong>/{maxPts}đ
+                            <span className="text-muted-foreground/70"> (1 ý = 0.1 · 2 ý = 0.25 · 3 ý = 0.5 · 4 ý = 1đ)</span>
+                          </p>
                           {q.statements!.map((st, i) => {
                             const picked = ans.statement_answers?.[i];
                             const ok = picked === st.correct;
@@ -766,17 +776,9 @@ function ResultView({ questions, result, onRetry, examTitle, showSolution, allow
 
 // ── Score calculation ─────────────────────────────────────────────────────────
 
+// Fallback offline — dùng chung thang điểm với server (exam-scoring.ts)
 function calcScore(questions: ExamQuestion[], answers: Record<string, StudentAnswer>): number {
-  return questions.reduce((total, q) => {
-    const ans = answers[q.id];
-    if (!ans) return total;
-    let correct = false;
-    if (q.type === "multiple_choice") correct = ans.selected_option === q.correct_option;
-    else if (q.type === "true_false") correct = isTrueFalseCorrect(q, ans);
-    else if (q.type === "fill_blank") correct = (ans.selected_value ?? "").trim().toLowerCase() === (q.correct_value ?? "").trim().toLowerCase();
-    // Tự luận: không tự chấm — giáo viên chấm thủ công (manual_scores)
-    return total + (correct ? q.score : 0);
-  }, 0);
+  return calcAutoScore(questions, answers);
 }
 
 // ── Main page ─────────────────────────────────────────────────────────────────
@@ -979,7 +981,7 @@ export default function ExamPage() {
     }
 
     const score = calcScore(questions, answers);
-    const total = questions.reduce((s, q) => s + q.score, 0);
+    const total = calcMaxScore(questions);
     const submitted_at = new Date().toISOString();
     const res: ExamResult = { answers, score, total, submitted_at };
     await saveExamResult(classId, lessonId, sid, studentName, { score, total, submitted_at, answers: answers as Record<string, unknown> });
@@ -1135,7 +1137,7 @@ export default function ExamPage() {
                 Câu {current + 1} / {questions.length}
               </span>
               <span className="text-xs px-2.5 py-1 rounded-full bg-primary/10 text-primary font-medium">
-                {q.score} điểm
+                {maxQuestionScore(q)} điểm
               </span>
               {q.difficulty && (
                 <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${
