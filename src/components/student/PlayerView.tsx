@@ -42,7 +42,7 @@ function PlayerViewInner({ course, isPackageLocked, onBack }: { course: OwnedCou
   const firstAccessible = effectiveLessons.find(l => l.status !== "locked") ?? effectiveLessons[0];
   const [selectedId, setSelectedId] = useState(firstAccessible.id);
   const [openChapters, setOpenChapters] = useState<string[]>([course.chapters[0].id]);
-  const [activeTab, setActiveTab] = useState<"files" | "notes" | "discuss">("files");
+  const [activeTab, setActiveTab] = useState<"files" | "discuss">("files");
   const [completedIds, setCompletedIds] = useState<string[]>(
     effectiveLessons.filter(l => l.status === "done").map(l => l.id)
   );
@@ -86,53 +86,9 @@ function PlayerViewInner({ course, isPackageLocked, onBack }: { course: OwnedCou
       </div>
 
       {/* Layout */}
-      <div className="flex border border-border rounded-xl overflow-hidden bg-card" style={{ minHeight: 600 }}>
-        {/* Sidebar */}
-        <div className="w-72 shrink-0 border-r border-border flex flex-col bg-muted/20 overflow-y-auto">
-          {course.chapters.map((chapter, ci) => {
-            const effectiveChapterLessons = effectiveLessons.filter(l => chapter.lessons.some(cl => cl.id === l.id));
-            const isOpen = openChapters.includes(chapter.id);
-            const chDone = effectiveChapterLessons.filter(l => isDone(l.id)).length;
-            return (
-              <div key={chapter.id}>
-                <button onClick={() => toggleChapter(chapter.id)}
-                  className="w-full flex items-center gap-2 px-4 py-3 text-left hover:bg-muted/40 border-b border-border/50 transition-colors">
-                  <span className="text-xs text-muted-foreground font-medium min-w-[20px]">C{ci + 1}</span>
-                  <span className="flex-1 text-sm font-medium text-foreground truncate">{chapter.title}</span>
-                  <span className="text-xs text-muted-foreground mr-1">{chDone}/{chapter.lessons.length}</span>
-                  {isOpen ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" /> : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
-                </button>
-                {isOpen && (
-                  <div className="py-1">
-                    {effectiveChapterLessons.map(lesson => {
-                      const done = isDone(lesson.id);
-                      const isSelected = selectedId === lesson.id;
-                      const accessible = lesson.status !== "locked" || done;
-                      return (
-                        <button key={lesson.id}
-                          onClick={() => accessible ? setSelectedId(lesson.id) : undefined}
-                          className={`w-full flex items-center gap-2.5 px-4 py-2.5 text-left transition-colors
-                            ${isSelected ? "bg-primary/10 text-primary" : "hover:bg-muted/40 text-foreground/80"}
-                            ${!accessible ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}>
-                          <div className={`w-2 h-2 rounded-full shrink-0 ${done ? "bg-green-500" : isSelected ? "bg-primary" : "border border-muted-foreground"}`} />
-                          <span className="flex-1 text-xs leading-snug line-clamp-2">{lesson.title}</span>
-                          {lesson.isPreview && !done && (
-                            <Eye className="h-3 w-3 text-violet-500 shrink-0" />
-                          )}
-                          {!accessible && <Lock className="h-3 w-3 text-muted-foreground shrink-0" />}
-                          {accessible && <TypeBadge type={lesson.type} />}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Content */}
-        <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex border border-border rounded-xl overflow-hidden bg-card" style={{ height: 600 }}>
+        {/* Content (frozen — does not scroll with the sidebar) */}
+        <div className="flex-1 flex flex-col min-w-0 min-h-0 border-r border-border">
           {isPackageLocked && (
             <div className="mx-4 mt-4 px-4 py-3 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 flex items-start gap-3">
               <Lock className="h-5 w-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
@@ -190,10 +146,18 @@ function PlayerViewInner({ course, isPackageLocked, onBack }: { course: OwnedCou
               </div>
             </div>
 
-            <div className="flex border-b border-border px-6 mt-2">
+            {/* Ghi chú — persistent, not a tab */}
+            <div className="px-6 pt-2">
+              <div className="flex items-center gap-1.5 text-sm font-medium text-foreground mb-2">
+                <StickyNote className="h-3.5 w-3.5" />Ghi chú
+              </div>
+              <textarea className="w-full h-24 rounded-lg border border-border bg-muted/20 px-3 py-2 text-sm resize-none outline-none focus:ring-2 focus:ring-primary text-foreground placeholder:text-muted-foreground"
+                placeholder="Ghi chú của bạn về bài học này..." />
+            </div>
+
+            <div className="flex border-b border-border px-6 mt-4">
               {[
                 { key: "files",   label: "Tài liệu kèm theo", icon: BookOpen },
-                { key: "notes",   label: "Ghi chú",           icon: StickyNote },
                 { key: "discuss", label: "Thảo luận",         icon: MessageSquare },
               ].map(tab => (
                 <button key={tab.key} onClick={() => setActiveTab(tab.key as typeof activeTab)}
@@ -230,10 +194,6 @@ function PlayerViewInner({ course, isPackageLocked, onBack }: { course: OwnedCou
                   )}
                 </div>
               )}
-              {activeTab === "notes" && (
-                <textarea className="w-full h-32 rounded-lg border border-border bg-muted/20 px-3 py-2 text-sm resize-none outline-none focus:ring-2 focus:ring-primary text-foreground placeholder:text-muted-foreground"
-                  placeholder="Ghi chú của bạn về bài học này..." />
-              )}
               {activeTab === "discuss" && (
                 <div className="text-center py-8 text-muted-foreground text-sm">Chức năng thảo luận đang được phát triển</div>
               )}
@@ -252,6 +212,56 @@ function PlayerViewInner({ course, isPackageLocked, onBack }: { course: OwnedCou
                   onClick={() => nextLesson && setSelectedId(nextLesson.id)}>Bài tiếp →</Button>
               )}
             </div>
+          </div>
+        </div>
+
+        {/* Sidebar: Lộ trình học — scrolls independently, content stays put */}
+        <div className="w-72 shrink-0 flex flex-col bg-muted/20 min-h-0">
+          <div className="px-4 py-3 border-b border-border/50 bg-card/50 flex items-center gap-2 shrink-0">
+            <BookOpen className="h-4 w-4 text-primary" />
+            <span className="text-sm font-semibold text-foreground">Lộ trình học</span>
+          </div>
+          <div className="flex-1 overflow-y-auto">
+          {course.chapters.map((chapter, ci) => {
+            const effectiveChapterLessons = effectiveLessons.filter(l => chapter.lessons.some(cl => cl.id === l.id));
+            const isOpen = openChapters.includes(chapter.id);
+            const chDone = effectiveChapterLessons.filter(l => isDone(l.id)).length;
+            return (
+              <div key={chapter.id}>
+                <button onClick={() => toggleChapter(chapter.id)}
+                  className="w-full flex items-center gap-2 px-4 py-3 text-left hover:bg-muted/40 border-b border-border/50 transition-colors">
+                  <span className="text-xs text-muted-foreground font-medium min-w-[20px]">C{ci + 1}</span>
+                  <span className="flex-1 text-sm font-medium text-foreground truncate">{chapter.title}</span>
+                  <span className="text-xs text-muted-foreground mr-1">{chDone}/{chapter.lessons.length}</span>
+                  {isOpen ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" /> : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
+                </button>
+                {isOpen && (
+                  <div className="py-1">
+                    {effectiveChapterLessons.map(lesson => {
+                      const done = isDone(lesson.id);
+                      const isSelected = selectedId === lesson.id;
+                      const accessible = lesson.status !== "locked" || done;
+                      return (
+                        <button key={lesson.id}
+                          onClick={() => accessible ? setSelectedId(lesson.id) : undefined}
+                          className={`w-full flex items-center gap-2.5 px-4 py-2.5 text-left transition-colors
+                            ${isSelected ? "bg-primary/10 text-primary" : "hover:bg-muted/40 text-foreground/80"}
+                            ${!accessible ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}>
+                          <div className={`w-2 h-2 rounded-full shrink-0 ${done ? "bg-green-500" : isSelected ? "bg-primary" : "border border-muted-foreground"}`} />
+                          <span className="flex-1 text-xs leading-snug line-clamp-2">{lesson.title}</span>
+                          {lesson.isPreview && !done && (
+                            <Eye className="h-3 w-3 text-violet-500 shrink-0" />
+                          )}
+                          {!accessible && <Lock className="h-3 w-3 text-muted-foreground shrink-0" />}
+                          {accessible && <TypeBadge type={lesson.type} />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
           </div>
         </div>
       </div>
