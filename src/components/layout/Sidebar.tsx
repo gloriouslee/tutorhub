@@ -12,9 +12,15 @@ import {
 } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { UserRole } from "@/types";
-import { MOCK_CLASSES, MOCK_HOMEWORK, MOCK_NOTIFICATIONS } from "@/lib/mock-data";
-import { kvGet } from "@/lib/storage";
+import { MOCK_HOMEWORK } from "@/lib/mock-data";
+import {
+  kvGet, getNotifications, getScheduleNotifications,
+  getEnrollments, getTransactions, getInvoices,
+} from "@/lib/storage";
+import { getSubmissionsByStudent } from "@/lib/supabase/submissions";
 import { useStudentContext } from "@/hooks/useStudentContext";
+import { useParentContext, type ParentChild } from "@/hooks/useParentContext";
+import { loadParentEventNotifications } from "@/lib/parent-data";
 
 // ── Nav config (no static badges) ────────────────────────────────────────────
 interface NavItem {
@@ -85,61 +91,90 @@ function parseSet(key: string): Set<string> {
   try { return new Set(JSON.parse(ls(key) ?? "[]")); } catch { return new Set(); }
 }
 
-async function computeBadges(role: UserRole, sid: string): Promise<Record<string, number>> {
+// Đếm thông báo chưa đọc theo ĐÚNG logic trang thông báo của từng role:
+// nguồn getNotifications() (đã gồm mock nền) + trừ đã đọc/đã xóa (localStorage).
+async function unreadBroadcasts(
+  targetRole: "student" | "parent" | "teacher",
+  readKey: string,
+  deletedKey: string
+): Promise<{ unread: number; readIds: Set<string>; deletedIds: Set<string> }> {
+  const readIds    = parseSet(readKey);
+  const deletedIds = parseSet(deletedKey);
+  const all = await getNotifications();
+  const unread = all.filter(n =>
+    (n.target_role === targetRole || n.target_role === "all")
+    && !deletedIds.has(n.id)
+    && !n.is_read
+    && !readIds.has(n.id)
+  ).length;
+  return { unread, readIds, deletedIds };
+}
+
+// Badge chuẩn hoá: mỗi số = đúng số liệu trang đích hiển thị
+// (student/teacher/parent: thông báo chưa đọc + bài tập chưa nộp;
+//  admin: số mục đang chờ xử lý ở từng hàng đợi).
+async function computeBadges(
+  role: UserRole,
+  sid: string,
+  myClassIds: string[],
+  parentChildren: ParentChild[]
+): Promise<Record<string, number>> {
   const result: Record<string, number> = {};
 
   if (role === "student") {
-    // Bài tập: homework for enrolled classes that hasn't been submitted
-    const myClassIds = MOCK_CLASSES
-      .filter(c => (c.student_ids ?? []).includes(sid))
-      .map(c => c.id);
-    const myHw = MOCK_HOMEWORK.filter(h => myClassIds.includes(h.class_id));
-    const subs: { homework_id: string; student_id: string }[] =
-      await kvGet("tutorhub_submissions", []);
-    const submittedIds = new Set(
-      subs.filter(s => s.student_id === sid).map(s => s.homework_id)
-    );
+    // Bài tập "Chưa nộp" — cùng nguồn với trang bài tập: homework giáo viên tạo
+    // (kv) + mock nền theo lớp thật của học sinh, trừ bài đã nộp (Supabase → kv).
+    const teacherHw = (await kvGet<{ id: string; class_id: string }[]>("tutorhub_teacher_homework", []))
+      .filter(h => myClassIds.includes(h.class_id));
+    const kvHwIds = new Set(teacherHw.map(h => h.id));
+    const myHw = [
+      ...teacherHw,
+      ...MOCK_HOMEWORK.filter(h => myClassIds.includes(h.class_id) && !kvHwIds.has(h.id)),
+    ];
+    let subs = await getSubmissionsByStudent(sid).catch(() => []);
+    if (subs.length === 0) {
+      const local = await kvGet<{ homework_id: string; student_id: string }[]>("tutorhub_submissions", []);
+      subs = local.filter(s => s.student_id === sid) as typeof subs;
+    }
+    const submittedIds = new Set(subs.map(s => s.homework_id));
     const pending = myHw.filter(h => !submittedIds.has(h.id)).length;
     if (pending > 0) result["/student/homework"] = pending;
 
-    // Thông báo: unread MOCK_NOTIFICATIONS + unread schedule notifications
-    const readIds    = parseSet("tutorhub_notif_read");
-    const deletedIds = parseSet("tutorhub_notif_deleted");
-    const mockUnread = MOCK_NOTIFICATIONS
-      .filter(n => (n.target_role === "student" || (n as any).target_role === "all")
-        && !n.is_read
-        && !readIds.has(n.id)
-        && !deletedIds.has(n.id))
-      .length;
-    const scheduleNotifs: { is_read: boolean }[] =
-      await kvGet("tutorhub_schedule_notifications", []);
-    const schedUnread = scheduleNotifs.filter(n => !n.is_read).length;
-    const totalUnread = mockUnread + schedUnread;
+    // Thông báo: broadcast + thông báo lịch học (cùng cách trang thông báo đếm)
+    const { unread, readIds, deletedIds } = await unreadBroadcasts("student", "tutorhub_notif_read", "tutorhub_notif_deleted");
+    const scheduleNotifs = await getScheduleNotifications().catch(() => [] as { id: string; is_read: boolean }[]);
+    const schedUnread = scheduleNotifs.filter(n => !deletedIds.has(n.id) && !n.is_read && !readIds.has(n.id)).length;
+    const totalUnread = unread + schedUnread;
     if (totalUnread > 0) result["/student/notifications"] = totalUnread;
   }
 
   if (role === "parent") {
-    const readIds    = parseSet("tutorhub_parent_notif_read");
-    const deletedIds = parseSet("tutorhub_parent_notif_deleted");
-    const unread = MOCK_NOTIFICATIONS
-      .filter(n => (n.target_role === "parent" || (n as any).target_role === "all")
-        && !n.is_read
-        && !readIds.has(n.id)
-        && !deletedIds.has(n.id))
-      .length;
-    if (unread > 0) result["/parent/notifications"] = unread;
+    // Broadcast + sự kiện sinh từ dữ liệu thật của các con — khớp trang thông báo
+    const { unread, readIds, deletedIds } = await unreadBroadcasts("parent", "tutorhub_parent_notif_read", "tutorhub_parent_notif_deleted");
+    const events = await loadParentEventNotifications(parentChildren).catch(() => []);
+    const eventUnread = events.filter(n => !deletedIds.has(n.id) && !readIds.has(n.id)).length;
+    const total = unread + eventUnread;
+    if (total > 0) result["/parent/notifications"] = total;
   }
 
   if (role === "teacher") {
-    const readIds    = parseSet("tutorhub_teacher_notif_read");
-    const deletedIds = parseSet("tutorhub_teacher_notif_deleted");
-    const unread = MOCK_NOTIFICATIONS
-      .filter(n => (n.target_role === "teacher" || (n as any).target_role === "all")
-        && !n.is_read
-        && !readIds.has(n.id)
-        && !deletedIds.has(n.id))
-      .length;
+    const { unread } = await unreadBroadcasts("teacher", "tutorhub_teacher_notif_read", "tutorhub_teacher_notif_deleted");
     if (unread > 0) result["/teacher/notifications"] = unread;
+  }
+
+  if (role === "admin") {
+    // Hàng đợi cần xử lý — khớp bộ đếm "Chờ duyệt/Chờ xác nhận" của từng trang
+    const [enrollments, transactions, invoices] = await Promise.all([
+      getEnrollments().catch(() => []),
+      getTransactions().catch(() => []),
+      getInvoices().catch(() => []),
+    ]);
+    const pendingEnroll = enrollments.filter(e => e.status === "pending").length;
+    const pendingTx     = transactions.filter(t => t.status === "pending").length;
+    const pendingRcpt   = invoices.filter(i => i.status === "pending_verification").length;
+    if (pendingEnroll > 0) result["/admin/enrollments"]  = pendingEnroll;
+    if (pendingTx > 0)     result["/admin/transactions"] = pendingTx;
+    if (pendingRcpt > 0)   result["/admin/payments"]     = pendingRcpt;
   }
 
   return result;
@@ -159,20 +194,27 @@ export default function Sidebar({ role, userName, isOpen = true, onClose }: Side
   const items    = navConfig[role];
   const config   = roleConfig[role];
   // Nhận diện đúng học viên hiện tại (demo s1 / cookie enrolled / phiên Supabase)
-  const { studentId, ready } = useStudentContext();
+  const { studentId, myClasses, ready } = useStudentContext();
+  // Danh sách con (chỉ dùng khi role = parent) — nguồn sự kiện thông báo
+  const { children: parentChildren, ready: parentReady } = useParentContext();
 
   const [badges, setBadges] = useState<Record<string, number>>({});
 
+  const myClassKey  = myClasses.map(c => c.id).join(",");
+  const childrenKey = parentChildren.map(c => c.id).join(",");
+
   // Recompute on every navigation so badge clears when user visits the page
   useEffect(() => {
-    if (role === "student" && !ready) return; // chờ context resolve, tránh đếm theo s1 mặc định
+    if (role === "student" && !ready) return;       // chờ context resolve, tránh đếm theo s1 mặc định
+    if (role === "parent" && !parentReady) return;  // chờ danh sách con
     let cancelled = false;
     (async () => {
-      const next = await computeBadges(role, studentId);
+      const next = await computeBadges(role, studentId, myClasses.map(c => c.id), parentChildren);
       if (!cancelled) setBadges(next);
     })();
     return () => { cancelled = true; };
-  }, [role, pathname, studentId, ready]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [role, pathname, studentId, ready, parentReady, myClassKey, childrenKey]);
 
   const handleLogout = async () => {
     // Clear all session cookies
