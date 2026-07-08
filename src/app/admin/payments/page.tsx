@@ -6,17 +6,35 @@ import { Button } from "@/components/ui/button";
 import { PaymentBadge, SectionHeader } from "@/components/shared";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { formatDate, formatCurrency, toLocalDateKey } from "@/lib/utils";
-import { DollarSign, AlertCircle, CheckCircle2, Plus, X } from "lucide-react";
+import { DollarSign, AlertCircle, CheckCircle2, Plus, X, Receipt, RotateCcw } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import { useState, useEffect } from "react";
-import { getPayments, savePayments, getStudents } from "@/lib/storage";
+import {
+  getPayments, savePayments, getStudents,
+  getInvoices, updateInvoiceStatus, type TuitionInvoice,
+} from "@/lib/storage";
 import { Payment, Student } from "@/types";
 import { Input } from "@/components/ui/input";
 
+// Hàng hiển thị hợp nhất: sổ học phí admin (Payment) + hóa đơn giáo viên phát
+// hành / phụ huynh–học viên nộp biên lai (TuitionInvoice, kv "tutorhub_invoices").
+interface LedgerRow {
+  id: string;
+  source: "payment" | "invoice";
+  student_id: string;
+  description: string;
+  amount: number;
+  due_date: string;
+  paid_date: string | null;
+  status: "paid" | "pending" | "overdue" | "pending_verification";
+  submitted_by?: "student" | "parent";
+}
+
 export default function AdminPaymentsPage() {
   const [payments, setPayments] = useState<Payment[]>([]);
+  const [invoices, setInvoices] = useState<TuitionInvoice[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
-  
+
   // Modal states
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [formData, setFormData] = useState({
@@ -28,48 +46,85 @@ export default function AdminPaymentsPage() {
 
   useEffect(() => {
     async function loadData() {
-      const [p, s] = await Promise.all([
+      const [p, inv, s] = await Promise.all([
         getPayments(),
+        getInvoices(),
         getStudents(),
       ]);
       setPayments(p);
+      setInvoices(inv);
       setStudents(s);
     }
     loadData();
   }, []);
 
   const todayKey = toLocalDateKey(new Date());
-  const isOverdue = (p: Payment) =>
-    p.payment_status === "overdue" || (p.payment_status === "pending" && p.due_date < todayKey);
-  const totalCollected = payments.filter(p => p.payment_status === "paid").reduce((s, p) => s + p.amount, 0);
-  const totalPending = payments.filter(p => p.payment_status === "pending" && !isOverdue(p)).reduce((s, p) => s + p.amount, 0);
-  const totalOverdue = payments.filter(isOverdue).reduce((s, p) => s + p.amount, 0);
 
-  // Last 5 calendar months of collected revenue, from real paid payments
+  // Hợp nhất hai nguồn thành một sổ cái
+  const rows: LedgerRow[] = [
+    ...payments.map<LedgerRow>(p => ({
+      id: p.id, source: "payment",
+      student_id: p.student_id, description: p.description ?? "Học phí",
+      amount: p.amount, due_date: p.due_date, paid_date: p.paid_date ?? null,
+      status: p.payment_status === "paid" ? "paid"
+        : (p.payment_status === "overdue" || p.due_date < todayKey) ? "overdue"
+        : "pending",
+    })),
+    ...invoices.map<LedgerRow>(inv => ({
+      id: inv.id, source: "invoice",
+      student_id: inv.child_id, description: inv.title,
+      amount: inv.amount, due_date: inv.due_date, paid_date: inv.paid_at ?? null,
+      status: inv.status === "paid" ? "paid"
+        : inv.status === "pending_verification" ? "pending_verification"
+        : inv.due_date < todayKey ? "overdue"
+        : "pending",
+      submitted_by: inv.submitted_by,
+    })),
+  ].sort((a, b) => b.due_date.localeCompare(a.due_date));
+
+  // Biên lai đang chờ admin xác nhận (phụ huynh/học viên đã nộp)
+  const awaitingVerification = rows.filter(r => r.status === "pending_verification");
+
+  const totalCollected = rows.filter(r => r.status === "paid").reduce((s, r) => s + r.amount, 0);
+  const totalPending = rows.filter(r => r.status === "pending" || r.status === "pending_verification").reduce((s, r) => s + r.amount, 0);
+  const totalOverdue = rows.filter(r => r.status === "overdue").reduce((s, r) => s + r.amount, 0);
+
+  // Last 5 calendar months of collected revenue — cả hai nguồn
   const monthlyData = Array.from({ length: 5 }, (_, i) => {
     const d = new Date();
     d.setDate(1);
     d.setMonth(d.getMonth() - (4 - i));
     const y = d.getFullYear();
     const m = d.getMonth();
-    const collected = payments
-      .filter(p => p.payment_status === "paid")
-      .filter(p => {
-        const pd = new Date(p.paid_date || p.due_date);
+    const collected = rows
+      .filter(r => r.status === "paid")
+      .filter(r => {
+        const pd = new Date(r.paid_date || r.due_date);
         return pd.getFullYear() === y && pd.getMonth() === m;
       })
-      .reduce((s, p) => s + p.amount, 0);
+      .reduce((s, r) => s + r.amount, 0);
     return { month: `Th.${m + 1}`, collected };
   });
 
-  const handleMarkPaid = async (id: string) => {
-    const updated = payments.map(p =>
-      p.id === id
-        ? { ...p, payment_status: "paid" as const, paid_date: toLocalDateKey(new Date()) }
-        : p
-    );
-    setPayments(updated);
-    await savePayments(updated);
+  const handleMarkPaid = async (row: LedgerRow) => {
+    if (row.source === "payment") {
+      const updated = payments.map(p =>
+        p.id === row.id
+          ? { ...p, payment_status: "paid" as const, paid_date: toLocalDateKey(new Date()) }
+          : p
+      );
+      setPayments(updated);
+      await savePayments(updated);
+    } else {
+      await updateInvoiceStatus(row.id, "paid", row.submitted_by ?? "parent");
+      setInvoices(await getInvoices());
+    }
+  };
+
+  // Từ chối biên lai — trả hóa đơn về trạng thái chờ thanh toán
+  const handleRejectReceipt = async (row: LedgerRow) => {
+    await updateInvoiceStatus(row.id, "pending", row.submitted_by ?? "parent");
+    setInvoices(await getInvoices());
   };
 
   const handleOpenAddModal = () => {
@@ -139,6 +194,42 @@ export default function AdminPaymentsPage() {
           ))}
         </div>
 
+        {/* Biên lai chờ xác nhận — phụ huynh/học viên vừa nộp */}
+        {awaitingVerification.length > 0 && (
+          <Card className="border-violet-200 dark:border-violet-800/50">
+            <CardHeader className="pb-3">
+              <div className="flex items-center gap-2">
+                <Receipt className="h-4 w-4 text-violet-500" />
+                <CardTitle className="text-sm">Biên lai chờ xác nhận ({awaitingVerification.length})</CardTitle>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {awaitingVerification.map(row => {
+                const student = students.find(s => s.id === row.student_id);
+                return (
+                  <div key={row.id} className="flex flex-col sm:flex-row sm:items-center gap-3 p-3 rounded-xl border border-violet-200/60 dark:border-violet-800/40 bg-violet-50/50 dark:bg-violet-900/10">
+                    <Avatar size="sm"><AvatarFallback name={student?.full_name ?? "?"} /></Avatar>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-foreground truncate">{row.description}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {student?.full_name ?? row.student_id} · {formatCurrency(row.amount)} · {row.submitted_by === "parent" ? "Phụ huynh nộp" : "Học viên nộp"}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <Button size="sm" variant="gradient" onClick={() => handleMarkPaid(row)}>
+                        <CheckCircle2 className="h-3.5 w-3.5 mr-1.5" /> Xác nhận đã thu
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => handleRejectReceipt(row)}>
+                        <RotateCcw className="h-3.5 w-3.5 mr-1.5" /> Từ chối
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </CardContent>
+          </Card>
+        )}
+
         {/* Chart */}
         <Card>
           <CardHeader><CardTitle className="text-sm">Doanh thu theo tháng</CardTitle></CardHeader>
@@ -170,38 +261,55 @@ export default function AdminPaymentsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
-                  {payments.length === 0 ? (
+                  {rows.length === 0 ? (
                     <tr>
                       <td colSpan={7} className="p-8 text-center text-muted-foreground text-sm">
                         Chưa có giao dịch nào.
                       </td>
                     </tr>
                   ) : (
-                    payments.map((pay, i) => {
-                      const student = students.find(s => s.id === pay.student_id);
+                    rows.map((row, i) => {
+                      const student = students.find(s => s.id === row.student_id);
                       return (
-                        <tr key={pay.id} className="hover:bg-muted/30 transition-colors animate-fade-in" style={{ animationDelay: `${i * 40}ms` }}>
+                        <tr key={`${row.source}_${row.id}`} className="hover:bg-muted/30 transition-colors animate-fade-in" style={{ animationDelay: `${i * 40}ms` }}>
                           <td className="p-4">
                             <div className="flex items-center gap-2">
                               <Avatar size="sm"><AvatarFallback name={student?.full_name ?? "?"} /></Avatar>
-                              <span className="text-sm font-semibold text-foreground">{student?.full_name ?? "Không xác định"}</span>
+                              <span className="text-sm font-semibold text-foreground">{student?.full_name ?? row.student_id}</span>
                             </div>
                           </td>
-                          <td className="p-4 text-sm text-muted-foreground">{pay.description}</td>
-                          <td className="p-4 text-sm font-semibold text-foreground">{formatCurrency(pay.amount)}</td>
-                          <td className="p-4 text-sm text-muted-foreground">{formatDate(pay.due_date)}</td>
-                          <td className="p-4 text-sm text-muted-foreground">{pay.paid_date ? formatDate(pay.paid_date) : "—"}</td>
-                          <td className="p-4"><PaymentBadge status={pay.payment_status} /></td>
+                          <td className="p-4 text-sm text-muted-foreground">{row.description}</td>
+                          <td className="p-4 text-sm font-semibold text-foreground">{formatCurrency(row.amount)}</td>
+                          <td className="p-4 text-sm text-muted-foreground">{formatDate(row.due_date)}</td>
+                          <td className="p-4 text-sm text-muted-foreground">{row.paid_date ? formatDate(row.paid_date) : "—"}</td>
+                          <td className="p-4">
+                            {row.status === "pending_verification" ? (
+                              <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400">
+                                Chờ xác nhận
+                              </span>
+                            ) : (
+                              <PaymentBadge status={row.status} />
+                            )}
+                          </td>
                           <td className="p-4">
                             <div className="flex items-center gap-2">
-                              {pay.payment_status !== "paid" ? (
-                                <Button size="sm" variant="gradient" onClick={() => handleMarkPaid(pay.id)}>
-                                  Xác nhận đã thu
-                                </Button>
-                              ) : (
+                              {row.status === "paid" ? (
                                 <span className="text-xs text-emerald-600 font-semibold flex items-center gap-1">
                                   <CheckCircle2 className="h-3.5 w-3.5" /> Đã thu
                                 </span>
+                              ) : row.status === "pending_verification" ? (
+                                <>
+                                  <Button size="sm" variant="gradient" onClick={() => handleMarkPaid(row)}>
+                                    Xác nhận
+                                  </Button>
+                                  <Button size="sm" variant="outline" onClick={() => handleRejectReceipt(row)}>
+                                    Từ chối
+                                  </Button>
+                                </>
+                              ) : (
+                                <Button size="sm" variant="gradient" onClick={() => handleMarkPaid(row)}>
+                                  Xác nhận đã thu
+                                </Button>
                               )}
                             </div>
                           </td>

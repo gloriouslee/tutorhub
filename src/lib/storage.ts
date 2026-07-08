@@ -709,7 +709,14 @@ export async function updateInvoiceStatus(
       const match = invoiceId === "ALL"
         ? inv.status === "pending" && (!childId || inv.child_id === childId)
         : inv.id === invoiceId;
-      return match ? { ...inv, status, submitted_by: submittedBy } : inv;
+      if (!match) return inv;
+      return {
+        ...inv,
+        status,
+        submitted_by: submittedBy,
+        // Ghi ngày thu khi chuyển sang đã thanh toán (dùng cho biểu đồ doanh thu admin)
+        paid_at: status === "paid" ? (inv.paid_at ?? new Date().toISOString().slice(0, 10)) : inv.paid_at,
+      };
     })
   );
 }
