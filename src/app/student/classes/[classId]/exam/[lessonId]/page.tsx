@@ -673,7 +673,9 @@ function ResultView({ questions, result, onRetry, examTitle, showSolution, allow
                         <div className="space-y-2">
                           <p className="text-[11px] text-muted-foreground">
                             Đúng {countCorrectStatements(q, ans)}/{q.statements!.length} mệnh đề · Được <strong className="text-foreground">{earned}đ</strong>/{maxPts}đ
-                            <span className="text-muted-foreground/70"> (1 ý = 0.1 · 2 ý = 0.25 · 3 ý = 0.5 · 4 ý = 1đ)</span>
+                            <span className="text-muted-foreground/70">
+                              {" "}(1 ý = {Math.round(0.1 * maxPts * 1000) / 1000} · 2 ý = {Math.round(0.25 * maxPts * 1000) / 1000} · 3 ý = {Math.round(0.5 * maxPts * 1000) / 1000} · 4 ý = {maxPts}đ)
+                            </span>
                           </p>
                           {q.statements!.map((st, i) => {
                             const picked = ans.statement_answers?.[i];

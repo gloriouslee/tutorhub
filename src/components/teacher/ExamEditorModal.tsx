@@ -225,16 +225,38 @@ function ParsedQuestionCard({ q, num, update, registry, onUpdateTex }: {
       <div className="flex items-center gap-2 flex-wrap">
         <span className="text-xs font-bold px-2.5 py-1 rounded-lg bg-primary/10 text-primary">Câu {num}</span>
         <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${meta.cls}`}>{meta.label}</span>
-        {q.type === "true_false" ? (
-          <span className="flex items-center gap-1 text-[11px] text-muted-foreground ml-auto" title="Đúng/Sai chấm theo số ý đúng: 1 ý=0.1 · 2 ý=0.25 · 3 ý=0.5 · 4 ý=1đ">
-            <span className="px-1.5 py-0.5 rounded-md bg-muted font-semibold text-foreground">{TRUE_FALSE_MAX}đ</span>
-            theo số ý đúng
-          </span>
-        ) : q.type === "fill_blank" ? (
-          <span className="flex items-center gap-1 text-[11px] text-muted-foreground ml-auto" title="Trả lời ngắn: mỗi câu đúng 0.5đ">
-            <span className="px-1.5 py-0.5 rounded-md bg-muted font-semibold text-foreground">{FILL_BLANK_SCORE}đ</span>
-            mỗi câu
-          </span>
+        {q.type === "true_false" || q.type === "fill_blank" ? (
+          // Đúng/Sai & Trả lời ngắn: mặc định khung chuẩn THPT; có score = tùy chỉnh
+          q.score !== undefined ? (
+            <span className="flex items-center gap-1 text-[11px] text-muted-foreground ml-auto"
+              title={q.type === "true_false" ? "Điểm tùy chỉnh — vẫn chấm thành phần theo tỉ lệ khung (1 ý=10% · 2 ý=25% · 3 ý=50% · 4 ý=100% điểm câu)" : "Điểm tùy chỉnh cho câu trả lời ngắn"}>
+              <input
+                type="number" min={0.1} step={0.05}
+                value={q.score}
+                onChange={e => update({ score: e.target.value === "" ? undefined : Math.max(0.1, parseFloat(e.target.value) || (q.type === "true_false" ? TRUE_FALSE_MAX : FILL_BLANK_SCORE)) })}
+                className="w-14 h-6 px-1.5 rounded-md border border-amber-300 dark:border-amber-700 bg-background text-xs text-center text-foreground outline-none focus:ring-2 focus:ring-primary/40"
+              />
+              điểm
+              <button
+                onClick={() => update({ score: undefined })}
+                className="px-1.5 py-0.5 rounded-md border border-border text-muted-foreground hover:text-primary hover:border-primary/40 transition-colors"
+                title="Quay về khung chuẩn THPT (Đúng/Sai 1đ theo số ý · Trả lời ngắn 0.5đ)"
+              >Về chuẩn</button>
+            </span>
+          ) : (
+            <span className="flex items-center gap-1 text-[11px] text-muted-foreground ml-auto"
+              title={q.type === "true_false" ? "Khung chuẩn THPT: 1 ý=0.1 · 2 ý=0.25 · 3 ý=0.5 · 4 ý=1đ" : "Khung chuẩn THPT: mỗi câu trả lời ngắn đúng 0.5đ"}>
+              <span className="px-1.5 py-0.5 rounded-md bg-muted font-semibold text-foreground">
+                {q.type === "true_false" ? `${TRUE_FALSE_MAX}đ` : `${FILL_BLANK_SCORE}đ`}
+              </span>
+              {q.type === "true_false" ? "theo số ý đúng" : "mỗi câu"}
+              <button
+                onClick={() => update({ score: q.type === "true_false" ? TRUE_FALSE_MAX : FILL_BLANK_SCORE })}
+                className="px-1.5 py-0.5 rounded-md border border-border text-muted-foreground hover:text-primary hover:border-primary/40 transition-colors"
+                title="Tự đặt điểm cho câu này (đề không chuẩn form)"
+              >Tùy chỉnh</button>
+            </span>
+          )
         ) : (
           <span className="flex items-center gap-1 text-[11px] text-muted-foreground ml-auto" title="Điểm của câu này">
             <input
@@ -693,10 +715,16 @@ export default function ExamEditorModal({
               </button>
             )}
           </div>
-          <div className="hidden sm:flex items-center gap-1.5 border border-border rounded-lg px-2.5 py-1.5" title="Tổng điểm các câu (Đúng/Sai = 1đ, Trả lời ngắn = 0.5đ, còn lại theo điểm từng câu)">
+          <div className="hidden sm:flex items-center gap-1.5 border border-border rounded-lg px-2.5 py-1.5" title="Tổng điểm các câu (Đúng/Sai & Trả lời ngắn theo khung chuẩn trừ khi tùy chỉnh điểm)">
             <span className="text-xs text-muted-foreground">Tổng:</span>
             <span className="text-xs font-semibold text-foreground">
-              {calcMaxScore(questions)}đ
+              {calcMaxScore(questions.map(q => ({
+                type: q.type,
+                score: q.score,
+                statements: q.statements,
+                // ParsedQuestion: có score trên câu Đ/S hay TLN nghĩa là tùy chỉnh
+                score_mode: (q.type === "true_false" || q.type === "fill_blank") && q.score !== undefined ? "custom" as const : undefined,
+              })))}đ
             </span>
           </div>
           <button

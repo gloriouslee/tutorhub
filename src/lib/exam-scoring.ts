@@ -10,6 +10,13 @@ export const TRUE_FALSE_MAX = 1;
 // Trả lời ngắn (điền đáp án): mỗi câu đúng 0.5đ
 export const FILL_BLANK_SCORE = 0.5;
 
+// Đề không chuẩn form: giáo viên đặt score_mode="custom" để tự quyết điểm câu.
+// Đúng/Sai custom vẫn chấm thành phần theo TỈ LỆ khung chuẩn, nhân với điểm câu
+// (VD câu 2đ: 1 ý = 0.2 · 2 ý = 0.5 · 3 ý = 1 · 4 ý = 2đ).
+export type ScoreMode = "standard" | "custom";
+
+const round3 = (n: number) => Math.round(n * 1000) / 1000;
+
 export type StudentAnswer = {
   selected_option?: number;
   selected_value?: string;
@@ -48,12 +55,13 @@ export function autoQuestionScore(q: ExamQuestion, ans: StudentAnswer | undefine
     case "multiple_choice":
       return ans.selected_option === q.correct_option ? q.score : 0;
     case "true_false":
-      // Nhiều mệnh đề → điểm thành phần; Đúng/Sai đơn (legacy) → trọn điểm câu.
+      // Nhiều mệnh đề → điểm thành phần theo tỉ lệ khung, nhân điểm tối đa của câu
+      // (chuẩn: max = 1 nên giữ nguyên khung; custom: scale theo điểm giáo viên đặt).
       if (q.statements && q.statements.length > 0)
-        return trueFalsePartialScore(countCorrectStatements(q, ans));
+        return round3(trueFalsePartialScore(countCorrectStatements(q, ans)) * (maxQuestionScore(q) / TRUE_FALSE_MAX));
       return ans.selected_value === q.correct_value ? q.score : 0;
     case "fill_blank":
-      return fillBlankMatches(q, ans) ? FILL_BLANK_SCORE : 0;
+      return fillBlankMatches(q, ans) ? maxQuestionScore(q) : 0;
     default: // essay
       return 0;
   }
@@ -63,13 +71,18 @@ export function autoQuestionScore(q: ExamQuestion, ans: StudentAnswer | undefine
 type ScorableShape = {
   type: ExamQuestion["type"];
   score?: number;
+  score_mode?: ScoreMode;
   statements?: unknown[];
 };
 
 // Điểm tối đa của MỘT câu — dùng cho thang điểm / "Tổng".
+// Đúng/Sai & Trả lời ngắn: mặc định theo khung chuẩn; score_mode="custom" thì
+// dùng điểm giáo viên tự đặt (q.score).
 export function maxQuestionScore(q: ScorableShape): number {
-  if (q.type === "true_false" && q.statements && q.statements.length > 0) return TRUE_FALSE_MAX;
-  if (q.type === "fill_blank") return FILL_BLANK_SCORE;
+  if (q.type === "true_false" && q.statements && q.statements.length > 0)
+    return q.score_mode === "custom" ? (q.score ?? TRUE_FALSE_MAX) : TRUE_FALSE_MAX;
+  if (q.type === "fill_blank")
+    return q.score_mode === "custom" ? (q.score ?? FILL_BLANK_SCORE) : FILL_BLANK_SCORE;
   return q.score ?? 1;
 }
 
@@ -78,10 +91,10 @@ export function calcAutoScore(
   questions: ExamQuestion[],
   answers: Record<string, StudentAnswer>
 ): number {
-  return questions.reduce((total, q) => total + autoQuestionScore(q, answers[q.id]), 0);
+  return round3(questions.reduce((total, q) => total + autoQuestionScore(q, answers[q.id]), 0));
 }
 
 // Tổng điểm tối đa của cả bài.
 export function calcMaxScore(questions: ScorableShape[]): number {
-  return questions.reduce((total, q) => total + maxQuestionScore(q), 0);
+  return round3(questions.reduce((total, q) => total + maxQuestionScore(q), 0));
 }

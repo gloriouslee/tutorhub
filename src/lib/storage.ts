@@ -508,6 +508,9 @@ export interface ExamQuestion {
   answer_html?: string;      // TipTap HTML — đáp án tự luận
   explanation_html?: string; // TipTap HTML — giải thích
   score: number;
+  // Đúng/Sai & Trả lời ngắn: mặc định chấm theo khung chuẩn THPT (bỏ qua score).
+  // "custom" = giáo viên tự đặt điểm câu (đề không chuẩn form) — dùng score.
+  score_mode?: "standard" | "custom";
   difficulty?: "easy" | "medium" | "hard";
   tags?: string[];
 }

@@ -307,8 +307,11 @@ export function parsedToText(
   sectionsAt?: { index: number; text: string }[]
 ): string {
   const blocks = questions.map((q, i) => {
-    // Điểm ≠ 1 → ghi "(Xđ)" ngay sau số câu để round-trip
-    const scoreTag = q.score !== undefined && q.score !== 1
+    // Ghi "(Xđ)" ngay sau số câu để round-trip.
+    // Đúng/Sai & Trả lời ngắn: có score = điểm tùy chỉnh → luôn ghi (kể cả 1đ);
+    // không có score = chấm theo khung chuẩn THPT → không ghi.
+    const isTfOrFill = q.type === "true_false" || q.type === "fill_blank";
+    const scoreTag = q.score !== undefined && (isTfOrFill || q.score !== 1)
       ? `(${String(q.score).replace(".", ",")}đ) `
       : "";
     const lines: string[] = [`Câu ${i + 1}. ${scoreTag}${q.content}`.trimEnd()];
@@ -421,7 +424,13 @@ export function examQuestionsToText(questions: ExamQuestion[]): { text: string; 
   const parsed: ParsedQuestion[] = questions.map((q, i) => {
     const content = htmlToConventionText(q.content_html);
     const solution = htmlToConventionText(q.explanation_html ?? "") || undefined;
-    const base = { index: i + 1, content, solution, warnings: [] as string[], score: q.score !== 1 ? q.score : undefined };
+    // Đúng/Sai & Trả lời ngắn: score chỉ có nghĩa khi giáo viên tùy chỉnh —
+    // chế độ chuẩn bỏ score để parse lại vẫn ra khung chuẩn.
+    const isTfOrFill = q.type === "true_false" || q.type === "fill_blank";
+    const score = isTfOrFill
+      ? (q.score_mode === "custom" ? q.score : undefined)
+      : (q.score !== 1 ? q.score : undefined);
+    const base = { index: i + 1, content, solution, warnings: [] as string[], score };
 
     switch (q.type) {
       case "multiple_choice":
@@ -473,12 +482,15 @@ export function parsedToExamQuestions(parsed: ParsedQuestion[], registry?: ExamA
       case "true_false":
         return {
           ...base, type: "true_false" as const,
+          // Có điểm ghi trên câu ("(Xđ)") = giáo viên tùy chỉnh; không có = khung chuẩn
+          score_mode: p.score !== undefined ? ("custom" as const) : undefined,
           // statements là text thuần → math inline $tex$, ảnh giữ dạng [img:url]
           statements: p.statements?.map(st => ({ ...st, text: resolveRegistryTokens(st.text, registry, "token") })),
         };
       case "fill_blank":
         return {
           ...base, type: "fill_blank" as const,
+          score_mode: p.score !== undefined ? ("custom" as const) : undefined,
           correct_value: p.shortAnswer ?? "",
         };
       default:
