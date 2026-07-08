@@ -6,7 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { SectionHeader } from "@/components/shared";
-import { MOCK_STUDENTS, MOCK_CLASSES } from "@/lib/mock-data";
+import { useParentContext } from "@/hooks/useParentContext";
 import { Calendar, Clock, MapPin, Video, ChevronLeft, ChevronRight, Filter, StickyNote, ChevronDown, BookOpen } from "lucide-react";
 import { getCurriculum, kvGet } from "@/lib/storage";
 import { toLocalDateKey } from "@/lib/utils";
@@ -22,15 +22,20 @@ const mapDay = (day: string) => {
   return map[day] || day;
 };
 
-// Map children to their real classes via enrollment
-const getClassesForChild = (childId: string) =>
-  MOCK_CLASSES.filter(c => (c.student_ids ?? []).includes(childId));
+// Bảng màu gán theo thứ tự con trong roster — hoạt động với mọi số lượng con
+const PALETTE = [
+  "from-indigo-500 to-purple-600",
+  "from-teal-500 to-emerald-600",
+  "from-rose-500 to-pink-600",
+  "from-amber-500 to-orange-600",
+];
 
 // per-class note + curriculum maps loaded from localStorage
 type NoteMap = Record<string, string>; // dateStr → note text
 type CurrMap = Record<string, CurriculumSession>; // dateStr → session
 
 export default function ParentSchedulePage() {
+  const { parentName, children, ready } = useParentContext();
   const [weekOffset, setWeekOffset] = useState(0);
   const [selectedChildId, setSelectedChildId] = useState<string>("all");
   const [expandedCard, setExpandedCard] = useState<string | null>(null); // key = `${classId}-${date}`
@@ -38,39 +43,36 @@ export default function ParentSchedulePage() {
   const [currByClass, setCurrByClass] = useState<Record<string, CurrMap>>({});
 
   useEffect(() => {
+    if (!ready) return;
     (async () => {
       const nb: Record<string, NoteMap> = {};
       const cb: Record<string, CurrMap> = {};
-      for (const cls of MOCK_CLASSES) {
-        const notes = await kvGet<NoteMap>(`tutorhub_session_notes_${cls.id}`, {});
-        if (Object.keys(notes).length) nb[cls.id] = notes;
-        const chapters = await getCurriculum(cls.id);
+      const classIds = Array.from(new Set(children.flatMap(ch => ch.classes.map(c => c.id))));
+      for (const classId of classIds) {
+        const notes = await kvGet<NoteMap>(`tutorhub_session_notes_${classId}`, {});
+        if (Object.keys(notes).length) nb[classId] = notes;
+        const chapters = await getCurriculum(classId);
         const byDate: CurrMap = {};
         chapters.forEach(ch => ch.sessions.forEach(s => { if (s.date) byDate[s.date] = s; }));
-        if (Object.keys(byDate).length) cb[cls.id] = byDate;
+        if (Object.keys(byDate).length) cb[classId] = byDate;
       }
       setNotesByClass(nb);
       setCurrByClass(cb);
     })();
-  }, []);
+  }, [ready, children]);
 
-  const children = MOCK_STUDENTS.filter(s => s.parent_id === "p1");
-  const childColors: Record<string, string> = {
-    "s1": "from-indigo-500 to-purple-600",
-    "s4": "from-teal-500 to-emerald-600",
-  };
-  const childHexColors: Record<string, string> = {
-    "s1": "#6366f1",
-    "s4": "#14b8a6",
-  };
+  // Màu theo thứ tự con — không phụ thuộc id cụ thể
+  const childColors: Record<string, string> = {};
+  children.forEach((child, index) => {
+    childColors[child.id] = PALETTE[index % PALETTE.length];
+  });
 
   const scheduleByDay: Record<string, any[]> = {};
   DAYS_OF_WEEK.forEach(day => { scheduleByDay[day] = []; });
 
   children.forEach(child => {
     if (selectedChildId === "all" || selectedChildId === child.id) {
-      const classes = getClassesForChild(child.id);
-      classes.forEach(cls => {
+      child.classes.forEach(cls => {
         cls.schedule.forEach(slot => {
           const vDay = mapDay(slot.day);
           if (scheduleByDay[vDay]) {
@@ -102,8 +104,19 @@ export default function ParentSchedulePage() {
   const prevWeek = () => setWeekOffset(prev => prev - 1);
   const isCurrentWeek = weekOffset === 0;
 
+  if (!ready) {
+    return (
+      <PortalLayout role="parent" userName={parentName} pageTitle="Lịch học của con">
+        <div className="flex flex-col items-center justify-center min-h-[400px] gap-3 text-muted-foreground">
+          <span className="animate-spin h-8 w-8 border-2 border-primary border-t-transparent rounded-full inline-block" />
+          <p className="text-sm font-medium">Đang tải lịch học...</p>
+        </div>
+      </PortalLayout>
+    );
+  }
+
   return (
-    <PortalLayout role="parent" userName="Trần Văn Minh" pageTitle="Lịch học của con">
+    <PortalLayout role="parent" userName={parentName} pageTitle="Lịch học của con">
       <div className="space-y-6 max-w-6xl mx-auto pb-10">
         
         {/* Header & Controls */}
@@ -124,7 +137,7 @@ export default function ParentSchedulePage() {
               >
                 <option value="all">Tất cả các con</option>
                 {children.map(child => (
-                  <option key={child.id} value={child.id}>{child.full_name}</option>
+                  <option key={child.id} value={child.id}>{child.name}</option>
                 ))}
               </select>
             </div>
@@ -149,7 +162,7 @@ export default function ParentSchedulePage() {
             {children.map(child => (
               <div key={child.id} className="flex items-center gap-2">
                 <div className={`h-3 w-3 rounded-full bg-gradient-to-br ${childColors[child.id]}`} />
-                <span className="text-sm font-semibold">{child.full_name}</span>
+                <span className="text-sm font-semibold">{child.name}</span>
               </div>
             ))}
           </div>
@@ -203,9 +216,9 @@ export default function ParentSchedulePage() {
                             {selectedChildId === "all" && (
                               <div className="mb-2 flex items-center gap-1.5">
                                 <div className={`h-5 w-5 rounded-full bg-gradient-to-br ${childColors[cls.child.id]} flex items-center justify-center text-[9px] font-bold text-white`}>
-                                  {cls.child.full_name.charAt(0)}
+                                  {cls.child.name.charAt(0)}
                                 </div>
-                                <span className="text-[10px] font-semibold text-muted-foreground truncate">{cls.child.full_name}</span>
+                                <span className="text-[10px] font-semibold text-muted-foreground truncate">{cls.child.name}</span>
                               </div>
                             )}
 

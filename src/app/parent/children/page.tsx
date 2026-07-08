@@ -1,16 +1,19 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { SectionHeader } from "@/components/shared";
-import { MOCK_STUDENTS, MOCK_CLASSES, MOCK_EXAM_SCORES, MOCK_ATTENDANCE } from "@/lib/mock-data";
-import { 
-  GraduationCap, Building2, BookOpen, 
+import { MOCK_STUDENTS } from "@/lib/mock-data";
+import {
+  GraduationCap, Building2, BookOpen,
   Activity, Target, ChevronRight, CalendarDays, Award
 } from "lucide-react";
 import Link from "next/link";
+import { useParentContext } from "@/hooks/useParentContext";
+import { loadChildrenAttendance, attendanceRate, loadChildScores, averageScore } from "@/lib/parent-data";
 
 const GRADIENTS = [
   "from-indigo-500 to-purple-600",
@@ -20,8 +23,28 @@ const GRADIENTS = [
 ];
 
 export default function ParentChildrenPage() {
-  // Simulate parent "p1" who has 2 children (s1 and s4)
-  const children = MOCK_STUDENTS.filter(s => s.parent_id === "p1");
+  const { parentName, children, ready } = useParentContext();
+
+  // Điểm TB và tỉ lệ chuyên cần thật theo từng con (null = chưa có dữ liệu → "—")
+  const [avgByChild, setAvgByChild] = useState<Record<string, number | null>>({});
+  const [attByChild, setAttByChild] = useState<Record<string, number | null>>({});
+
+  useEffect(() => {
+    if (!ready) return;
+    const ids = children.map(c => c.id);
+
+    loadChildrenAttendance(ids).then(records => {
+      setAttByChild(Object.fromEntries(
+        children.map(c => [c.id, attendanceRate(records.filter(r => r.student_id === c.id))])
+      ));
+    });
+
+    Promise.all(
+      children.map(async c =>
+        [c.id, averageScore(await loadChildScores(c.id, c.classes.map(cl => cl.id)))] as const
+      )
+    ).then(entries => setAvgByChild(Object.fromEntries(entries)));
+  }, [ready, children]);
 
   // Helper to map learning type to Vietnamese
   const getLearningTypeLabel = (type: string) => {
@@ -34,24 +57,22 @@ export default function ParentChildrenPage() {
   };
 
   return (
-    <PortalLayout role="parent" userName="Trần Văn Minh" pageTitle="Hồ sơ các con">
+    <PortalLayout role="parent" userName={parentName} pageTitle="Hồ sơ các con">
       <div className="space-y-8 max-w-6xl mx-auto pb-10">
-        <SectionHeader 
-          title="Hồ sơ các con" 
+        <SectionHeader
+          title="Hồ sơ các con"
           subtitle="Quản lý thông tin và theo dõi lớp học của các con đang theo học tại TutorHub"
         />
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           {children.map((child, index) => {
-            const enrolledClasses = MOCK_CLASSES.filter(c => (c.student_ids ?? []).includes(child.id));
-            const scores = MOCK_EXAM_SCORES.filter(e => e.student_id === child.id);
-            const avgScore = scores.length > 0
-              ? (scores.reduce((s, e) => s + e.score, 0) / scores.length).toFixed(1)
-              : "—";
-            const attRecords = MOCK_ATTENDANCE.filter(a => a.student_id === child.id);
-            const attendance = attRecords.length > 0
-              ? Math.round(attRecords.filter(a => a.status === "present").length / attRecords.length * 100)
-              : null;
+            const enrolledClasses = child.classes;
+            const avg = avgByChild[child.id] ?? null;
+            const avgScoreLabel = avg != null ? avg.toFixed(1) : "—";
+            const attendance = attByChild[child.id] ?? null;
+            // Hồ sơ đăng ký (hình thức học, ngày nhập học) chưa có nguồn thật —
+            // tra cứu từ mock roster làm dữ liệu demo.
+            const profile = MOCK_STUDENTS.find(s => s.id === child.id);
             const bgGradient = GRADIENTS[index % GRADIENTS.length];
 
             return (
@@ -61,20 +82,24 @@ export default function ParentChildrenPage() {
                   <div className="absolute top-0 right-0 opacity-10 translate-x-4 -translate-y-4 transition-transform duration-500 group-hover:scale-110">
                     <GraduationCap className="h-40 w-40 text-white" />
                   </div>
-                  
+
                   <div className="relative z-10 flex items-center gap-5">
                     <div className="h-20 w-20 rounded-2xl bg-white/20 backdrop-blur-md border-2 border-white/40 shadow-inner flex items-center justify-center text-3xl font-black text-white shrink-0">
-                      {child.full_name.charAt(0)}
+                      {child.name.charAt(0)}
                     </div>
                     <div>
-                      <h2 className="text-2xl font-bold text-white mb-1">{child.full_name}</h2>
+                      <h2 className="text-2xl font-bold text-white mb-1">{child.name}</h2>
                       <div className="flex flex-wrap items-center gap-2 text-white/80 text-sm">
-                        <span className="flex items-center gap-1 bg-white/10 px-2 py-0.5 rounded-md">
-                          <Building2 className="h-3.5 w-3.5" /> {child.school}
-                        </span>
-                        <span className="flex items-center gap-1 bg-white/10 px-2 py-0.5 rounded-md">
-                          <GraduationCap className="h-3.5 w-3.5" /> {child.grade}
-                        </span>
+                        {child.school && (
+                          <span className="flex items-center gap-1 bg-white/10 px-2 py-0.5 rounded-md">
+                            <Building2 className="h-3.5 w-3.5" /> {child.school}
+                          </span>
+                        )}
+                        {child.grade && (
+                          <span className="flex items-center gap-1 bg-white/10 px-2 py-0.5 rounded-md">
+                            <GraduationCap className="h-3.5 w-3.5" /> {child.grade}
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -83,7 +108,7 @@ export default function ParentChildrenPage() {
                 {/* Quick Stats */}
                 <div className="grid grid-cols-3 divide-x divide-border border-b border-border bg-muted/20">
                   <div className="p-4 flex flex-col items-center justify-center text-center">
-                    <span className="text-2xl font-black text-foreground">{avgScore}</span>
+                    <span className="text-2xl font-black text-foreground">{avgScoreLabel}</span>
                     <span className="text-[10px] uppercase font-bold text-muted-foreground flex items-center gap-1 mt-1">
                       <Target className="h-3 w-3" /> Điểm TB
                     </span>
@@ -111,11 +136,15 @@ export default function ParentChildrenPage() {
                     <div className="space-y-3 bg-muted/30 p-4 rounded-xl border border-border/50">
                       <div className="flex justify-between items-center text-sm">
                         <span className="text-muted-foreground">Hình thức học:</span>
-                        <Badge variant="outline" className="font-semibold bg-background">{getLearningTypeLabel(child.learning_type)}</Badge>
+                        <Badge variant="outline" className="font-semibold bg-background">
+                          {profile ? getLearningTypeLabel(profile.learning_type) : "Đang cập nhật"}
+                        </Badge>
                       </div>
                       <div className="flex justify-between items-center text-sm">
                         <span className="text-muted-foreground">Ngày nhập học:</span>
-                        <span className="font-medium text-foreground">{new Date(child.created_at).toLocaleDateString('vi-VN')}</span>
+                        <span className="font-medium text-foreground">
+                          {profile ? new Date(profile.created_at).toLocaleDateString('vi-VN') : "—"}
+                        </span>
                       </div>
                       <div className="flex justify-between items-center text-sm">
                         <span className="text-muted-foreground">Danh hiệu hiện tại:</span>
@@ -132,17 +161,19 @@ export default function ParentChildrenPage() {
                       <BookOpen className="h-4 w-4" /> Lớp học đang tham gia
                     </h3>
                     <div className="space-y-2">
-                      {enrolledClasses.map(cls => (
+                      {enrolledClasses.length > 0 ? enrolledClasses.map(cls => (
                         <div key={cls.id} className="flex items-center justify-between p-3 rounded-xl border border-border hover:border-primary/50 transition-colors bg-card">
                           <div>
                             <p className="font-bold text-sm text-foreground">{cls.class_name}</p>
                             <p className="text-xs text-muted-foreground mt-0.5">{cls.subject}</p>
                           </div>
                           <Badge className="bg-primary/10 text-primary border-0 hover:bg-primary/20">
-                            {cls.schedule.length} buổi/tuần
+                            {cls.schedule?.length ?? 0} buổi/tuần
                           </Badge>
                         </div>
-                      ))}
+                      )) : (
+                        <p className="text-sm text-muted-foreground text-center py-3">Chưa tham gia lớp học nào.</p>
+                      )}
                     </div>
                   </div>
 

@@ -1,60 +1,43 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { SectionHeader } from "@/components/shared";
-import { MOCK_STUDENTS, MOCK_ATTENDANCE, MOCK_CLASSES } from "@/lib/mock-data";
 import { formatDate } from "@/lib/utils";
 import { CheckCircle2, Clock, XCircle, Calendar, User, BookOpen, AlertCircle } from "lucide-react";
-
-// Parent p1 has students s1 and s4
-const PARENT_ID = "p1";
-const myChildren = MOCK_STUDENTS.filter(s => s.parent_id === PARENT_ID);
+import { useParentContext } from "@/hooks/useParentContext";
+import {
+  loadChildrenAttendance, attendanceRate, classNameOf,
+  type ChildAttendanceRecord,
+} from "@/lib/parent-data";
 
 export default function ParentAttendancePage() {
+  const { parentName, children, ready } = useParentContext();
   const [selectedChildId, setSelectedChildId] = useState<string>("all");
+  const [records, setRecords] = useState<ChildAttendanceRecord[]>([]);
+
+  // Load real attendance (teacher records merged over mock baseline) for all children
+  useEffect(() => {
+    if (!ready || children.length === 0) return;
+    loadChildrenAttendance(children.map(c => c.id)).then(setRecords);
+  }, [ready, children]);
 
   // Get relevant attendance records
-  const childIds = selectedChildId === "all" ? myChildren.map(c => c.id) : [selectedChildId];
-  
-  // To make the UI more populated, we'll generate some extra mock attendance 
-  // based on MOCK_ATTENDANCE but expanded across a few weeks
-  const baseAttendance = MOCK_ATTENDANCE.filter(a => childIds.includes(a.student_id));
-  
-  // Simulate more history for better UI demonstration
-  const generateExtendedHistory = () => {
-    const history = [...baseAttendance];
-    if (history.length < 15) {
-      childIds.forEach(cId => {
-        const studentClasses = MOCK_CLASSES.filter(c => (c.student_ids ?? []).includes(cId));
-        studentClasses.forEach((cls, idx) => {
-          for (let i = 1; i <= 4; i++) {
-            const date = new Date(2026, 4, 5 - i * 3); // some past dates
-            history.push({
-              id: `mock-${cId}-${cls.id}-${i}`,
-              class_id: cls.id,
-              student_id: cId,
-              attendance_date: date.toISOString().split('T')[0],
-              status: i % 7 === 0 ? "absent" : (i % 5 === 0 ? "late" : "present")
-            });
-          }
-        });
-      });
-    }
-    return history.sort((a, b) => new Date(b.attendance_date).getTime() - new Date(a.attendance_date).getTime());
-  };
+  const childIds = selectedChildId === "all" ? children.map(c => c.id) : [selectedChildId];
+  const attendanceHistory = records.filter(r => childIds.includes(r.student_id));
 
-  const attendanceHistory = generateExtendedHistory();
+  // Classes of all children — for resolving real class names
+  const allClasses = children.flatMap(c => c.classes);
 
   // Stats
   const totalSessions = attendanceHistory.length;
   const presentCount = attendanceHistory.filter(a => a.status === "present").length;
   const lateCount = attendanceHistory.filter(a => a.status === "late").length;
   const absentCount = attendanceHistory.filter(a => a.status === "absent").length;
-  
-  const presentRate = totalSessions > 0 ? Math.round((presentCount / totalSessions) * 100) : 0;
+
+  const presentRate = attendanceRate(attendanceHistory) ?? 0;
 
   const getStatusDisplay = (status: string) => {
     switch (status) {
@@ -72,10 +55,10 @@ export default function ParentAttendancePage() {
   };
 
   return (
-    <PortalLayout role="parent" userName="Trần Văn Minh" pageTitle="Chuyên cần">
+    <PortalLayout role="parent" userName={parentName} pageTitle="Chuyên cần">
       <div className="space-y-6 max-w-6xl mx-auto pb-10">
-        <SectionHeader 
-          title="Theo dõi chuyên cần" 
+        <SectionHeader
+          title="Theo dõi chuyên cần"
           subtitle="Quản lý lịch sử điểm danh và tình hình đi học của các con"
         />
 
@@ -84,27 +67,27 @@ export default function ParentAttendancePage() {
           <button
             onClick={() => setSelectedChildId("all")}
             className={`px-5 py-2.5 rounded-xl text-sm font-bold transition-all border-2 ${
-              selectedChildId === "all" 
-                ? "bg-primary text-primary-foreground border-primary shadow-md" 
+              selectedChildId === "all"
+                ? "bg-primary text-primary-foreground border-primary shadow-md"
                 : "bg-card text-muted-foreground border-border hover:border-primary/30"
             }`}
           >
             Tất cả các con
           </button>
-          {myChildren.map(child => (
+          {children.map(child => (
             <button
               key={child.id}
               onClick={() => setSelectedChildId(child.id)}
               className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all border-2 ${
-                selectedChildId === child.id 
-                  ? "bg-primary text-primary-foreground border-primary shadow-md" 
+                selectedChildId === child.id
+                  ? "bg-primary text-primary-foreground border-primary shadow-md"
                   : "bg-card text-muted-foreground border-border hover:border-primary/30"
               }`}
             >
               <div className="h-6 w-6 rounded-full bg-muted text-foreground flex items-center justify-center text-[10px] font-bold shrink-0">
-                {child.full_name.charAt(0)}
+                {child.name.charAt(0)}
               </div>
-              {child.full_name}
+              {child.name}
             </button>
           ))}
         </div>
@@ -189,8 +172,7 @@ export default function ParentAttendancePage() {
             ) : (
               <div className="divide-y divide-border/50">
                 {attendanceHistory.map((record) => {
-                  const student = MOCK_STUDENTS.find(s => s.id === record.student_id);
-                  const cls = MOCK_CLASSES.find(c => c.id === record.class_id);
+                  const child = children.find(c => c.id === record.student_id);
                   const statusInfo = getStatusDisplay(record.status);
                   const StatusIcon = statusInfo.icon;
 
@@ -201,27 +183,20 @@ export default function ParentAttendancePage() {
                           <StatusIcon className="h-6 w-6" />
                         </div>
                         <div>
-                          <p className="font-bold text-foreground flex items-center gap-2">
-                            {formatDate(record.attendance_date)}
+                          <div className="font-bold text-foreground flex items-center gap-2">
+                            {formatDate(record.date)}
                             <Badge variant="outline" className={`border-0 ${statusInfo.bg} ${statusInfo.color} font-bold text-[10px] uppercase`}>
                               {statusInfo.label}
                             </Badge>
-                          </p>
+                          </div>
                           <div className="flex items-center gap-3 text-sm text-muted-foreground mt-1 font-medium">
                             {selectedChildId === "all" && (
-                              <span className="flex items-center gap-1 text-primary"><User className="h-3.5 w-3.5" /> {student?.full_name}</span>
+                              <span className="flex items-center gap-1 text-primary"><User className="h-3.5 w-3.5" /> {child?.name}</span>
                             )}
-                            <span className="flex items-center gap-1"><BookMarkedIcon className="h-3.5 w-3.5" /> {cls?.class_name}</span>
+                            <span className="flex items-center gap-1"><BookMarkedIcon className="h-3.5 w-3.5" /> {classNameOf(record.class_id, allClasses)}</span>
                           </div>
                         </div>
                       </div>
-                      
-                      {record.status !== 'present' && (
-                        <div className="w-full sm:w-auto bg-muted/50 p-3 rounded-xl border border-border/50 text-sm italic text-muted-foreground flex items-start gap-2">
-                          <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
-                          <span>Giáo viên ghi chú: {record.status === 'late' ? "Vào lớp muộn 15 phút" : "Nghỉ học không phép"}</span>
-                        </div>
-                      )}
                     </div>
                   );
                 })}

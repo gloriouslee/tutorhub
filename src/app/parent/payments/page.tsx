@@ -9,19 +9,16 @@ import { SectionHeader } from "@/components/shared";
 import {
   getInvoices, updateInvoiceStatus, type TuitionInvoice,
 } from "@/lib/storage";
-import { MOCK_STUDENTS } from "@/lib/mock-data";
+import { useParentContext } from "@/hooks/useParentContext";
 import { formatCurrency } from "@/lib/utils";
 import {
   DollarSign, CreditCard, Clock, CheckCircle2,
   AlertCircle, ArrowRight, X, QrCode, UploadCloud, Users,
 } from "lucide-react";
 
-const PARENT_ID = "p1";
-
-
 export default function ParentPaymentsPage() {
-  const children = MOCK_STUDENTS.filter(s => s.parent_id === PARENT_ID);
-  const childIds  = children.map(c => c.id);
+  const { parentName, children, ready } = useParentContext();
+  const childIds = children.map(c => c.id);
 
   const [invoices,     setInvoices]     = useState<TuitionInvoice[]>([]);
   const [modalInvoice, setModalInvoice] = useState<TuitionInvoice | null>(null);
@@ -29,9 +26,10 @@ export default function ParentPaymentsPage() {
   const [submitting,   setSubmitting]   = useState(false);
 
   const load = async () => setInvoices((await getInvoices()).filter(inv => childIds.includes(inv.child_id)));
-  useEffect(() => { load(); }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { if (ready) load(); }, [ready]);
 
-  const getChildName = (id: string) => children.find(c => c.id === id)?.full_name ?? "Học viên";
+  const getChildName = (id: string) => children.find(c => c.id === id)?.name ?? "Học viên";
 
   const pendingInvoices = invoices.filter(i => i.status === "pending");
   const otherInvoices   = invoices.filter(i => i.status !== "pending");
@@ -85,7 +83,7 @@ export default function ParentPaymentsPage() {
     : "";
 
   return (
-    <PortalLayout role="parent" userName="Trần Văn Minh" pageTitle="Thanh toán">
+    <PortalLayout role="parent" userName={parentName} pageTitle="Thanh toán">
       <div className="space-y-6 max-w-5xl mx-auto pb-10">
         <SectionHeader
           title="Thanh toán Học phí"

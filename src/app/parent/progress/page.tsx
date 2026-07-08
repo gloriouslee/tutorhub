@@ -5,45 +5,51 @@ import PortalLayout from "@/components/layout/PortalLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { SectionHeader } from "@/components/shared";
+import { getStudentComments, type StoredExamScore } from "@/lib/storage";
+import { useParentContext } from "@/hooks/useParentContext";
+import { loadChildScores, loadChildrenAttendance, attendanceRate, averageScore } from "@/lib/parent-data";
 import {
-  MOCK_EXAM_SCORES,
-  MOCK_STUDENTS,
-  MOCK_ATTENDANCE
-} from "@/lib/mock-data";
-import { getStudentComments } from "@/lib/storage";
-import { 
-  TrendingUp, Target, Brain, Award, Calendar, 
-  BarChart3, ChevronDown, BookOpen, Star, FileText 
+  TrendingUp, Target, Brain, Award, Calendar,
+  BarChart3, ChevronDown, BookOpen, Star, FileText
 } from "lucide-react";
-import { 
-  ResponsiveContainer, LineChart, Line, XAxis, YAxis, 
-  Tooltip, CartesianGrid, Radar, RadarChart, PolarGrid, 
+import {
+  ResponsiveContainer, XAxis, YAxis,
+  Tooltip, CartesianGrid, Radar, RadarChart, PolarGrid,
   PolarAngleAxis, PolarRadiusAxis, Area, AreaChart
 } from "recharts";
 
 export default function ParentProgressPage() {
-  // Parent "p1" has students "s1" and "s4"
-  const children = MOCK_STUDENTS.filter(s => s.parent_id === "p1");
-  const [selectedChild, setSelectedChild] = useState(children[0]);
+  const { parentName, children, ready } = useParentContext();
+  const [selectedChildId, setSelectedChildId] = useState<string>("");
+  const selectedChild = children.find(c => c.id === selectedChildId) ?? children[0];
   const [latestComment, setLatestComment] = useState<any | null>(null);
+  const [childExams, setChildExams] = useState<StoredExamScore[]>([]);
+  const [childAttendanceRate, setChildAttendanceRate] = useState<number | null>(null);
 
+  // Load real data (teacher-entered + online exam results merged over mock) per child
   useEffect(() => {
-    async function loadLatestComment() {
-      if (selectedChild) {
-        const studentComments = await getStudentComments(selectedChild.id);
-        if (studentComments.length > 0) {
-          const sorted = [...studentComments].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-          setLatestComment(sorted[0]);
-        } else {
-          setLatestComment(null);
-        }
-      }
-    }
-    loadLatestComment();
-  }, [selectedChild]);
+    if (!ready || !selectedChild) return;
+    let cancelled = false;
 
-  // Exams for selected child
-  const childExams = MOCK_EXAM_SCORES.filter(e => e.student_id === selectedChild?.id);
+    loadChildScores(selectedChild.id, selectedChild.classes.map(c => c.id))
+      .then(scores => { if (!cancelled) setChildExams(scores); });
+
+    loadChildrenAttendance([selectedChild.id])
+      .then(records => { if (!cancelled) setChildAttendanceRate(attendanceRate(records)); });
+
+    (async () => {
+      const studentComments = await getStudentComments(selectedChild.id);
+      if (cancelled) return;
+      if (studentComments.length > 0) {
+        const sorted = [...studentComments].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        setLatestComment(sorted[0]);
+      } else {
+        setLatestComment(null);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [ready, selectedChild?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Normalize scores to a 10-point scale
   const normalizedExams = childExams.map(e => ({
@@ -51,10 +57,9 @@ export default function ParentProgressPage() {
     norm: e.max_score && e.max_score !== 10 ? Number(((e.score / e.max_score) * 10).toFixed(1)) : e.score,
   }));
 
-  // Average score for the selected child
-  const childAvg = normalizedExams.length
-    ? (normalizedExams.reduce((acc, e) => acc + e.norm, 0) / normalizedExams.length).toFixed(1)
-    : null;
+  // Average score for the selected child (10-point scale)
+  const avg = averageScore(childExams);
+  const childAvg = avg !== null ? avg.toFixed(1) : null;
 
   // Score trend over time (sorted by exam date)
   const trendData = [...normalizedExams]
@@ -64,16 +69,11 @@ export default function ParentProgressPage() {
       score: e.norm,
     }));
 
-  // Attendance rate for the selected child
-  const childAttendance = MOCK_ATTENDANCE.filter(a => a.student_id === selectedChild?.id);
-  const attendanceRate = childAttendance.length
-    ? Math.round((childAttendance.filter(a => a.status !== "absent").length / childAttendance.length) * 100)
-    : null;
-
-  // Radar: child's scores grouped by exam topic (averaged when repeated)
+  // Radar: scores grouped by subject (from the child's class), fallback to exam topic
   const radarGroups = new Map<string, { sum: number; n: number }>();
   normalizedExams.forEach(e => {
-    const topic = (e.exam_name.split("–").pop() ?? e.exam_name).trim();
+    const cls = selectedChild?.classes.find(c => c.id === e.class_id);
+    const topic = cls?.subject ?? (e.exam_name.split("–").pop() ?? e.exam_name).trim();
     const cur = radarGroups.get(topic) ?? { sum: 0, n: 0 };
     radarGroups.set(topic, { sum: cur.sum + e.norm, n: cur.n + 1 });
   });
@@ -83,10 +83,10 @@ export default function ParentProgressPage() {
   }));
 
   return (
-    <PortalLayout role="parent" userName="Trần Văn Minh" pageTitle="Tiến độ học tập">
+    <PortalLayout role="parent" userName={parentName} pageTitle="Tiến độ học tập">
       <div className="space-y-8 max-w-6xl mx-auto pb-10">
-        <SectionHeader 
-          title="Tiến độ học tập" 
+        <SectionHeader
+          title="Tiến độ học tập"
           subtitle="Theo dõi kết quả và đánh giá năng lực của con"
         />
 
@@ -101,23 +101,23 @@ export default function ParentProgressPage() {
               <CardContent className="p-6 relative z-10">
                 <p className="text-indigo-100 text-sm font-medium mb-1">Đang xem báo cáo của</p>
                 <div className="relative">
-                  <select 
+                  <select
                     className="w-full appearance-none bg-white/20 border border-white/30 text-white text-lg font-bold rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-white/50 cursor-pointer"
-                    value={selectedChild?.id}
-                    onChange={(e) => setSelectedChild(children.find(c => c.id === e.target.value) || children[0])}
+                    value={selectedChild?.id ?? ""}
+                    onChange={(e) => setSelectedChildId(e.target.value)}
                   >
                     {children.map(child => (
                       <option key={child.id} value={child.id} className="text-gray-900">
-                        {child.full_name} ({child.grade})
+                        {child.name}{child.grade ? ` (${child.grade})` : ""}
                       </option>
                     ))}
                   </select>
                   <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 h-5 w-5 pointer-events-none opacity-70" />
                 </div>
-                
+
                 <div className="mt-6 flex items-center gap-4">
                   <div className="h-16 w-16 rounded-full bg-white/20 flex items-center justify-center border-2 border-white/40 shadow-inner">
-                    <span className="text-2xl font-black">{selectedChild?.full_name.charAt(0)}</span>
+                    <span className="text-2xl font-black">{selectedChild?.name.charAt(0)}</span>
                   </div>
                   <div>
                     <p className="text-2xl font-bold">{childAvg ?? "—"}</p>
@@ -137,7 +137,7 @@ export default function ParentProgressPage() {
                     <Target className="h-5 w-5" />
                   </div>
                   <div>
-                    <p className="text-2xl font-bold text-foreground">{attendanceRate !== null ? `${attendanceRate}%` : "—"}</p>
+                    <p className="text-2xl font-bold text-foreground">{childAttendanceRate !== null ? `${childAttendanceRate}%` : "—"}</p>
                     <p className="text-[11px] text-muted-foreground uppercase tracking-wider font-semibold">Tỷ lệ chuyên cần</p>
                   </div>
                 </CardContent>
@@ -182,7 +182,7 @@ export default function ParentProgressPage() {
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#888888" opacity={0.2} />
                     <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{ fontSize: 12 }} dy={10} />
                     <YAxis domain={[0, 10]} axisLine={false} tickLine={false} tick={{ fontSize: 12 }} />
-                    <Tooltip 
+                    <Tooltip
                       contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.1)' }}
                       cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }}
                     />
@@ -239,12 +239,14 @@ export default function ParentProgressPage() {
                   <div className="bg-white/60 dark:bg-black/20 p-4 rounded-xl text-sm leading-relaxed text-foreground relative">
                     <span className="text-4xl text-amber-300 absolute top-2 left-2 opacity-50 font-serif">"</span>
                     <p className="relative z-10 pl-4">
-                      {latestComment ? latestComment.text : `Em ${selectedChild?.full_name.split(' ').pop()} có thái độ học tập tích cực và luôn hoàn thành bài tập đầy đủ. Cần rèn luyện thêm kỹ năng làm toán cẩn thận.`}
+                      {latestComment ? latestComment.text : "Chưa có nhận xét nào từ giáo viên."}
                     </p>
                   </div>
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground font-medium justify-end">
-                    <span>{latestComment ? `— Ngày ${latestComment.date} (Đánh giá: ${"★".repeat(latestComment.rating)})` : "— Thầy Hùng Toán"}</span>
-                  </div>
+                  {latestComment && (
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground font-medium justify-end">
+                      <span>{`— Ngày ${latestComment.date} (Đánh giá: ${"★".repeat(latestComment.rating)})`}</span>
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -257,7 +259,7 @@ export default function ParentProgressPage() {
             <BookOpen className="h-5 w-5 text-primary" /> Kết quả bài thi gần đây
           </h3>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {childExams.length > 0 ? childExams.map((exam, i) => {
+            {normalizedExams.length > 0 ? normalizedExams.map((exam) => {
               const scorePercent = (exam.score / exam.max_score) * 100;
               let scoreColor = "text-emerald-600";
               let badgeColor = "bg-emerald-100 text-emerald-700";
@@ -275,7 +277,7 @@ export default function ParentProgressPage() {
                     <div className="flex justify-between items-start mb-4">
                       <div>
                         <Badge className={`text-[10px] font-bold border-0 mb-2 ${badgeColor}`}>
-                          {exam.score >= 8 ? "Giỏi" : exam.score >= 6.5 ? "Khá" : "Cần cố gắng"}
+                          {exam.norm >= 8 ? "Giỏi" : exam.norm >= 6.5 ? "Khá" : "Cần cố gắng"}
                         </Badge>
                         <h4 className="font-bold text-foreground leading-tight line-clamp-1 group-hover:text-primary transition-colors">{exam.exam_name}</h4>
                       </div>
@@ -284,14 +286,14 @@ export default function ParentProgressPage() {
                         <span className="text-xs text-muted-foreground font-medium">/{exam.max_score}</span>
                       </div>
                     </div>
-                    
+
                     <div className="w-full bg-muted rounded-full h-1.5 mb-3 overflow-hidden">
-                      <div 
-                        className={`h-full rounded-full ${scorePercent >= 80 ? 'bg-emerald-500' : scorePercent >= 50 ? 'bg-amber-500' : 'bg-red-500'}`} 
-                        style={{ width: `${scorePercent}%` }} 
+                      <div
+                        className={`h-full rounded-full ${scorePercent >= 80 ? 'bg-emerald-500' : scorePercent >= 50 ? 'bg-amber-500' : 'bg-red-500'}`}
+                        style={{ width: `${scorePercent}%` }}
                       />
                     </div>
-                    
+
                     <div className="flex items-center justify-between text-[11px] text-muted-foreground font-medium">
                       <span className="flex items-center gap-1"><Calendar className="h-3 w-3" /> {new Date(exam.exam_date).toLocaleDateString('vi-VN')}</span>
                     </div>
