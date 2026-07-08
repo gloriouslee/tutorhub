@@ -13,6 +13,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recha
 import { useParentContext } from "@/hooks/useParentContext";
 import {
   loadChildrenAttendance, attendanceRate, loadChildScores, averageScore,
+  loadParentEventNotifications,
   type ChildAttendanceRecord,
 } from "@/lib/parent-data";
 import { getInvoices, getNotifications, type TuitionInvoice, type StoredExamScore } from "@/lib/storage";
@@ -62,17 +63,26 @@ export default function ParentDashboard() {
     // Hóa đơn học phí thật (kho chung tutorhub_invoices)
     getInvoices().then(all => setInvoices(all.filter(inv => ids.includes(inv.child_id))));
 
-    // Thông báo gửi tới phụ huynh — trừ đã đọc/đã xóa (giống trang thông báo)
-    getNotifications().then(all => {
+    // Thông báo gửi tới phụ huynh: broadcast + sự kiện sinh từ dữ liệu thật
+    // của các con — trừ đã đọc/đã xóa (đồng bộ với trang thông báo)
+    (async () => {
+      const [broadcasts, events] = await Promise.all([
+        getNotifications(),
+        loadParentEventNotifications(children),
+      ]);
       const readIds    = parseIdSet("tutorhub_parent_notif_read");
       const deletedIds = parseIdSet("tutorhub_parent_notif_deleted");
+      const merged: Notification[] = [
+        ...broadcasts.filter(n => n.target_role === "parent" || n.target_role === "all"),
+        ...(events as unknown as Notification[]),
+      ];
       setNotifications(
-        all
-          .filter(n => (n.target_role === "parent" || n.target_role === "all") && !deletedIds.has(n.id))
+        merged
+          .filter(n => !deletedIds.has(n.id))
           .map(n => (readIds.has(n.id) ? { ...n, is_read: true } : n))
           .sort((a, b) => b.created_at.localeCompare(a.created_at))
       );
-    });
+    })();
   }, [ready, children]);
 
   // Computed stats — dữ liệu thật, "—" khi chưa có bản ghi

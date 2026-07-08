@@ -151,3 +151,133 @@ export function classNameOf(classId: string, realClasses?: { id: string; class_n
     ?? MOCK_CLASSES.find(c => c.id === classId)?.class_name
     ?? classId;
 }
+
+// ── Thông báo sự kiện cho phụ huynh ──────────────────────────────────────────
+// Sinh từ dữ liệu THẬT của các con (điểm danh, bài tập, học phí, điểm thi) —
+// bổ sung cho thông báo broadcast (getNotifications). Id ổn định theo bản ghi
+// gốc để đánh dấu đã đọc/xóa (localStorage) vẫn hoạt động qua các lần tải.
+
+export interface ParentEventNotification {
+  id:          string;
+  title:       string;
+  content:     string;
+  target_role: "parent";
+  is_read:     boolean;
+  created_at:  string;
+  category:    "assignment" | "graded" | "system" | "payment" | "info";
+  sent_by?:    string;
+}
+
+const DAY_MS = 86400000;
+
+interface EventChild {
+  id:   string;
+  name: string;
+  classes: { id: string; class_name: string }[];
+}
+
+export async function loadParentEventNotifications(children: EventChild[]): Promise<ParentEventNotification[]> {
+  if (children.length === 0) return [];
+  const now = Date.now();
+  const events: ParentEventNotification[] = [];
+  const allClasses = children.flatMap(c => c.classes);
+  const childName = (id: string) => children.find(c => c.id === id)?.name ?? "Học viên";
+
+  // 1. Điểm danh: vắng/muộn trong 14 ngày gần nhất
+  try {
+    const attendance = await loadChildrenAttendance(children.map(c => c.id));
+    for (const r of attendance) {
+      if (r.status !== "absent" && r.status !== "late") continue;
+      const ts = new Date(`${r.date}T12:00:00`).getTime();
+      if (now - ts > 14 * DAY_MS) continue;
+      events.push({
+        id:          `evt_att_${r.class_id}_${r.student_id}_${r.date}`,
+        title:       r.status === "absent" ? "Vắng mặt buổi học" : "Đi học muộn",
+        content:     `Em ${childName(r.student_id)} ${r.status === "absent" ? "vắng mặt" : "đi muộn"} buổi học ${classNameOf(r.class_id, allClasses)} ngày ${new Date(`${r.date}T12:00:00`).toLocaleDateString("vi-VN")}.`,
+        target_role: "parent",
+        is_read:     false,
+        created_at:  `${r.date}T12:00:00`,
+        category:    "system",
+      });
+    }
+  } catch { /* offline */ }
+
+  // 2. Bài tập: đến hạn trong 3 ngày tới
+  try {
+    const classIds = [...new Set(allClasses.map(c => c.id))];
+    const homework = await loadClassHomework(classIds);
+    for (const hw of homework) {
+      const due = new Date(`${hw.due_date}T23:59:59`).getTime();
+      if (due < now || due - now > 3 * DAY_MS) continue;
+      const owners = children.filter(c => c.classes.some(cl => cl.id === hw.class_id));
+      if (owners.length === 0) continue;
+      events.push({
+        id:          `evt_hw_${hw.id}`,
+        title:       "Bài tập sắp đến hạn",
+        content:     `"${hw.title}" (${classNameOf(hw.class_id, allClasses)}) hạn nộp ${new Date(hw.due_date).toLocaleDateString("vi-VN")} — của em ${owners.map(o => o.name).join(", ")}.`,
+        target_role: "parent",
+        is_read:     false,
+        created_at:  hw.created_at ?? hw.due_date,
+        category:    "assignment",
+      });
+    }
+  } catch { /* offline */ }
+
+  // 3. Học phí: hóa đơn chưa thanh toán quá hạn / sắp đến hạn (7 ngày),
+  //    và xác nhận đã thu trong 14 ngày gần nhất
+  try {
+    const { getInvoices } = await import("@/lib/storage");
+    const childIds = new Set(children.map(c => c.id));
+    const invoices = (await getInvoices()).filter(inv => childIds.has(inv.child_id));
+    for (const inv of invoices) {
+      if (inv.status === "pending") {
+        const due = new Date(`${inv.due_date}T23:59:59`).getTime();
+        if (due - now > 7 * DAY_MS) continue;
+        const overdue = due < now;
+        events.push({
+          id:          `evt_inv_due_${inv.id}`,
+          title:       overdue ? "Học phí quá hạn" : "Học phí sắp đến hạn",
+          content:     `${inv.title} của em ${childName(inv.child_id)} ${overdue ? "đã quá hạn" : "đến hạn"} ${new Date(inv.due_date).toLocaleDateString("vi-VN")}.`,
+          target_role: "parent",
+          is_read:     false,
+          created_at:  inv.due_date,
+          category:    "payment",
+        });
+      } else if (inv.status === "paid" && inv.paid_at) {
+        const paidTs = new Date(inv.paid_at).getTime();
+        if (now - paidTs > 14 * DAY_MS) continue;
+        events.push({
+          id:          `evt_inv_paid_${inv.id}`,
+          title:       "Đã xác nhận thanh toán",
+          content:     `${inv.title} của em ${childName(inv.child_id)} đã được trung tâm xác nhận thu.`,
+          target_role: "parent",
+          is_read:     false,
+          created_at:  inv.paid_at,
+          category:    "payment",
+        });
+      }
+    }
+  } catch { /* offline */ }
+
+  // 4. Điểm thi: bài thi có kết quả trong 14 ngày gần nhất
+  try {
+    for (const child of children) {
+      const scores = await loadChildScores(child.id, child.classes.map(c => c.id));
+      for (const s of scores) {
+        const ts = new Date(s.exam_date).getTime();
+        if (isNaN(ts) || now - ts > 14 * DAY_MS) continue;
+        events.push({
+          id:          `evt_score_${s.id}`,
+          title:       "Có kết quả bài kiểm tra",
+          content:     `Em ${child.name} đạt ${s.score}/${s.max_score} điểm bài "${s.exam_name}" (${classNameOf(s.class_id, allClasses)}).`,
+          target_role: "parent",
+          is_read:     false,
+          created_at:  s.exam_date,
+          category:    "graded",
+        });
+      }
+    }
+  } catch { /* offline */ }
+
+  return events.sort((a, b) => b.created_at.localeCompare(a.created_at));
+}

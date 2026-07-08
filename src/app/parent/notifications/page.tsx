@@ -8,6 +8,8 @@ import { SectionHeader } from "@/components/shared";
 import { Bell, Check, Trash2, BookOpen, CheckCircle2, AlertTriangle, Info, CreditCard } from "lucide-react";
 import { getNotifications } from "@/lib/storage";
 import { Notification } from "@/types";
+import { useParentContext } from "@/hooks/useParentContext";
+import { loadParentEventNotifications } from "@/lib/parent-data";
 
 // ── localStorage helpers ──────────────────────────────────────────────────────
 const READ_KEY    = "tutorhub_parent_notif_read";
@@ -72,19 +74,29 @@ function categorize(n: Notification): NotifCategory {
 }
 
 export default function ParentNotificationsPage() {
+  const { parentName, children, ready } = useParentContext();
   const [notifs, setNotifs] = useState<Notification[]>([]);
   const [readIds,    setReadIds]    = useState<Set<string>>(new Set());
   const [deletedIds, setDeletedIds] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState<"all" | "unread" | "read">("all");
 
   useEffect(() => {
+    if (!ready) return;
     setReadIds(getReadIds());
     setDeletedIds(getDeletedIds());
-    getNotifications().then(all =>
-      setNotifs(all.filter(n => n.target_role === "parent" || n.target_role === "all")
-                   .sort((a, b) => b.created_at.localeCompare(a.created_at)))
-    );
-  }, []);
+    (async () => {
+      // Broadcast (trung tâm gửi) + sự kiện sinh từ dữ liệu thật của các con
+      const [broadcasts, events] = await Promise.all([
+        getNotifications(),
+        loadParentEventNotifications(children),
+      ]);
+      const merged: Notification[] = [
+        ...broadcasts.filter(n => n.target_role === "parent" || n.target_role === "all"),
+        ...(events as unknown as Notification[]),
+      ];
+      setNotifs(merged.sort((a, b) => b.created_at.localeCompare(a.created_at)));
+    })();
+  }, [ready, children]);
 
   const visible = notifs.filter(n => !deletedIds.has(n.id));
   const isRead = (n: Notification) => n.is_read || readIds.has(n.id);
@@ -112,7 +124,7 @@ export default function ParentNotificationsPage() {
   };
 
   return (
-    <PortalLayout role="parent" userName="Trần Văn Minh" pageTitle="Thông báo">
+    <PortalLayout role="parent" userName={parentName} pageTitle="Thông báo">
       <div className="space-y-6 max-w-3xl mx-auto">
         <SectionHeader
           title="Thông báo"
