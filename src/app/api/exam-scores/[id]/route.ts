@@ -1,5 +1,6 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { isAdminRequest } from "@/lib/api-auth";
 
 function supabase() {
   return createClient(
@@ -9,9 +10,12 @@ function supabase() {
 }
 
 export async function DELETE(
-  _req: Request,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  if (!(await isAdminRequest(req))) {
+    return NextResponse.json({ error: "Admin authorization required" }, { status: 403 });
+  }
   const { id } = await params;
   const { error } = await supabase().from("app_exam_scores").delete().eq("id", id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

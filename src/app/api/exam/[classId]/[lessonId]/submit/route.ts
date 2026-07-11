@@ -5,6 +5,7 @@ import {
   examResultId, examSubmissionsId,
   type StoredExamResult, type StudentAnswer,
 } from "@/lib/exam-server";
+import { getRequestIdentity } from "@/lib/api-auth";
 
 // POST /api/exam/[classId]/[lessonId]/submit
 // Body: { studentId, studentName, answers }
@@ -25,12 +26,16 @@ export async function POST(
   } catch {
     return NextResponse.json({ error: "invalid_json" }, { status: 400 });
   }
-  const studentId = body.studentId ?? "";
+  const identity = await getRequestIdentity(req);
+  if (identity?.role !== "student" || !identity.studentId) {
+    return NextResponse.json({ error: "authentication_required" }, { status: 403 });
+  }
+  if (body.studentId && body.studentId !== identity.studentId) {
+    return NextResponse.json({ error: "student_mismatch" }, { status: 403 });
+  }
+  const studentId = identity.studentId;
   const studentName = body.studentName ?? "";
   const answers = body.answers ?? {};
-  if (!studentId) {
-    return NextResponse.json({ error: "studentId required" }, { status: 400 });
-  }
 
   const admin = serviceClient(serviceKey);
   let lesson;

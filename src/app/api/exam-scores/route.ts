@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { getRequestIdentity, isAdminRequest } from "@/lib/api-auth";
 
 function supabase() {
   return createClient(
@@ -13,6 +14,10 @@ export async function GET(req: NextRequest) {
   if (!studentRef) {
     return NextResponse.json({ error: "student_ref required" }, { status: 400 });
   }
+  const identity = await getRequestIdentity(req);
+  if (!identity || (identity.role !== "admin" && identity.studentId !== studentRef)) {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  }
   const { data, error } = await supabase()
     .from("app_exam_scores")
     .select("*")
@@ -23,6 +28,9 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  if (!(await isAdminRequest(req))) {
+    return NextResponse.json({ error: "Admin authorization required" }, { status: 403 });
+  }
   const body = await req.json();
   const { data, error } = await supabase()
     .from("app_exam_scores")

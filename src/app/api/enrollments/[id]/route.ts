@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { isAdminRequest } from "@/lib/api-auth";
 
 function anonClient() {
   return createClient(
@@ -20,6 +21,9 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  if (!(await isAdminRequest(req))) {
+    return NextResponse.json({ error: "Admin authorization required" }, { status: 403 });
+  }
   const { id } = await params;
   const body = await req.json();
   const { action, assigned_class_id, account_username, account_password, reject_reason } = body;

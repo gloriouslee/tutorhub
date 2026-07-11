@@ -4,6 +4,7 @@ import {
   sanitizeQuestions, kvGetServer, examResultId,
   type StoredExamResult,
 } from "@/lib/exam-server";
+import { getRequestIdentity } from "@/lib/api-auth";
 
 // GET /api/exam/[classId]/[lessonId]?studentId=...
 // Trả đề thi ĐÃ LỌC ĐÁP ÁN cho học sinh. Nếu đã nộp → kèm kết quả,
@@ -17,10 +18,15 @@ export async function GET(
     return NextResponse.json({ error: "not_configured" }, { status: 501 });
   }
   const { classId, lessonId } = await params;
-  const studentId = req.nextUrl.searchParams.get("studentId") ?? "";
-  if (!studentId) {
-    return NextResponse.json({ error: "studentId required" }, { status: 400 });
+  const requestedStudentId = req.nextUrl.searchParams.get("studentId") ?? "";
+  const identity = await getRequestIdentity(req);
+  if (identity?.role !== "student" || !identity.studentId) {
+    return NextResponse.json({ error: "authentication_required" }, { status: 403 });
   }
+  if (requestedStudentId && requestedStudentId !== identity.studentId) {
+    return NextResponse.json({ error: "student_mismatch" }, { status: 403 });
+  }
+  const studentId = identity.studentId;
 
   const admin = serviceClient(serviceKey);
   let lesson;

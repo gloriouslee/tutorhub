@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { getRequestIdentity } from "@/lib/api-auth";
 
 // Đổi mật khẩu học viên (tài khoản từ đơn đăng ký): xác thực mật khẩu hiện tại
 // server-side, cập nhật đồng bộ CẢ enrollment_requests LẪN Supabase Auth —
@@ -10,9 +11,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "not_configured" }, { status: 501 });
   }
 
+  const identity = await getRequestIdentity(req);
+  if (identity?.role !== "student" || !identity.studentId?.startsWith("enr_")) {
+    return NextResponse.json({ error: "authentication_required" }, { status: 403 });
+  }
+
   const { enrollment_id, current_password, new_password } = await req.json();
   if (!enrollment_id || !current_password || !new_password) {
     return NextResponse.json({ error: "missing_fields" }, { status: 400 });
+  }
+  if (identity.studentId !== `enr_${enrollment_id}`) {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
   if (new_password.length < 6) {
     return NextResponse.json({ error: "password_too_short" }, { status: 400 });
