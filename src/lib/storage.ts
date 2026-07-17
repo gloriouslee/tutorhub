@@ -556,12 +556,18 @@ export interface CurriculumChapter {
   sessions: CurriculumSession[];
 }
 
+/** Một mục được giao (assigned_to) có áp dụng cho học viên `studentId` không?
+ *  null/undefined/mảng rỗng = giao cả lớp; ngược lại chỉ các id trong danh sách. */
+export function isAssignedToStudent(assignedTo: string[] | null | undefined, studentId: string): boolean {
+  if (!assignedTo || assignedTo.length === 0) return true;
+  return assignedTo.includes(studentId);
+}
+
 /** Nội dung lộ trình có hiển thị cho học viên `studentId` không?
  *  Điều kiện: đã publish VÀ (giao cả lớp HOẶC nằm trong danh sách được chọn). */
 export function isLessonVisibleToStudent(lesson: CurriculumLesson, studentId: string): boolean {
   if (!lesson.is_published) return false;
-  if (!lesson.assigned_to || lesson.assigned_to.length === 0) return true;
-  return lesson.assigned_to.includes(studentId);
+  return isAssignedToStudent(lesson.assigned_to, studentId);
 }
 
 export async function getCurriculum(classId: string): Promise<CurriculumChapter[]> {

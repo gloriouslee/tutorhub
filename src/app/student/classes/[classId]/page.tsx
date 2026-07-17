@@ -13,7 +13,7 @@ import {
   MOCK_LECTURES, MOCK_CLASS_NOTES, MOCK_EXAM_SCORES, MOCK_HOMEWORK, MOCK_ATTENDANCE,
 } from "@/lib/mock-data";
 import { getSubmissionsByStudent, type SubmissionRecord } from "@/lib/supabase/submissions";
-import { kvGet, getClasses, getClassScheduleOverride, getOnlineLink, getStudentPackages, getCurriculum, getClassMaterials, incrementMaterialDownload, isLessonVisibleToStudent, type StudentPackage, type CurriculumSession, type StoredClassMaterial } from "@/lib/storage";
+import { kvGet, getClasses, getClassScheduleOverride, getOnlineLink, getStudentPackages, getCurriculum, getClassMaterials, incrementMaterialDownload, isLessonVisibleToStudent, isAssignedToStudent, type StudentPackage, type CurriculumSession, type StoredClassMaterial } from "@/lib/storage";
 import CurriculumView from "@/components/student/CurriculumView";
 import {
   BookOpen, Clock, Video, MapPin, Users, ArrowLeft, FileText, Download,
@@ -170,6 +170,7 @@ interface HomeworkItem {
   description?: string;
   due_date: string;
   created_at?: string;
+  assigned_to?: string[] | null;
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
@@ -227,7 +228,7 @@ export default function StudentClassDetailPage() {
     })();
     getClassScheduleOverride(classId).then(ov => setScheduleOverride(ov as ClassInfo["schedule"] | null));
     kvGet<HomeworkItem[]>("tutorhub_teacher_homework", [])
-      .then(all => setTeacherHomework(all.filter(h => h.class_id === classId)));
+      .then(all => setTeacherHomework(all.filter(h => h.class_id === classId && isAssignedToStudent(h.assigned_to, studentId))));
   }, [classId]);
 
   useEffect(() => {

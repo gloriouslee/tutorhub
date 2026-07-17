@@ -18,7 +18,7 @@ import {
   getSubmissionsByStudent,
   type SubmissionRecord,
 } from "@/lib/supabase/submissions";
-import { kvGet, kvSet, getCurriculum, isLessonVisibleToStudent } from "@/lib/storage";
+import { kvGet, kvSet, getCurriculum, isLessonVisibleToStudent, isAssignedToStudent } from "@/lib/storage";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const ACCEPTED = ".pdf,.doc,.docx,.jpg,.jpeg,.png";
@@ -48,6 +48,7 @@ interface HomeworkItem {
   description?: string;
   due_date: string;
   created_at?: string;
+  assigned_to?: string[] | null;
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
@@ -77,7 +78,7 @@ export default function StudentHomeworkPage() {
     // Load manually-created homework
     kvGet<HomeworkItem[]>("tutorhub_teacher_homework", [])
       .then(all => setTeacherHw(prev => {
-        const manual = all.filter(h => myClassIds.includes(h.class_id));
+        const manual = all.filter(h => myClassIds.includes(h.class_id) && isAssignedToStudent(h.assigned_to, STUDENT_ID));
         const existingIds = new Set(prev.map(h => h.id));
         const fresh = manual.filter(h => !existingIds.has(h.id));
         return fresh.length > 0 ? [...prev, ...fresh] : prev.length === 0 ? manual : prev;

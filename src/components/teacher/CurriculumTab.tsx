@@ -82,7 +82,7 @@ function LessonModal({
   students?: StudentLite[];
   onSave: (lesson: CurriculumLesson) => void;
   onClose: () => void;
-  onOpenExam?: (title: string) => void;
+  onOpenExam?: (title: string, assignedTo: string[] | null) => void;
 }) {
   const [type,       setType]       = useState<LessonType>(initial?.type ?? "lecture");
   const [title,      setTitle]      = useState(initial?.title ?? "");
@@ -354,7 +354,7 @@ function LessonModal({
         <div className="flex justify-end gap-2 px-5 py-4 border-t border-border">
           <Button variant="outline" size="sm" onClick={onClose} disabled={uploading}>Huỷ</Button>
           {type === "exam" && !isEdit ? (
-            <Button variant="gradient" size="sm" onClick={() => { onOpenExam?.(title.trim()); onClose(); }} disabled={!title.trim()}>
+            <Button variant="gradient" size="sm" onClick={() => { onOpenExam?.(title.trim(), scope === "select" ? Array.from(selectedIds) : null); onClose(); }} disabled={!title.trim()}>
               <PenSquare className="h-3.5 w-3.5 mr-1.5" />Soạn bài thi
             </Button>
           ) : (
@@ -841,10 +841,10 @@ export default function CurriculumTab({ classId, schedule, students = [] }: { cl
           students={students}
           onSave={lesson => saveLesson(lessonModal.chapterId, lessonModal.sessionId, lesson)}
           onClose={() => setLessonModal(null)}
-          onOpenExam={title => setExamModal({
+          onOpenExam={(title, assignedTo) => setExamModal({
             chapterId: lessonModal.chapterId,
             sessionId: lessonModal.sessionId,
-            lesson: { id: undefined as any, type: "exam", title, is_published: true },
+            lesson: { id: undefined as any, type: "exam", title, is_published: true, assigned_to: assignedTo },
           })}
         />
       )}

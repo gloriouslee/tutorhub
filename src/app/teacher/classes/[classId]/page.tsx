@@ -235,6 +235,7 @@ export default function TeacherClassDetailPage() {
                 description: (lesson as any).description,
                 due_date: (lesson as any).due_date ?? s.date ?? new Date().toISOString().slice(0, 10),
                 created_at: s.date ?? new Date().toISOString().slice(0, 10),
+                assigned_to: lesson.assigned_to ?? null,
                 source: "curriculum",
               });
             }
@@ -258,23 +259,26 @@ export default function TeacherClassDetailPage() {
     (async () => {
       try {
         const all = await kvGet<Homework[]>("tutorhub_teacher_homework", []);
-        const forClass = all.filter(h => h.class_id === classId);
-        if (forClass.length === 0) {
-          // Seed from mock
-          const mock = (MOCK_HOMEWORK as any[])
-            .filter((h: any) => h.class_id === classId)
-            .map((h: any): Homework => ({
-              id: h.id,
-              class_id: h.class_id,
-              title: h.title,
-              description: h.description,
-              due_date: h.due_date,
-              created_at: h.created_at,
-            }));
-          setHomeworks(mock);
-        } else {
-          setHomeworks(forClass);
-        }
+        const forClass = all.filter(h => h.class_id === classId && h.source !== "curriculum");
+        const base: Homework[] = forClass.length === 0
+          ? (MOCK_HOMEWORK as any[])
+              .filter((h: any) => h.class_id === classId)
+              .map((h: any): Homework => ({
+                id: h.id,
+                class_id: h.class_id,
+                title: h.title,
+                description: h.description,
+                due_date: h.due_date,
+                created_at: h.created_at,
+              }))
+          : forClass;
+        // Giữ lại các bài tập từ lộ trình mà effect curriculum đã nạp vào state,
+        // tránh race giữa hai effect ghi đè lẫn nhau (mất bài tập lộ trình khi mới load).
+        setHomeworks(prev => {
+          const curr = prev.filter(h => h.source === "curriculum");
+          const currIds = new Set(curr.map(h => h.id));
+          return [...base.filter(h => !currIds.has(h.id)), ...curr];
+        });
       } catch {
         setHomeworks([]);
       }
@@ -336,7 +340,10 @@ export default function TeacherClassDetailPage() {
     try {
       const all = await kvGet<Homework[]>("tutorhub_teacher_homework", []);
       const others = all.filter(h => h.class_id !== classId);
-      await kvSet("tutorhub_teacher_homework", [...others, ...updated]);
+      // Không ghi lại các bài tập nguồn từ lộ trình (source:"curriculum") — chúng
+      // sống trong tutorhub_curriculum_*, ghi vào đây sẽ tạo bản sao "đông cứng".
+      const manualOnly = updated.filter(h => h.source !== "curriculum");
+      await kvSet("tutorhub_teacher_homework", [...others, ...manualOnly]);
     } catch {}
     setHomeworks(updated);
   }
