@@ -1219,11 +1219,19 @@ export interface TuitionPaymentRecord {
   note?: string;
 }
 
+export interface TuitionDiscount {
+  type: "amount" | "percent";  // giảm theo số tiền hoặc theo %
+  value: number;               // VND (amount) hoặc 0..100 (percent)
+}
+
 export interface StudentTuitionData {
   custom_fee?: number;       // Monthly fee override; uses class default if absent
   payments: TuitionPaymentRecord[];
   notes?: string;
   next_due_date?: string;    // YYYY-MM-DD
+  // Học phí theo buổi: ghi đè số buổi tính phí + giảm giá, theo từng kỳ "YYYY-MM"
+  session_overrides?: Record<string, number>;
+  discounts?: Record<string, TuitionDiscount>;
 }
 
 export interface ClassTuitionConfig {
@@ -1232,6 +1240,7 @@ export interface ClassTuitionConfig {
     advanced: number;
     offline: number;
   };
+  unit_price?: number;       // Đơn giá / buổi (mô hình tính theo buổi thực tế)
   students: Record<string, StudentTuitionData>;
 }
 
@@ -1249,8 +1258,10 @@ export async function getClassTuition(classId: string): Promise<ClassTuitionConf
     return { package_fees: { online: parsed.default_fee, advanced: parsed.default_fee, offline: parsed.default_fee }, students: parsed.students ?? {} };
   }
   // Chuẩn hóa: dữ liệu cũ/hỏng có thể thiếu package_fees hoặc students →
-  // caller đọc config.package_fees.online sẽ crash. Luôn đảm bảo đủ field.
+  // caller đọc config.package_fees.online sẽ crash. Giữ nguyên các field khác
+  // (unit_price...) và chỉ đảm bảo package_fees + students luôn tồn tại.
   return {
+    ...parsed,
     package_fees: parsed.package_fees ?? { ...DEFAULT_TUITION.package_fees },
     students: parsed.students ?? {},
   };
