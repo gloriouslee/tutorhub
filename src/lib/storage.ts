@@ -1100,6 +1100,11 @@ async function getStoredExamScores(): Promise<StoredExamScore[]> {
   return kvGet<StoredExamScore[]>(SCORES_KEY, []);
 }
 
+/** Tất cả điểm thi đã lưu (nhập tay) — dùng cho báo cáo/thống kê. */
+export async function getAllExamScores(): Promise<StoredExamScore[]> {
+  return getStoredExamScores();
+}
+
 export async function saveExamScore(score: Omit<StoredExamScore, "id">): Promise<StoredExamScore> {
   const record: StoredExamScore = { ...score, id: crypto.randomUUID() };
   await kvSet(SCORES_KEY, [...(await getStoredExamScores()), record]);
