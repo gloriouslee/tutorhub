@@ -18,7 +18,7 @@ import {
   getSubmissionsByStudent,
   type SubmissionRecord,
 } from "@/lib/supabase/submissions";
-import { kvGet, kvSet } from "@/lib/storage";
+import { kvGet, kvSet, getCurriculum } from "@/lib/storage";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const ACCEPTED = ".pdf,.doc,.docx,.jpg,.jpeg,.png";
@@ -71,8 +71,48 @@ export default function StudentHomeworkPage() {
   const [errorMsg,     setErrorMsg]     = useState("");
 
   useEffect(() => {
+    const classKey = myClassIds.join(",");
+    if (!classKey) return;
+
+    // Load manually-created homework
     kvGet<HomeworkItem[]>("tutorhub_teacher_homework", [])
-      .then(all => setTeacherHw(all.filter(h => myClassIds.includes(h.class_id))));
+      .then(all => setTeacherHw(prev => {
+        const manual = all.filter(h => myClassIds.includes(h.class_id));
+        const existingIds = new Set(prev.map(h => h.id));
+        const fresh = manual.filter(h => !existingIds.has(h.id));
+        return fresh.length > 0 ? [...prev, ...fresh] : prev.length === 0 ? manual : prev;
+      }));
+
+    // Load curriculum homework (is_published lessons of type "homework")
+    Promise.all(myClassIds.map(cid =>
+      getCurriculum(cid).then(chapters => {
+        const items: HomeworkItem[] = [];
+        chapters.forEach(ch => ch.sessions.forEach(s => {
+          s.lessons.forEach(lesson => {
+            if (lesson.type === "homework" && lesson.is_published) {
+              items.push({
+                id: lesson.id,
+                class_id: cid,
+                title: lesson.title,
+                description: (lesson as any).description,
+                due_date: (lesson as any).due_date ?? s.date ?? new Date().toISOString().slice(0, 10),
+                created_at: s.date,
+              });
+            }
+          });
+        }));
+        return items;
+      })
+    )).then(results => {
+      const currHws = results.flat();
+      if (currHws.length > 0) {
+        setTeacherHw(prev => {
+          const existingIds = new Set(prev.map(h => h.id));
+          const fresh = currHws.filter(h => !existingIds.has(h.id));
+          return fresh.length > 0 ? [...prev, ...fresh] : prev;
+        });
+      }
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [myClassIds.join(",")]);
 
