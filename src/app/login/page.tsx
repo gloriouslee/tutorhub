@@ -3,11 +3,11 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { GraduationCap, Mail, Lock, Eye, EyeOff, ArrowRight, User, Users, Phone, BookOpen, Target, CheckCircle2, Calendar } from "lucide-react";
+import { GraduationCap, Mail, Lock, Eye, EyeOff, ArrowRight, CheckCircle2, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { createClient } from "@/lib/supabase/client";
-import { createEnrollment, getEnrollments } from "@/lib/storage";
+import { getEnrollments } from "@/lib/storage";
 
 const DEMO_USERS = [
   { role: "student", email: "student@tutorhub.com", label: "Học viên", color: "from-indigo-500 to-purple-600", icon: "🎓" },
@@ -16,26 +16,21 @@ const DEMO_USERS = [
   { role: "admin", email: "admin@tutorhub.com", label: "Quản trị viên", color: "from-rose-500 to-pink-600", icon: "⚙️" },
 ];
 
-const SUBJECTS = ["Toán học", "Vật lý", "Hóa học", "Tiếng Anh", "Ngữ Văn"];
+const HIGHLIGHTS = [
+  "Lộ trình học cá nhân hoá theo từng học viên",
+  "Học Online, Offline hoặc Hybrid linh hoạt",
+  "Theo dõi điểm danh, bài tập, điểm thi realtime",
+  "Trung tâm liên hệ xếp lớp trong 1–2 ngày",
+];
 
 export default function LoginPage() {
   const router = useRouter();
-  
-  // Login State
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPass, setShowPass] = useState(false);
   const [loginLoading, setLoginLoading] = useState(false);
   const [loginError, setLoginError] = useState("");
-
-  // Register State
-  const [regData, setRegData] = useState({
-    studentName: "", email: "", dob: "", studentPhone: "", parentName: "", parentPhone: "",
-    grade: "", school: "", subjects: [] as string[], targetScore: "", package: ""
-  });
-  const [regLoading, setRegLoading] = useState(false);
-  const [regSuccess, setRegSuccess] = useState(false);
-  const [regError, setRegError] = useState("");
 
   const handleDemo = (demoEmail: string, role: string) => {
     setEmail(demoEmail);
@@ -68,8 +63,6 @@ export default function LoginPage() {
       const supabase = createClient();
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (!error && data.user) {
-        // Xóa mọi cookie demo còn sót — nếu không, middleware sẽ ưu tiên
-        // demo_role cũ (vd. admin) và cấp sai quyền cho phiên đăng nhập thật
         ["demo_role", "enrolled_student_id", "enrolled_student_name", "enrolled_student_class"]
           .forEach(c => { document.cookie = `${c}=; path=/; max-age=0`; });
         const metaRole = data.user.user_metadata?.role as string | undefined;
@@ -103,209 +96,54 @@ export default function LoginPage() {
     setLoginLoading(false);
   };
 
-  const handleRegisterSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setRegError("");
-    if (!regData.email) { setRegError("Vui lòng nhập email liên hệ."); return; }
-    if (!regData.dob) { setRegError("Vui lòng nhập ngày sinh học viên."); return; }
-    if (!regData.parentPhone) { setRegError("Vui lòng nhập số điện thoại phụ huynh."); return; }
-    setRegLoading(true);
-    const noteLines: string[] = [];
-    if (regData.studentPhone) noteLines.push(`SĐT học viên: ${regData.studentPhone}`);
-    if (regData.subjects.length) noteLines.push(`Môn học: ${regData.subjects.join(", ")}`);
-    if (regData.targetScore) noteLines.push(`Mục tiêu: ${regData.targetScore}`);
-    if (regData.package) noteLines.push(`Gói học: ${regData.package}`);
-    if (regData.parentName) noteLines.push(`Phụ huynh: ${regData.parentName}`);
-    try {
-      await createEnrollment({
-        full_name: regData.studentName,
-        email: regData.email,
-        dob: regData.dob,
-        school: regData.school,
-        grade: regData.grade,
-        requested_class_id: "",
-        parent_phone: regData.parentPhone,
-        note: noteLines.join(" | "),
-      });
-      setRegSuccess(true);
-    } catch {
-      setRegError("Có lỗi khi gửi hồ sơ. Vui lòng thử lại.");
-    } finally {
-      setRegLoading(false);
-    }
-  };
-
-  const toggleSubject = (sub: string) => {
-    setRegData(prev => ({
-      ...prev,
-      subjects: prev.subjects.includes(sub) 
-        ? prev.subjects.filter(s => s !== sub)
-        : [...prev.subjects, sub]
-    }));
-  };
-
   return (
     <div className="min-h-screen flex flex-col lg:flex-row relative overflow-hidden bg-background">
-      
-      {/* LEFT PANEL — Admission Registration Form */}
-      <div className="w-full lg:w-[60%] relative overflow-y-auto bg-gradient-to-br from-indigo-900 via-purple-900 to-slate-900">
+
+      {/* LEFT PANEL — Marketing / CTA đăng ký học */}
+      <div className="w-full lg:w-[55%] relative overflow-hidden bg-gradient-to-br from-indigo-900 via-purple-900 to-slate-900">
         <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-indigo-500/20 rounded-full blur-3xl animate-pulse" />
         <div className="absolute bottom-1/4 right-1/4 w-[500px] h-[500px] bg-purple-500/20 rounded-full blur-3xl animate-pulse delay-300" />
-        
-        <div className="relative z-10 p-8 lg:p-12 min-h-full flex flex-col">
-          <div className="flex items-center gap-3 mb-8">
+
+        <div className="relative z-10 p-8 lg:p-14 min-h-full flex flex-col">
+          <div className="flex items-center gap-3 mb-12">
             <div className="h-10 w-10 rounded-2xl bg-white/10 backdrop-blur-sm border border-white/20 flex items-center justify-center">
               <GraduationCap className="h-5 w-5 text-white" />
             </div>
             <span className="text-white font-bold text-xl">TutorHub</span>
           </div>
 
-          <div className="mb-8">
-            <h1 className="text-3xl lg:text-4xl font-bold text-white mb-3">Đăng ký Nhập học</h1>
-            <p className="text-white/70 text-lg">Điền thông tin chi tiết bên dưới để Trung tâm đánh giá và phân bổ lớp học phù hợp nhất cho học viên.</p>
-          </div>
-
-          {regSuccess ? (
-            <div className="bg-white/10 backdrop-blur-md border border-emerald-500/30 rounded-2xl p-8 text-center animate-fade-in flex-1 flex flex-col justify-center items-center">
-              <div className="h-20 w-20 bg-emerald-500/20 rounded-full flex items-center justify-center mb-6">
-                <CheckCircle2 className="h-10 w-10 text-emerald-400" />
-              </div>
-              <h2 className="text-2xl font-bold text-white mb-2">Đăng ký thành công!</h2>
-              <p className="text-white/80 max-w-md">
-                Thông tin của bạn đã được gửi đến ban giáo vụ TutorHub. Chúng tôi sẽ liên hệ qua số điện thoại phụ huynh trong vòng 24h để làm bài test đầu vào và xếp lớp.
-              </p>
-              <Button 
-                variant="outline" 
-                className="mt-8 bg-white/5 border-white/20 text-white hover:bg-white/10"
-                onClick={() => setRegSuccess(false)}
-              >
-                Gửi thêm đăng ký
-              </Button>
+          <div className="flex-1 flex flex-col justify-center max-w-lg">
+            <div className="inline-flex items-center gap-2 self-start bg-white/10 border border-white/20 rounded-full px-3 py-1 mb-5 text-white/80 text-xs font-medium">
+              <Sparkles className="h-3.5 w-3.5" /> Nền tảng học tập Hybrid
             </div>
-          ) : (
-            <form onSubmit={handleRegisterSubmit} className="space-y-6 bg-white/5 backdrop-blur-sm border border-white/10 rounded-2xl p-6 lg:p-8 animate-fade-in flex-1">
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {/* Học viên */}
-                <div className="space-y-4">
-                  <h3 className="text-white font-semibold flex items-center gap-2 border-b border-white/10 pb-2">
-                    <User className="h-4 w-4 text-indigo-300" /> Thông tin Học viên
-                  </h3>
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-white/70">Họ và tên học viên *</label>
-                    <Input className="bg-white/10 border-white/20 text-white placeholder:text-white/40 h-11" placeholder="Nguyễn Văn A" required value={regData.studentName} onChange={e => setRegData({...regData, studentName: e.target.value})} />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-white/70">Email liên hệ *</label>
-                    <Input type="email" className="bg-white/10 border-white/20 text-white placeholder:text-white/40 h-11" placeholder="email@example.com" required value={regData.email} onChange={e => setRegData({...regData, email: e.target.value})} />
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-white/70">Ngày sinh *</label>
-                      <Input type="date" className="bg-white/10 border-white/20 text-white placeholder:text-white/40 h-11" required value={regData.dob} onChange={e => setRegData({...regData, dob: e.target.value})} />
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-white/70">Lớp *</label>
-                      <select className="flex h-11 w-full items-center justify-between rounded-xl border border-white/20 bg-white/10 px-3 py-2 text-sm text-white outline-none focus:ring-2 focus:ring-indigo-500" required value={regData.grade} onChange={e => setRegData({...regData, grade: e.target.value})}>
-                        <option value="" disabled className="text-gray-900">Chọn lớp</option>
-                        <option value="9" className="text-gray-900">Lớp 9</option>
-                        <option value="10" className="text-gray-900">Lớp 10</option>
-                        <option value="11" className="text-gray-900">Lớp 11</option>
-                        <option value="12" className="text-gray-900">Lớp 12</option>
-                      </select>
-                    </div>
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-white/70">Số điện thoại học viên</label>
-                    <Input type="tel" className="bg-white/10 border-white/20 text-white placeholder:text-white/40 h-11" placeholder="Tuỳ chọn" value={regData.studentPhone} onChange={e => setRegData({...regData, studentPhone: e.target.value})} />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-white/70">Trường học</label>
-                    <Input className="bg-white/10 border-white/20 text-white placeholder:text-white/40 h-11" placeholder="VD: THPT Chu Văn An" value={regData.school} onChange={e => setRegData({...regData, school: e.target.value})} />
-                  </div>
-                </div>
+            <h1 className="text-4xl lg:text-5xl font-bold text-white leading-tight mb-4">
+              Bắt đầu hành trình<br />học tập cùng TutorHub
+            </h1>
+            <p className="text-white/70 text-lg mb-8">
+              Đăng ký nhập học chỉ trong 1 phút. Trung tâm sẽ đánh giá và xếp lớp phù hợp nhất cho học viên.
+            </p>
 
-                {/* Phụ huynh */}
-                <div className="space-y-4">
-                  <h3 className="text-white font-semibold flex items-center gap-2 border-b border-white/10 pb-2">
-                    <Users className="h-4 w-4 text-emerald-300" /> Thông tin Phụ huynh
-                  </h3>
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-white/70">Họ và tên phụ huynh *</label>
-                    <Input className="bg-white/10 border-white/20 text-white placeholder:text-white/40 h-11" placeholder="Người giám hộ" required value={regData.parentName} onChange={e => setRegData({...regData, parentName: e.target.value})} />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-white/70">Số điện thoại phụ huynh *</label>
-                    <Input type="tel" className="bg-white/10 border-white/20 text-white placeholder:text-white/40 h-11" placeholder="Dùng để liên hệ xếp lớp" required value={regData.parentPhone} onChange={e => setRegData({...regData, parentPhone: e.target.value})} />
-                  </div>
-                </div>
-              </div>
+            <ul className="space-y-3 mb-10">
+              {HIGHLIGHTS.map(h => (
+                <li key={h} className="flex items-center gap-3 text-white/80 text-sm">
+                  <CheckCircle2 className="h-5 w-5 text-emerald-400 shrink-0" /> {h}
+                </li>
+              ))}
+            </ul>
 
-              {/* Nhu cầu học tập */}
-              <div className="space-y-4 pt-4">
-                <h3 className="text-white font-semibold flex items-center gap-2 border-b border-white/10 pb-2">
-                  <Target className="h-4 w-4 text-amber-300" /> Đánh giá Nhu cầu
-                </h3>
-                
-                <div className="space-y-2">
-                  <label className="text-xs font-medium text-white/70">Môn học cần bồi dưỡng *</label>
-                  <div className="flex flex-wrap gap-2">
-                    {SUBJECTS.map(sub => (
-                      <button
-                        key={sub}
-                        type="button"
-                        onClick={() => toggleSubject(sub)}
-                        className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors border ${
-                          regData.subjects.includes(sub) 
-                            ? 'bg-indigo-500 text-white border-indigo-400' 
-                            : 'bg-white/5 text-white/60 border-white/10 hover:bg-white/10 hover:text-white'
-                        }`}
-                      >
-                        {sub}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-white/70">Mục tiêu điểm số (VD: 8.5+ Đại học) *</label>
-                    <Input className="bg-white/10 border-white/20 text-white placeholder:text-white/40 h-11" placeholder="Mục tiêu đầu ra" required value={regData.targetScore} onChange={e => setRegData({...regData, targetScore: e.target.value})} />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-white/70">Gói học quan tâm *</label>
-                    <select className="flex h-11 w-full items-center justify-between rounded-xl border border-white/20 bg-white/10 px-3 py-2 text-sm text-white outline-none focus:ring-2 focus:ring-indigo-500" required value={regData.package} onChange={e => setRegData({...regData, package: e.target.value})}>
-                      <option value="" disabled className="text-gray-900">Chọn gói học</option>
-                      <option value="online" className="text-gray-900">Gói Online (Miễn phí)</option>
-                      <option value="advanced" className="text-gray-900">Gói Nâng cao (Online + Tài liệu)</option>
-                      <option value="offline" className="text-gray-900">Gói Offline (Học tại trung tâm)</option>
-                    </select>
-                  </div>
-                </div>
-              </div>
-
-              {regError && (
-                <div className="text-sm text-red-300 bg-red-500/10 border border-red-500/30 px-4 py-3 rounded-xl">
-                  {regError}
-                </div>
-              )}
-              <Button type="submit" size="lg" disabled={regLoading} className="w-full bg-white text-indigo-900 hover:bg-white/90 font-bold mt-4">
-                {regLoading ? "Đang gửi hồ sơ..." : "Gửi Hồ Sơ Nhập Học"}
+            <Link href="/enroll">
+              <Button size="lg" className="bg-white text-indigo-900 hover:bg-white/90 font-bold h-12 px-8">
+                Đăng ký học ngay <ArrowRight className="h-5 w-5 ml-2" />
               </Button>
-            </form>
-          )}
-
-          <div className="mt-8 flex items-center justify-between">
-            <p className="text-white/40 text-xs">© 2025 TutorHub · Nền tảng Hybrid Learning</p>
-            <Link href="/enroll" className="text-xs text-indigo-300 hover:text-white underline underline-offset-2 transition-colors">
-              Đăng ký qua form mới →
             </Link>
           </div>
+
+          <p className="text-white/40 text-xs mt-10">© 2025 TutorHub · Nền tảng Hybrid Learning</p>
         </div>
       </div>
 
       {/* RIGHT PANEL — Login Form */}
-      <div className="w-full lg:w-[40%] flex items-center justify-center p-8 bg-background relative shadow-[-20px_0_40px_rgba(0,0,0,0.1)] z-20">
+      <div className="w-full lg:w-[45%] flex items-center justify-center p-8 bg-background relative shadow-[-20px_0_40px_rgba(0,0,0,0.1)] z-20">
         <div className="w-full max-w-sm">
           <div className="mb-8 text-center lg:text-left">
             <h2 className="text-3xl font-bold text-foreground">Chào mừng trở lại</h2>
@@ -375,6 +213,14 @@ export default function LoginPage() {
               )}
             </Button>
           </form>
+
+          {/* Chưa có tài khoản */}
+          <p className="text-center text-sm text-muted-foreground mt-5">
+            Chưa có tài khoản?{" "}
+            <Link href="/enroll" className="text-primary font-semibold hover:underline">
+              Đăng ký học
+            </Link>
+          </p>
 
           {/* Divider */}
           <div className="flex items-center gap-3 my-8">

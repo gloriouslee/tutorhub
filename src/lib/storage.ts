@@ -811,6 +811,7 @@ export interface EnrollmentRequest {
   requested_class_id: string;
   parent_phone: string;
   student_phone?: string;
+  package?: StudentPackage;   // gói học viên đăng ký: online | advanced | offline
   note?: string;
   status: EnrollmentStatus;
   assigned_class_id?: string;
@@ -877,7 +878,13 @@ export async function createEnrollment(
   };
   try {
     const { error } = await supabase.from("enrollment_requests").insert(request);
-    if (error) console.error("Error creating enrollment:", error);
+    if (error) {
+      // Có thể do cột 'package' chưa tồn tại trong DB — thử lại không kèm package
+      // (bản ghi vẫn được lưu; chạy migration để lưu cả gói học lên DB).
+      const { package: _pkg, ...withoutPkg } = request;
+      const retry = await supabase.from("enrollment_requests").insert(withoutPkg);
+      if (retry.error) console.error("Error creating enrollment:", retry.error);
+    }
   } catch { /* offline */ }
   writeEnrollmentsLocal([request, ...(await readEnrollmentsLocal())]);
   return request;
@@ -986,6 +993,14 @@ export async function approveEnrollment(
     // Lớp không có trong DB (mock-only) → bỏ qua im lặng
   } catch (e) {
     console.error("Không đồng bộ được học viên vào bảng students/classes:", e);
+  }
+
+  // Gán gói học viên đã đăng ký cho lớp được phân (dùng cho học phí theo gói)
+  if (enr.package) {
+    try {
+      const packages = await getStudentPackages(opts.assigned_class_id);
+      await saveStudentPackages(opts.assigned_class_id, { ...packages, [studentId]: enr.package });
+    } catch { /* offline */ }
   }
 }
 

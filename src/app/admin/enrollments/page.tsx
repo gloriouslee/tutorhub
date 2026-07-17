@@ -19,6 +19,8 @@ import {
   AlertCircle, Key, ArrowRight, FileText,
 } from "lucide-react";
 
+const PKG_LABEL: Record<string, string> = { online: "Gói Online", advanced: "Gói Nâng cao", offline: "Gói Offline" };
+
 const STATUS_CONFIG: Record<EnrollmentStatus, { label: string; color: string; icon: React.ElementType }> = {
   pending:  { label: "Chờ duyệt", color: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",   icon: Clock },
   approved: { label: "Đã duyệt",  color: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400", icon: CheckCircle2 },
@@ -111,6 +113,7 @@ function ApproveModal({ enrollment, classes, onClose, onDone }: ApproveModalProp
                 { label: "Ngày sinh", value: fmtDate(enrollment.dob) },
                 { label: "Trường",    value: enrollment.school },
                 { label: "Khối",      value: enrollment.grade },
+                { label: "Gói học",   value: enrollment.package ? PKG_LABEL[enrollment.package] : "—" },
                 { label: "SĐT PH",   value: enrollment.parent_phone },
               ].map(r => (
                 <div key={r.label}>
@@ -443,9 +446,14 @@ export default function AdminEnrollmentsPage() {
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <GraduationCap className="h-4 w-4 text-muted-foreground shrink-0" />
                           <span className="text-sm text-muted-foreground">{enr.grade} · {enr.school}</span>
+                          {enr.package && (
+                            <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400">
+                              {PKG_LABEL[enr.package]}
+                            </span>
+                          )}
                         </div>
 
                         {/* Account info if approved */}

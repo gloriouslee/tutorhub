@@ -1,18 +1,30 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { MOCK_CLASSES } from "@/lib/mock-data";
-import { createEnrollment } from "@/lib/storage";
+import { getClasses, createEnrollment, type StudentPackage } from "@/lib/storage";
+import type { Class } from "@/types";
 import {
-  GraduationCap, User, Mail, Phone, BookOpen,
+  GraduationCap, User, Mail, Phone, BookOpen, Package,
   Calendar, FileText, CheckCircle2, ArrowLeft, ChevronRight,
 } from "lucide-react";
 
 const GRADES = ["Lớp 6", "Lớp 7", "Lớp 8", "Lớp 9", "Lớp 10", "Lớp 11", "Lớp 12"];
+
+const PACKAGES: { value: StudentPackage; label: string; desc: string }[] = [
+  { value: "online",   label: "Gói Online",   desc: "Học trực tuyến" },
+  { value: "advanced", label: "Gói Nâng cao", desc: "Online + tài liệu nâng cao" },
+  { value: "offline",  label: "Gói Offline",  desc: "Học tại trung tâm" },
+];
+
+// "Lớp 12" → 12 để so khớp với Class.grade (number)
+function gradeNum(g: string): number | null {
+  const m = g.match(/\d+/);
+  return m ? parseInt(m[0], 10) : null;
+}
 
 interface FormData {
   full_name: string;
@@ -21,13 +33,14 @@ interface FormData {
   school: string;
   grade: string;
   requested_class_id: string;
+  package: StudentPackage | "";
   parent_phone: string;
   note: string;
 }
 
 const EMPTY: FormData = {
   full_name: "", email: "", dob: "", school: "",
-  grade: "", requested_class_id: "", parent_phone: "", note: "",
+  grade: "", requested_class_id: "", package: "", parent_phone: "", note: "",
 };
 
 type FieldError = Partial<Record<keyof FormData, string>>;
@@ -41,6 +54,7 @@ function validate(f: FormData): FieldError {
   if (!f.school.trim())            errs.school            = "Vui lòng nhập tên trường";
   if (!f.grade)                    errs.grade             = "Vui lòng chọn khối lớp";
   if (!f.requested_class_id)       errs.requested_class_id = "Vui lòng chọn lớp";
+  if (!f.package)                  errs.package           = "Vui lòng chọn gói học";
   if (!f.parent_phone.trim())      errs.parent_phone      = "Vui lòng nhập SĐT phụ huynh";
   return errs;
 }
@@ -51,6 +65,12 @@ export default function EnrollPage() {
   const [submitted, setSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
+  const [classes, setClasses] = useState<Class[]>([]);
+
+  useEffect(() => { getClasses().then(setClasses); }, []);
+
+  const gnum = gradeNum(form.grade);
+  const filteredClasses = gnum != null ? classes.filter(c => c.grade === gnum) : [];
 
   const set = (key: keyof FormData) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     setForm(prev => ({ ...prev, [key]: e.target.value }));
@@ -71,6 +91,7 @@ export default function EnrollPage() {
         school:             form.school.trim(),
         grade:              form.grade,
         requested_class_id: form.requested_class_id,
+        package:            (form.package || undefined) as StudentPackage | undefined,
         parent_phone:       form.parent_phone.trim(),
         note:               form.note.trim() || undefined,
       });
@@ -99,7 +120,9 @@ export default function EnrollPage() {
             </div>
             <div className="bg-muted/50 rounded-xl p-4 text-left space-y-1.5 text-sm">
               <p className="text-muted-foreground">Lớp đăng ký:</p>
-              <p className="font-semibold">{MOCK_CLASSES.find(c => c.id === form.requested_class_id)?.class_name}</p>
+              <p className="font-semibold">{classes.find(c => c.id === form.requested_class_id)?.class_name}</p>
+              <p className="text-muted-foreground pt-1">Gói học:</p>
+              <p className="font-semibold">{PACKAGES.find(p => p.value === form.package)?.label ?? "—"}</p>
             </div>
             <Link href="/login">
               <Button className="w-full mt-2">
@@ -184,7 +207,11 @@ export default function EnrollPage() {
                     </label>
                     <select
                       value={form.grade}
-                      onChange={set("grade")}
+                      onChange={e => {
+                        const grade = e.target.value;
+                        setForm(prev => ({ ...prev, grade, requested_class_id: "" }));
+                        setErrors(prev => ({ ...prev, grade: undefined }));
+                      }}
                       className={`w-full h-10 px-3 rounded-lg border bg-background text-sm outline-none focus:ring-2 focus:ring-primary transition-shadow ${errors.grade ? "border-red-400 focus:ring-red-400" : "border-input"}`}
                     >
                       <option value="">Chọn khối lớp…</option>
@@ -193,7 +220,7 @@ export default function EnrollPage() {
                     {errors.grade && <p className="text-xs text-red-500">{errors.grade}</p>}
                   </div>
 
-                  {/* Class */}
+                  {/* Class — chỉ hiển thị lớp thuộc khối đã chọn */}
                   <div className="space-y-1.5">
                     <label className="text-sm font-medium flex items-center gap-2">
                       <BookOpen className="h-4 w-4 text-muted-foreground" /> Lớp đăng ký
@@ -202,16 +229,38 @@ export default function EnrollPage() {
                     <select
                       value={form.requested_class_id}
                       onChange={set("requested_class_id")}
-                      className={`w-full h-10 px-3 rounded-lg border bg-background text-sm outline-none focus:ring-2 focus:ring-primary transition-shadow ${errors.requested_class_id ? "border-red-400 focus:ring-red-400" : "border-input"}`}
+                      disabled={!form.grade}
+                      className={`w-full h-10 px-3 rounded-lg border bg-background text-sm outline-none focus:ring-2 focus:ring-primary transition-shadow disabled:opacity-50 disabled:cursor-not-allowed ${errors.requested_class_id ? "border-red-400 focus:ring-red-400" : "border-input"}`}
                     >
-                      <option value="">Chọn lớp học…</option>
-                      {MOCK_CLASSES.map(c => (
+                      <option value="">
+                        {!form.grade ? "Chọn khối lớp trước…" : filteredClasses.length === 0 ? "Khối này chưa có lớp" : "Chọn lớp học…"}
+                      </option>
+                      {filteredClasses.map(c => (
                         <option key={c.id} value={c.id}>
                           {c.class_name} — {c.subject}
                         </option>
                       ))}
                     </select>
                     {errors.requested_class_id && <p className="text-xs text-red-500">{errors.requested_class_id}</p>}
+                  </div>
+
+                  {/* Package */}
+                  <div className="space-y-1.5 md:col-span-2">
+                    <label className="text-sm font-medium flex items-center gap-2">
+                      <Package className="h-4 w-4 text-muted-foreground" /> Gói học
+                      <span className="text-red-500">*</span>
+                    </label>
+                    <select
+                      value={form.package}
+                      onChange={set("package")}
+                      className={`w-full h-10 px-3 rounded-lg border bg-background text-sm outline-none focus:ring-2 focus:ring-primary transition-shadow ${errors.package ? "border-red-400 focus:ring-red-400" : "border-input"}`}
+                    >
+                      <option value="">Chọn gói học…</option>
+                      {PACKAGES.map(p => (
+                        <option key={p.value} value={p.value}>{p.label} — {p.desc}</option>
+                      ))}
+                    </select>
+                    {errors.package && <p className="text-xs text-red-500">{errors.package}</p>}
                   </div>
                 </div>
               </div>
