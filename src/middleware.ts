@@ -14,9 +14,15 @@ const roleRoutes: Record<string, string> = {
 export async function middleware(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
 
+  // Thiếu env (VD chưa cấu hình trên Vercel) → dùng placeholder để createServerClient
+  // KHÔNG ném lỗi làm middleware crash (MIDDLEWARE_INVOCATION_FAILED). Auth demo qua
+  // cookie vẫn hoạt động; auth Supabase thật chỉ chạy khi có env thật.
+  const SUPA_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const SUPA_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
   const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    SUPA_URL || "https://placeholder.supabase.co",
+    SUPA_KEY || "placeholder-anon-key",
     {
       cookies: {
         getAll() {
@@ -38,8 +44,8 @@ export async function middleware(request: NextRequest) {
   let user = null;
   const demoRole = request.cookies.get("demo_role")?.value;
   
-  // Only try to get Supabase user if no demo role is present and it's a real project URL
-  if (!demoRole && process.env.NEXT_PUBLIC_SUPABASE_URL !== "https://your-project.supabase.co") {
+  // Only try to get Supabase user if no demo role is present and real env is configured
+  if (!demoRole && SUPA_URL && SUPA_KEY && SUPA_URL !== "https://your-project.supabase.co") {
     try {
       const { data } = await supabase.auth.getUser();
       user = data.user;
