@@ -523,6 +523,7 @@ export default function TeacherClassDetailPage() {
             <HomeworkTab
               homeworks={homeworks}
               submissions={submissions}
+              students={classStudents}
               onNewHomework={() => setHomeworkModal({ open: true })}
               onEditHomework={hw => setHomeworkModal({ open: true, editing: hw })}
               onDeleteHomework={handleDeleteHomework}

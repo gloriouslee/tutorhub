@@ -1,23 +1,33 @@
 "use client";
 
+import { useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Plus, Edit3, Trash2, CheckSquare } from "lucide-react";
+import { Plus, Edit3, Trash2, CheckSquare, Users, ChevronDown, ChevronUp } from "lucide-react";
 import { formatDate, dueStatus, type Homework, type Submission } from "./classDetail.types";
+
+interface Student {
+  id: string;
+  full_name: string;
+}
 
 export default function HomeworkTab({
   homeworks,
   submissions,
+  students = [],
   onNewHomework,
   onEditHomework,
   onDeleteHomework,
 }: {
   homeworks: Homework[];
   submissions: Submission[];
+  students?: Student[];
   onNewHomework: () => void;
   onEditHomework: (hw: Homework) => void;
   onDeleteHomework: (id: string) => void;
 }) {
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
   return (
     <div className="space-y-5">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -44,10 +54,16 @@ export default function HomeworkTab({
           const status = dueStatus(hw.due_date);
           const hwSubmissions = submissions.filter(s => s.homework_id === hw.id);
           const gradedCount = hwSubmissions.filter(s => (s as any).score !== undefined && (s as any).score !== null).length;
+          const isExpanded = expandedId === hw.id;
+
           return (
             <Card key={hw.id} className="hover:shadow-md transition-all animate-fade-in" style={{ animationDelay: `${i * 50}ms` }}>
               <CardContent className="p-5">
-                <div className="flex flex-col sm:flex-row sm:items-start gap-4">
+                {/* Header row — click to toggle */}
+                <div
+                  className="flex flex-col sm:flex-row sm:items-start gap-4 cursor-pointer"
+                  onClick={() => setExpandedId(isExpanded ? null : hw.id)}
+                >
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap mb-1">
                       <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full ${status.color}`}>{status.label}</span>
@@ -64,16 +80,68 @@ export default function HomeworkTab({
                     </div>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
+                    {students.length > 0 && (
+                      <span className="text-xs text-muted-foreground flex items-center gap-1">
+                        <Users className="h-3.5 w-3.5" />
+                        {isExpanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                      </span>
+                    )}
                     <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground"
-                      onClick={() => onEditHomework(hw)}>
+                      onClick={e => { e.stopPropagation(); onEditHomework(hw); }}>
                       <Edit3 className="h-3.5 w-3.5" />
                     </Button>
                     <Button size="icon" variant="ghost" className="h-8 w-8 text-red-500 hover:bg-red-50"
-                      onClick={() => onDeleteHomework(hw.id)}>
+                      onClick={e => { e.stopPropagation(); onDeleteHomework(hw.id); }}>
                       <Trash2 className="h-3.5 w-3.5" />
                     </Button>
                   </div>
                 </div>
+
+                {/* Expandable student summary */}
+                {isExpanded && students.length > 0 && (
+                  <div className="mt-4 pt-4 border-t border-border/50">
+                    {/* Legend */}
+                    <div className="flex flex-wrap gap-4 mb-3 text-xs text-muted-foreground">
+                      <span className="flex items-center gap-1"><span>✅</span> Đã chấm</span>
+                      <span className="flex items-center gap-1"><span>⏳</span> Đã nộp, chờ chấm</span>
+                      <span className="flex items-center gap-1"><span>❌</span> Chưa nộp</span>
+                    </div>
+
+                    <div className="space-y-2">
+                      {students.map(student => {
+                        const sub = submissions.find(s => s.homework_id === hw.id && s.student_id === student.id);
+                        const isGraded = sub && (sub as any).score !== undefined && (sub as any).score !== null;
+                        const isSubmitted = !!sub;
+
+                        return (
+                          <div key={student.id} className="flex items-center justify-between py-2 px-3 rounded-lg bg-muted/30">
+                            <span className="text-sm font-medium text-foreground">{student.full_name}</span>
+                            <div className="flex items-center gap-2">
+                              {isGraded ? (
+                                <>
+                                  <span className="text-base">✅</span>
+                                  <span className="text-xs font-semibold text-emerald-600 bg-emerald-100 dark:bg-emerald-900/30 px-2 py-0.5 rounded-full">
+                                    {(sub as any).score} điểm
+                                  </span>
+                                </>
+                              ) : isSubmitted ? (
+                                <>
+                                  <span className="text-base">⏳</span>
+                                  <span className="text-xs text-amber-600 bg-amber-100 dark:bg-amber-900/30 px-2 py-0.5 rounded-full">Chờ chấm</span>
+                                </>
+                              ) : (
+                                <>
+                                  <span className="text-base">❌</span>
+                                  <span className="text-xs text-red-600 bg-red-100 dark:bg-red-900/30 px-2 py-0.5 rounded-full">Chưa nộp</span>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </CardContent>
             </Card>
           );
