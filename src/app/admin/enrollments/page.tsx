@@ -432,12 +432,12 @@ export default function AdminEnrollmentsPage() {
                           </div>
                         </div>
 
-                        {/* Class + grade */}
+                        {/* Class */}
                         <div className="flex items-start gap-2">
                           <BookOpen className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
                           <div className="text-sm">
-                            <span className="text-muted-foreground">Đăng ký: </span>
-                            <span className="font-medium">{reqClass?.class_name ?? enr.requested_class_id}</span>
+                            <span className="text-muted-foreground">Lớp đăng ký: </span>
+                            <span className="font-medium">{reqClass?.class_name ?? enr.requested_class_id ?? "—"}</span>
                             {asnClass && asnClass.id !== reqClass?.id && (
                               <span className="ml-2 text-xs text-amber-600">
                                 → Phân vào: <strong>{asnClass.class_name}</strong>
@@ -446,15 +446,41 @@ export default function AdminEnrollmentsPage() {
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <GraduationCap className="h-4 w-4 text-muted-foreground shrink-0" />
-                          <span className="text-sm text-muted-foreground">{enr.grade} · {enr.school}</span>
-                          {enr.package && (
-                            <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400">
-                              {PKG_LABEL[enr.package]}
-                            </span>
+                        {/* Detailed info grid */}
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1.5 text-xs bg-muted/30 rounded-lg p-3">
+                          <div>
+                            <span className="text-muted-foreground">Gói học: </span>
+                            {enr.package
+                              ? <span className="font-semibold text-violet-600 dark:text-violet-400">{PKG_LABEL[enr.package]}</span>
+                              : <span className="text-muted-foreground italic">Chưa chọn</span>}
+                          </div>
+                          <div>
+                            <span className="text-muted-foreground">Khối: </span>
+                            <span className="font-medium text-foreground">{enr.grade || "—"}</span>
+                          </div>
+                          <div>
+                            <span className="text-muted-foreground">Ngày sinh: </span>
+                            <span className="font-medium text-foreground">{enr.dob ? fmtDate(enr.dob) : "—"}</span>
+                          </div>
+                          <div className="col-span-2 sm:col-span-1">
+                            <span className="text-muted-foreground">Trường: </span>
+                            <span className="font-medium text-foreground">{enr.school || "—"}</span>
+                          </div>
+                          {enr.student_phone && (
+                            <div>
+                              <span className="text-muted-foreground">SĐT học viên: </span>
+                              <span className="font-medium text-foreground">{enr.student_phone}</span>
+                            </div>
                           )}
                         </div>
+
+                        {/* Note */}
+                        {enr.note && (
+                          <div className="flex items-start gap-2 text-xs">
+                            <FileText className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" />
+                            <p className="text-muted-foreground italic">{enr.note}</p>
+                          </div>
+                        )}
 
                         {/* Account info if approved */}
                         {enr.status === "approved" && enr.account_username && (
