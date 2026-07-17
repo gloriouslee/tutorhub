@@ -99,6 +99,8 @@ export interface Homework {
   due_date: string;
   created_at: string;
   attachment?: HomeworkAttachment;
+  /** undefined/null = giao cho cả lớp; string[] = danh sách student_id được giao */
+  assigned_to?: string[] | null;
 }
 
 export interface Submission {

@@ -55,6 +55,10 @@ export default function HomeworkTab({
           const hwSubmissions = submissions.filter(s => s.homework_id === hw.id);
           const gradedCount = hwSubmissions.filter(s => (s as any).score !== undefined && (s as any).score !== null).length;
           const isExpanded = expandedId === hw.id;
+          // Học viên được giao bài này: null/undefined = cả lớp
+          const assignedStudents = hw.assigned_to && hw.assigned_to.length > 0
+            ? students.filter(s => hw.assigned_to!.includes(s.id))
+            : students;
 
           return (
             <Card key={hw.id} className="hover:shadow-md transition-all animate-fade-in" style={{ animationDelay: `${i * 50}ms` }}>
@@ -76,6 +80,10 @@ export default function HomeworkTab({
                     <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
                       <span>{hwSubmissions.length} nộp bài</span>
                       {gradedCount > 0 && <span className="text-emerald-600">{gradedCount} đã chấm</span>}
+                      {hw.assigned_to && hw.assigned_to.length > 0
+                        ? <span className="text-violet-600 font-medium">Chỉ định {hw.assigned_to.length} học viên</span>
+                        : <span>Cả lớp</span>
+                      }
                       <span>Tạo: {formatDate(hw.created_at)}</span>
                     </div>
                   </div>
@@ -98,7 +106,7 @@ export default function HomeworkTab({
                 </div>
 
                 {/* Expandable student summary */}
-                {isExpanded && students.length > 0 && (
+                {isExpanded && assignedStudents.length > 0 && (
                   <div className="mt-4 pt-4 border-t border-border/50">
                     {/* Legend */}
                     <div className="flex flex-wrap gap-4 mb-3 text-xs text-muted-foreground">
@@ -108,7 +116,7 @@ export default function HomeworkTab({
                     </div>
 
                     <div className="space-y-2">
-                      {students.map(student => {
+                      {assignedStudents.map(student => {
                         const sub = submissions.find(s => s.homework_id === hw.id && s.student_id === student.id);
                         const isGraded = sub && (sub as any).score !== undefined && (sub as any).score !== null;
                         const isSubmitted = !!sub;

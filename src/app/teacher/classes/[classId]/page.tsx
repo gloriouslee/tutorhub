@@ -608,6 +608,7 @@ export default function TeacherClassDetailPage() {
           classId={classId}
           initial={homeworkModal.editing}
           defaultDueDate={homeworkModalForSession ?? undefined}
+          students={classStudents}
           onSave={hw => {
             handleSaveHomework(hw);
             if (homeworkModalForSession) setHomeworkModalForSession(null);

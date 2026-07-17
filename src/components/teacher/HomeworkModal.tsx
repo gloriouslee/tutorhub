@@ -5,19 +5,26 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { uploadClassFile } from "@/lib/upload";
 import { saveHomeworkAttachment, type HomeworkAttachment } from "@/lib/storage";
-import { FileText, Upload, X, Check, Loader2 } from "lucide-react";
+import { FileText, Upload, X, Check, Loader2, Users, User } from "lucide-react";
 import type { Homework } from "./classDetail.types";
+
+interface Student {
+  id: string;
+  full_name: string;
+}
 
 export default function HomeworkModal({
   classId,
   initial,
   defaultDueDate,
+  students = [],
   onSave,
   onClose,
 }: {
   classId: string;
   initial?: Partial<Homework>;
   defaultDueDate?: string;
+  students?: Student[];
   onSave: (hw: Homework) => void;
   onClose: () => void;
 }) {
@@ -25,11 +32,25 @@ export default function HomeworkModal({
   const [description, setDescription] = useState(initial?.description ?? "");
   const [dueDate, setDueDate] = useState(initial?.due_date ?? (!initial ? defaultDueDate ?? "" : ""));
   const [file, setFile] = useState<File | null>(null);
-  // Existing attachment when editing — preserved unless removed or replaced
   const [existingAttachment, setExistingAttachment] = useState<HomeworkAttachment | undefined>(initial?.attachment);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  // Assignment scope: "all" = cả lớp, "select" = chọn từng người
+  const initialScope = initial?.assigned_to && initial.assigned_to.length > 0 ? "select" : "all";
+  const [scope, setScope] = useState<"all" | "select">(initialScope);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(
+    new Set(initial?.assigned_to ?? [])
+  );
+
+  function toggleStudent(id: string) {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
 
   const handleSubmit = async () => {
     if (!title.trim() || !dueDate) return;
@@ -66,6 +87,7 @@ export default function HomeworkModal({
       due_date: dueDate,
       created_at: initial?.created_at ?? new Date().toISOString(),
       attachment,
+      assigned_to: scope === "select" ? Array.from(selectedIds) : null,
     };
     onSave(hw);
     setUploading(false);
@@ -100,6 +122,54 @@ export default function HomeworkModal({
               placeholder="Mô tả nội dung bài tập..."
             />
           </div>
+          {/* Assignment scope */}
+          {students.length > 0 && (
+            <div>
+              <label className="text-sm font-medium text-foreground mb-1.5 block">Giao cho</label>
+              <div className="flex gap-2 mb-3">
+                <button
+                  type="button"
+                  onClick={() => setScope("all")}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium transition-all ${scope === "all" ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:border-primary/50"}`}
+                >
+                  <Users className="h-4 w-4" /> Cả lớp
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setScope("select")}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium transition-all ${scope === "select" ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:border-primary/50"}`}
+                >
+                  <User className="h-4 w-4" /> Chọn học viên
+                </button>
+              </div>
+              {scope === "select" && (
+                <div className="space-y-2 rounded-xl border border-border p-3 bg-muted/20">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs text-muted-foreground">{selectedIds.size}/{students.length} học viên được chọn</span>
+                    <button
+                      type="button"
+                      className="text-xs text-primary hover:underline"
+                      onClick={() => setSelectedIds(selectedIds.size === students.length ? new Set() : new Set(students.map(s => s.id)))}
+                    >
+                      {selectedIds.size === students.length ? "Bỏ chọn tất cả" : "Chọn tất cả"}
+                    </button>
+                  </div>
+                  {students.map(s => (
+                    <label key={s.id} className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted/40 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(s.id)}
+                        onChange={() => toggleStudent(s.id)}
+                        className="h-4 w-4 rounded accent-primary"
+                      />
+                      <span className="text-sm text-foreground">{s.full_name}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           <div>
             <label className="text-sm font-medium text-foreground mb-1.5 block">Đính kèm file</label>
             <input
@@ -147,7 +217,7 @@ export default function HomeworkModal({
         </div>
         <div className="p-5 border-t border-border bg-muted/20 flex justify-end gap-3">
           <Button variant="outline" onClick={onClose} disabled={uploading}>Hủy</Button>
-          <Button variant="gradient" disabled={!title.trim() || !dueDate || uploading} onClick={handleSubmit}>
+          <Button variant="gradient" disabled={!title.trim() || !dueDate || uploading || (scope === "select" && selectedIds.size === 0)} onClick={handleSubmit}>
             {uploading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Check className="h-4 w-4 mr-2" />}
             {initial?.id ? "Lưu thay đổi" : "Giao bài"}
           </Button>
