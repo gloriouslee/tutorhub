@@ -7,6 +7,7 @@ import {
   getInvoices, issueTuitionInvoice, confirmInvoicePaid, getAllTeacherAttendance,
   type ClassTuitionConfig, type StudentTuitionData, type TuitionPaymentRecord,
   type TuitionInvoice, type TuitionDiscount, type TeacherAttendanceRecord,
+  type PackagePrices,
 } from "@/lib/storage";
 import { formatCurrency } from "@/lib/utils";
 import {
@@ -56,10 +57,22 @@ function attendedSessions(att: TeacherAttendanceRecord[], classId: string, stude
 
 interface FeeBreakdown { sessions: number; attended: number; overridden: boolean; unit: number; gross: number; discount?: TuitionDiscount; net: number; }
 
-function computeFee(config: ClassTuitionConfig, sData: StudentTuitionData, period: string, attended: number): FeeBreakdown {
+// Đơn giá theo GÓI hiệu lực cho một kỳ: ưu tiên snapshot của kỳ đó; nếu chưa có
+// thì KẾ THỪA TIẾN (lấy kỳ đã cấu hình gần nhất TRƯỚC đó) — nên đặt giá kỳ này
+// không bao giờ thay đổi các kỳ trước. Cuối cùng fallback đơn giá cũ (toàn cục).
+export function resolveUnitPrices(config: ClassTuitionConfig, period: string): PackagePrices {
+  const table = config.unit_prices ?? {};
+  if (table[period]) return table[period];
+  const prior = Object.keys(table).filter(k => k < period).sort();
+  if (prior.length) return table[prior[prior.length - 1]];
+  const legacy = config.unit_price ?? 0;
+  return { online: legacy, advanced: legacy, offline: legacy };
+}
+
+function computeFee(config: ClassTuitionConfig, sData: StudentTuitionData, period: string, attended: number, pkg: PackageType): FeeBreakdown {
   const override = sData.session_overrides?.[period];
   const sessions = override ?? attended;
-  const unit = config.unit_price ?? 0;
+  const unit = resolveUnitPrices(config, period)[pkg] ?? 0;
   const gross = unit * sessions;
   const discount = sData.discounts?.[period];
   let net = gross;
@@ -207,7 +220,7 @@ function StudentCard({ student, config, period, classId, className, invoice, att
   const sData = config.students[student.id] ?? { payments: [] };
   const pkg = student.package ?? "online";
   const name = studentName(student);
-  const fee = computeFee(config, sData, period, attended);
+  const fee = computeFee(config, sData, period, attended, pkg);
   const paid = paidInPeriod(sData, period);
   const debt = Math.max(0, fee.net - paid);
 
@@ -419,14 +432,20 @@ function StudentCard({ student, config, period, classId, className, invoice, att
 
 // ── Config panel (đơn giá / buổi) ─────────────────────────────────────────────
 
-function ConfigPanel({ classId, config, onUpdate }: { classId: string; config: ClassTuitionConfig; onUpdate: () => void }) {
-  const [unit, setUnit] = useState(String(config.unit_price ?? ""));
+function ConfigPanel({ classId, config, period, onUpdate }: { classId: string; config: ClassTuitionConfig; period: string; onUpdate: () => void }) {
+  const effective = resolveUnitPrices(config, period);
+  const hasOwn = !!config.unit_prices?.[period];
+  const [inputs, setInputs] = useState<PackagePrices>(effective);
   const [saved, setSaved] = useState(false);
-  useEffect(() => { setUnit(String(config.unit_price ?? "")); }, [config.unit_price]);
+
+  // Đồng bộ input khi đổi kỳ hoặc dữ liệu nguồn đổi
+  useEffect(() => { setInputs(resolveUnitPrices(config, period)); }, [period, config.unit_prices]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function save() {
     const cur = await getClassTuition(classId);
-    cur.unit_price = parseInt(unit.replace(/\D/g, ""), 10) || 0;
+    cur.unit_prices = { ...(cur.unit_prices ?? {}), [period]: {
+      online: inputs.online || 0, advanced: inputs.advanced || 0, offline: inputs.offline || 0,
+    } };
     await saveClassTuition(classId, cur);
     setSaved(true); setTimeout(() => setSaved(false), 2500);
     onUpdate();
@@ -434,22 +453,31 @@ function ConfigPanel({ classId, config, onUpdate }: { classId: string; config: C
 
   return (
     <div className="p-4 rounded-2xl border border-border bg-muted/20 space-y-3">
-      <p className="text-sm font-semibold text-foreground">Đơn giá học phí</p>
-      <div className="flex flex-wrap items-end gap-3">
-        <div>
-          <label className="text-xs font-medium text-muted-foreground block mb-1.5">Đơn giá / buổi</label>
-          <div className="relative">
-            <input type="text" value={parseInt(unit || "0") ? parseInt(unit).toLocaleString("vi-VN") : ""}
-              onChange={e => setUnit(e.target.value.replace(/\D/g, ""))} placeholder="VD: 150.000"
-              className="w-44 h-10 px-3 pr-7 rounded-xl border border-border bg-background text-sm font-semibold text-foreground outline-none focus:ring-2 focus:ring-primary/40" />
-            <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">đ</span>
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-semibold text-foreground">Đơn giá / buổi theo gói — {periodLabel(period)}</p>
+        {!hasOwn && <span className="text-[10px] text-muted-foreground bg-muted px-2 py-0.5 rounded-full">Kế thừa từ kỳ trước</span>}
+      </div>
+      <div className="grid grid-cols-3 gap-3">
+        {(["online", "advanced", "offline"] as const).map(pkg => (
+          <div key={pkg}>
+            <label className={`text-xs font-medium block mb-1.5 ${PKG_COLOR[pkg].split(" ")[1]}`}>Gói {PKG_LABEL[pkg]}</label>
+            <div className="relative">
+              <input type="text"
+                value={inputs[pkg] ? inputs[pkg].toLocaleString("vi-VN") : ""}
+                onChange={e => setInputs(prev => ({ ...prev, [pkg]: parseInt(e.target.value.replace(/\D/g, ""), 10) || 0 }))}
+                placeholder="0"
+                className="w-full h-10 px-3 pr-7 rounded-xl border border-border bg-background text-sm font-semibold text-foreground outline-none focus:ring-2 focus:ring-primary/40" />
+              <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">đ</span>
+            </div>
           </div>
-        </div>
-        <Button size="sm" variant="gradient" onClick={save}><Check className="h-3.5 w-3.5 mr-1" />Lưu đơn giá</Button>
+        ))}
+      </div>
+      <div className="flex items-center gap-2">
+        <Button size="sm" variant="gradient" onClick={save}><Check className="h-3.5 w-3.5 mr-1" />Lưu đơn giá {periodLabel(period)}</Button>
         {saved && <span className="text-xs text-emerald-600 flex items-center gap-1"><CheckCircle2 className="h-3.5 w-3.5" />Đã lưu</span>}
       </div>
       <p className="text-xs text-muted-foreground">
-        Học phí mỗi học viên = đơn giá × số buổi thực tế (lấy từ điểm danh, có thể chỉnh tay từng em) − giảm giá. Đặt đơn giá xong, điều chỉnh từng học viên rồi bấm <strong>Phát hành hóa đơn</strong>.
+        Đơn giá lưu riêng theo <strong>từng tháng</strong> — đổi giá tháng này <strong>không ảnh hưởng</strong> các tháng đã qua. Học phí = đơn giá (theo gói) × số buổi thực tế (từ điểm danh, chỉnh được) − giảm giá.
       </p>
     </div>
   );
@@ -482,7 +510,7 @@ export default function TuitionTab({ classId, className, students }: Props) {
   const invoiceFor = (studentId: string) => invoices.find(inv => inv.child_id === studentId && inv.period === period);
   const attendedFor = (studentId: string) => attendedSessions(attendance, classId, studentId, period);
   const netFor = (st: Props["students"][number]) =>
-    computeFee(config, config.students[st.id] ?? { payments: [] }, period, attendedFor(st.id)).net;
+    computeFee(config, config.students[st.id] ?? { payments: [] }, period, attendedFor(st.id), st.package ?? "online").net;
 
   async function issueAll() {
     if (bulkBusy) return;
@@ -498,7 +526,8 @@ export default function TuitionTab({ classId, className, students }: Props) {
   }
 
   const missingCount = students.filter(st => !invoiceFor(st.id) && netFor(st) > 0).length;
-  const unitSet = (config.unit_price ?? 0) > 0;
+  const prices = resolveUnitPrices(config, period);
+  const unitSet = prices.online > 0 || prices.advanced > 0 || prices.offline > 0;
 
   const totalExpected = students.reduce((s, st) => s + netFor(st), 0);
   const totalCollected = students.reduce((s, st) => {
@@ -530,7 +559,7 @@ export default function TuitionTab({ classId, className, students }: Props) {
       </div>
 
       {/* Config */}
-      {(showConfig || !unitSet) && <ConfigPanel classId={classId} config={config} onUpdate={reload} />}
+      {(showConfig || !unitSet) && <ConfigPanel classId={classId} config={config} period={period} onUpdate={reload} />}
 
       {/* Summary */}
       <div className="grid grid-cols-3 gap-3">

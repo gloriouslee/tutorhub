@@ -1234,13 +1234,18 @@ export interface StudentTuitionData {
   discounts?: Record<string, TuitionDiscount>;
 }
 
+export interface PackagePrices { online: number; advanced: number; offline: number; }
+
 export interface ClassTuitionConfig {
   package_fees: {
     online: number;
     advanced: number;
     offline: number;
   };
-  unit_price?: number;       // Đơn giá / buổi (mô hình tính theo buổi thực tế)
+  unit_price?: number;       // (Cũ) đơn giá/buổi toàn cục — chỉ dùng làm fallback lịch sử
+  // Đơn giá/buổi theo GÓI, lưu SNAPSHOT theo từng kỳ "YYYY-MM" để đổi giá tháng
+  // này KHÔNG làm thay đổi các tháng đã qua.
+  unit_prices?: Record<string, PackagePrices>;
   students: Record<string, StudentTuitionData>;
 }
 
