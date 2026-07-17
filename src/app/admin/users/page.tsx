@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef, useLayoutEffect } from "react";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -10,7 +10,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   Search, Plus, X, Edit2, Trash2, KeyRound,
   ShieldCheck, GraduationCap, BookOpen, UserX, UserCheck,
-  Eye, EyeOff, Shield,
+  Eye, EyeOff, Shield, Users,
 } from "lucide-react";
 import {
   getManagedUsers, saveManagedUser, deleteManagedUser, kvSet,
@@ -31,10 +31,10 @@ const ROLE_META: Record<UserRole, { label: string; color: string; icon: React.El
 };
 
 const TABS = [
-  { id: "all"     as const, label: "Tất cả" },
-  { id: "student" as const, label: "Học viên" },
-  { id: "teacher" as const, label: "Giáo viên" },
-  { id: "admin"   as const, label: "Quản trị viên" },
+  { id: "all"     as const, label: "Tất cả",         icon: Users,         dot: "bg-foreground/40" },
+  { id: "student" as const, label: "Học viên",       icon: GraduationCap, dot: "bg-indigo-500" },
+  { id: "teacher" as const, label: "Giáo viên",      icon: BookOpen,      dot: "bg-amber-500" },
+  { id: "admin"   as const, label: "Quản trị viên",  icon: ShieldCheck,   dot: "bg-rose-500" },
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -307,6 +307,15 @@ export default function AdminUsersPage() {
   const [delTarget, setDel]       = useState<ManagedUser | null>(null);
   const [pwdVisible, setPwdVis]   = useState<Set<string>>(new Set());
 
+  // Sliding pill indicator dưới tab đang chọn — đo vị trí nút active rồi animate transform
+  const tabRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const [indicator, setIndicator] = useState({ left: 0, width: 0 });
+
+  useLayoutEffect(() => {
+    const el = tabRefs.current[tab];
+    if (el) setIndicator({ left: el.offsetLeft, width: el.offsetWidth });
+  }, [tab, users.length]);
+
   useEffect(() => {
     (async () => {
       const stored = await getManagedUsers();
@@ -385,19 +394,36 @@ export default function AdminUsersPage() {
 
         {/* Tabs + Search */}
         <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
-          <div className="flex gap-1 p-1 bg-muted/60 rounded-xl">
-            {TABS.map(t => (
-              <button
-                key={t.id}
-                onClick={() => setTab(t.id)}
-                className={`px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${tab === t.id ? "bg-card shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}
-              >
-                {t.label}
-                <span className={`ml-1.5 text-xs px-1.5 py-0.5 rounded-full ${tab === t.id ? "bg-primary/10 text-primary" : "bg-border text-muted-foreground"}`}>
-                  {counts[t.id]}
-                </span>
-              </button>
-            ))}
+          <div className="relative flex gap-1 p-1 bg-muted/60 rounded-xl">
+            {/* Pill nền trượt theo tab đang chọn */}
+            <div
+              data-testid="tab-indicator"
+              className="absolute top-1 bottom-1 rounded-lg bg-card shadow-sm ring-1 ring-black/5 transition-all duration-300 ease-out"
+              style={{ left: `${indicator.left}px`, width: `${indicator.width}px` }}
+            />
+            {TABS.map(t => {
+              const active = tab === t.id;
+              const Icon = t.icon;
+              return (
+                <button
+                  key={t.id}
+                  ref={el => { tabRefs.current[t.id] = el; }}
+                  onClick={() => setTab(t.id)}
+                  className={`relative z-10 flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap transition-colors duration-200 ${active ? "text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                >
+                  <Icon className={`h-3.5 w-3.5 transition-transform duration-300 ${active ? "scale-110" : ""}`} />
+                  {t.label}
+                  <span
+                    className={`inline-flex items-center gap-1 ml-0.5 text-xs px-1.5 py-0.5 rounded-full transition-all duration-200 ${
+                      active ? "bg-primary/10 text-primary" : "bg-border/70 text-muted-foreground"
+                    }`}
+                  >
+                    <span className={`h-1.5 w-1.5 rounded-full ${t.dot}`} />
+                    {counts[t.id]}
+                  </span>
+                </button>
+              );
+            })}
           </div>
           <div className="relative w-full sm:w-64">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -421,12 +447,16 @@ export default function AdminUsersPage() {
               Không tìm thấy tài khoản nào
             </div>
           )}
-          {filtered.map(user => {
+          {filtered.map((user, i) => {
             const rm = ROLE_META[user.type];
             const RoleIcon = rm.icon;
             const showPwd = pwdVisible.has(user.id);
             return (
-              <Card key={user.id} className={`transition-all ${user.disabled ? "opacity-60" : ""}`}>
+              <Card
+                key={user.id}
+                className={`animate-fade-in transition-all duration-200 hover:shadow-md hover:border-primary/30 ${user.disabled ? "opacity-60" : ""}`}
+                style={{ animationDelay: `${Math.min(i, 12) * 40}ms` }}
+              >
                 <CardContent className="p-4">
                   <div className="flex items-center gap-4 flex-wrap">
                     {/* Avatar */}
