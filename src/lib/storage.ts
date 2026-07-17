@@ -299,6 +299,18 @@ export async function saveAttendance(attendance: Attendance[]): Promise<void> {
   return saveEntity(ENTITY_KEYS.attendance, "attendance", attendance);
 }
 
+/** Điểm danh THẬT do giáo viên nhập (kv_teacher_attendance) — dùng cho báo cáo. */
+export interface TeacherAttendanceRecord {
+  class_id: string;
+  student_id: string;
+  date: string;      // YYYY-MM-DD
+  status: "present" | "absent" | "late" | "excused";
+  saved_at: string;
+}
+export async function getAllTeacherAttendance(): Promise<TeacherAttendanceRecord[]> {
+  return kvGet<TeacherAttendanceRecord[]>("tutorhub_teacher_attendance", []);
+}
+
 export async function getNotifications(): Promise<Notification[]> {
   return getEntity(
     ENTITY_KEYS.notifications,
@@ -711,6 +723,11 @@ const DEFAULT_INVOICES: TuitionInvoice[] = [
 
 export async function getInvoices(): Promise<TuitionInvoice[]> {
   return kvGet<TuitionInvoice[]>(INVOICE_KEY, DEFAULT_INVOICES);
+}
+
+/** Hoá đơn thật, KHÔNG fallback demo — dùng cho báo cáo/thống kê. */
+export async function getInvoicesRaw(): Promise<TuitionInvoice[]> {
+  return kvGet<TuitionInvoice[]>(INVOICE_KEY, []);
 }
 
 export async function updateInvoiceStatus(

@@ -19,6 +19,14 @@ const AXIS = { fontSize: 11, fill: "rgb(var(--muted-foreground))" };
 const TOOLTIP_STYLE = { background: "rgb(var(--card))", border: "1px solid rgb(var(--border))", borderRadius: 12, fontSize: 12 };
 const trVND = (v: number) => `${(v / 1_000_000).toFixed(0)}tr`;
 
+// Rút gọn tiền tệ cho thẻ KPI (tránh tràn thẻ): 12.500.000 → "12,5tr ₫"
+function compactVND(v: number): string {
+  if (v >= 1_000_000_000) return `${(v / 1_000_000_000).toFixed(1).replace(".", ",")} tỷ ₫`;
+  if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1).replace(".", ",")}tr ₫`;
+  if (v >= 1_000) return `${Math.round(v / 1_000)}k ₫`;
+  return `${v} ₫`;
+}
+
 function ChartCard({ title, badge, span, children }: { title: string; badge?: React.ReactNode; span?: boolean; children: React.ReactNode }) {
   return (
     <Card className={`border border-border ${span ? "lg:col-span-2" : ""}`}>
@@ -63,14 +71,14 @@ export default function AnalyticsDashboard({
   return (
     <div className="space-y-6">
       {/* ── KPI cards ── */}
-      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
-        <StatCard title="Tổng doanh thu" value={formatCurrency(kpis.totalRevenue)} icon={DollarSign} iconColor="text-rose-500" iconBg="bg-rose-50 dark:bg-rose-950/20" delay={0} />
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">
+        <StatCard title="Doanh thu" value={compactVND(kpis.totalRevenue)} subtitle={formatCurrency(kpis.totalRevenue)} icon={DollarSign} iconColor="text-rose-500" iconBg="bg-rose-50 dark:bg-rose-950/20" delay={0} />
         <StatCard title="Học viên" value={kpis.studentCount} icon={Users} iconColor="text-blue-500" iconBg="bg-blue-50 dark:bg-blue-950/20" delay={40} />
         <StatCard title="Lớp học" value={kpis.classCount} icon={BookOpen} iconColor="text-violet-500" iconBg="bg-violet-50 dark:bg-violet-950/20" delay={80} />
         {showTeacherBreakdown && (
           <StatCard title="Giáo viên" value={kpis.teacherCount} icon={GraduationCap} iconColor="text-amber-500" iconBg="bg-amber-50 dark:bg-amber-950/20" delay={120} />
         )}
-        <StatCard title="Chuyên cần TB" value={`${kpis.avgAttendancePct}%`} icon={CheckSquare} iconColor="text-emerald-500" iconBg="bg-emerald-50 dark:bg-emerald-950/20" delay={160} />
+        <StatCard title="Chuyên cần" value={`${kpis.avgAttendancePct}%`} icon={CheckSquare} iconColor="text-emerald-500" iconBg="bg-emerald-50 dark:bg-emerald-950/20" delay={160} />
         <StatCard title="Điểm TB" value={kpis.avgScore > 0 ? `${kpis.avgScore}/10` : "—"} icon={Trophy} iconColor="text-teal-500" iconBg="bg-teal-50 dark:bg-teal-950/20" delay={200} />
       </div>
 

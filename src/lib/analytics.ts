@@ -4,12 +4,11 @@
 // view giáo viên truyền `classIds` để lọc về đúng lớp mình dạy.
 
 import {
-  getClasses, getStudents, getTeachers, getPayments, getInvoices,
-  getAttendance, getClassTuition, getClassTeacherOverrides, getAllExamScores,
+  getClasses, getStudents, getTeachers, getInvoicesRaw,
+  getAllTeacherAttendance, getClassTuition, getClassTeacherOverrides, getAllExamScores,
   type TuitionInvoice, type StoredExamScore,
 } from "@/lib/storage";
-import { MOCK_EXAM_SCORES } from "@/lib/mock-data";
-import type { Class, Student, Teacher, Attendance, Payment } from "@/types";
+import type { Class, Student, Teacher, Attendance } from "@/types";
 
 const MONTHS_VI = ["Th.1", "Th.2", "Th.3", "Th.4", "Th.5", "Th.6", "Th.7", "Th.8", "Th.9", "Th.10", "Th.11", "Th.12"];
 
@@ -22,7 +21,7 @@ export interface RevenueEvent {
   date: string;            // ISO hoặc YYYY-MM-DD
   classId?: string;
   teacherId?: string;
-  source: "tuition" | "invoice" | "payment";
+  source: "tuition" | "invoice";
 }
 
 export interface AnalyticsData {
@@ -51,16 +50,20 @@ export function lastNMonths(n: number, now = new Date()): { year: number; month:
 
 // ── Nạp toàn bộ dữ liệu thô ────────────────────────────────────────────────────
 export async function loadAnalyticsData(): Promise<AnalyticsData> {
-  const [classes, students, teachers, payments, invoices, attendance, overrides, storedScores] = await Promise.all([
+  const [classes, students, teachers, invoices, teacherAtt, overrides, storedScores] = await Promise.all([
     getClasses(),
     getStudents(),
     getTeachers(),
-    getPayments(),
-    getInvoices(),
-    getAttendance(),
+    getInvoicesRaw(),
+    getAllTeacherAttendance(),
     getClassTeacherOverrides(),
     getAllExamScores().catch(() => [] as StoredExamScore[]),
   ]);
+
+  // Điểm danh thật (giáo viên nhập) → chuẩn hoá về shape Attendance để tái dùng aggregation
+  const attendance = teacherAtt.map(r => ({
+    class_id: r.class_id, student_id: r.student_id, attendance_date: r.date, status: r.status,
+  })) as unknown as Attendance[];
 
   const teacherOf: Record<string, string | undefined> = {};
   for (const c of classes) teacherOf[c.id] = overrides[c.id] ?? c.tutor_id;
@@ -68,11 +71,8 @@ export async function loadAnalyticsData(): Promise<AnalyticsData> {
   const firstClassOf = (studentId: string): string | undefined =>
     classes.find(c => (c.student_ids ?? []).includes(studentId))?.id;
 
-  // Điểm thi: gộp mock (demo) + đã lưu, khử trùng theo id
-  const examMap = new Map<string, StoredExamScore>();
-  for (const s of MOCK_EXAM_SCORES as StoredExamScore[]) examMap.set(s.id, s);
-  for (const s of storedScores) examMap.set(s.id, s);
-  const examScores = [...examMap.values()];
+  // Điểm thi: chỉ dùng dữ liệu thật đã lưu (không trộn mock)
+  const examScores = storedScores;
 
   // ── Sự kiện doanh thu (gộp 3 nguồn tiền) ─────────────────────────────────────
   const revenueEvents: RevenueEvent[] = [];
@@ -98,19 +98,6 @@ export async function loadAnalyticsData(): Promise<AnalyticsData> {
       classId,
       teacherId: classId ? teacherOf[classId] : undefined,
       source: "invoice",
-    });
-  }
-
-  // 3) Bảng payments cũ (không có class_id → gán lớp đầu tiên của HV để quy về GV/lớp)
-  for (const p of payments as Payment[]) {
-    if (p.payment_status !== "paid") continue;
-    const classId = p.class_id ?? firstClassOf(p.student_id);
-    revenueEvents.push({
-      amount: p.amount,
-      date: p.paid_date ?? p.due_date,
-      classId,
-      teacherId: classId ? teacherOf[classId] : undefined,
-      source: "payment",
     });
   }
 
