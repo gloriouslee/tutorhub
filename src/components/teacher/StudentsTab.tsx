@@ -114,7 +114,7 @@ export default function StudentsTab({
                           </button>
                         ))}
                       </div>
-                      <p className="text-[10px] text-muted-foreground italic">{PACKAGE_TYPES[student.package].description}</p>
+                      <p className="text-[10px] text-muted-foreground italic">{PACKAGE_TYPES[student.package]?.description ?? "—"}</p>
                     </div>
                   </td>
                   <td className="p-4 min-w-[150px]">

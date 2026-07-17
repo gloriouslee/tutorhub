@@ -79,12 +79,14 @@ export default function StudentScoresPage() {
         examLessons.forEach((lesson, i) => {
           const rec = results[i];
           if (!rec) return;
+          // Điểm hiển thị = tự động + điểm chấm tay (tự luận), giống trang làm bài
+          const manualSum = Object.values(rec.manual_scores ?? {}).reduce((a, b) => a + b, 0);
           found.push({
             id:         `tutorhub_exam_result_${cls.id}_${lesson.id}_${studentId}`,
             student_id: studentId,
             class_id:   cls.id,
             exam_name:  lesson.title ?? "Bài kiểm tra trực tuyến",
-            score:      rec.score,
+            score:      rec.score + manualSum,
             max_score:  rec.total,
             exam_date:  rec.submitted_at,
           });
@@ -308,7 +310,7 @@ export default function StudentScoresPage() {
                 <div className="divide-y divide-border/50">
                   {displayed.map((score, i) => {
                     const cls = MOCK_CLASSES.find(c => c.id === score.class_id);
-                    const pct = (score.score / score.max_score) * 100;
+                    const pct = score.max_score > 0 ? (score.score / score.max_score) * 100 : 0;
                     const { label, variant } = gradeLabel(pct);
 
                     return (

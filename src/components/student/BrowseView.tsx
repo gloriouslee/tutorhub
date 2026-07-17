@@ -112,7 +112,7 @@ export default function BrowseView({ onSelectCourse }: { onSelectCourse: (c: Own
           ) : myCourses.map(course => {
             const allLessons = course.chapters.flatMap(ch => ch.lessons);
             const done = allLessons.filter(l => l.status === "done").length;
-            const pct = Math.round((done / allLessons.length) * 100);
+            const pct = allLessons.length > 0 ? Math.round((done / allLessons.length) * 100) : 0;
             const videoCount = allLessons.filter(l => l.type === "video").length;
             const pdfCount = allLessons.filter(l => l.type === "pdf").length;
             const myPkg = studentPkgs[course.id];

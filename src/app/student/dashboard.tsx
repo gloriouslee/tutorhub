@@ -14,7 +14,7 @@ import {
   MOCK_CLASSES, MOCK_HOMEWORK, MOCK_ATTENDANCE,
   MOCK_EXAM_SCORES, MOCK_TEACHERS, ATTENDANCE_CHART_DATA,
 } from "@/lib/mock-data";
-import { getNotifications, getEnrollments, kvGet } from "@/lib/storage";
+import { getNotifications, getEnrollments, kvGet, getExamScoresByStudent, getCurriculum, getExamResult, isAssignedToStudent } from "@/lib/storage";
 import { getSubmissionsByStudent } from "@/lib/supabase/submissions";
 import Link from "next/link";
 import { formatDate } from "@/lib/utils";
@@ -28,6 +28,7 @@ interface HomeworkItem {
   description?: string;
   due_date: string;
   created_at?: string;
+  assigned_to?: string[] | null;
 }
 
 const DOW_EN = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -79,12 +80,34 @@ export default function StudentDashboard() {
   useEffect(() => {
     if (!ready) return;
 
-    // Scores
-    const exams = MOCK_EXAM_SCORES.filter(e => e.student_id === studentId);
-    setAvgScore(exams.length > 0
-      ? (exams.reduce((acc, e) => acc + (e.score / e.max_score) * 10, 0) / exams.length).toFixed(1)
-      : null
-    );
+    // Scores — gộp điểm mock (demo) + điểm lưu tay + bài thi online đã làm,
+    // giống trang /student/scores để học sinh thật cũng có điểm TB.
+    (async () => {
+      const mock = MOCK_EXAM_SCORES.filter(e => e.student_id === studentId)
+        .map(e => ({ id: e.id, score: e.score, max_score: e.max_score }));
+      const stored = (await getExamScoresByStudent(studentId))
+        .map(e => ({ id: e.id, score: e.score, max_score: e.max_score }));
+      const taken: { id: string; score: number; max_score: number }[] = [];
+      for (const cls of myClasses) {
+        const chapters = await getCurriculum(cls.id);
+        const examLessons = chapters.flatMap(ch => ch.sessions).flatMap(s => s.lessons).filter(l => l.type === "exam");
+        const results = await Promise.all(examLessons.map(l => getExamResult(cls.id, l.id, studentId)));
+        examLessons.forEach((lesson, i) => {
+          const rec = results[i];
+          if (!rec) return;
+          const manualSum = Object.values(rec.manual_scores ?? {}).reduce((a, b) => a + b, 0);
+          taken.push({ id: `tutorhub_exam_result_${cls.id}_${lesson.id}_${studentId}`, score: rec.score + manualSum, max_score: rec.total });
+        });
+      }
+      const seen = new Set<string>();
+      const merged = [...mock, ...stored, ...taken].filter(e => {
+        if (seen.has(e.id)) return false; seen.add(e.id); return true;
+      }).filter(e => e.max_score > 0);
+      setAvgScore(merged.length > 0
+        ? (merged.reduce((acc, e) => acc + (e.score / e.max_score) * 10, 0) / merged.length).toFixed(1)
+        : null
+      );
+    })();
 
     // Attendance — null when there is no record yet (shown as "—")
     const att = MOCK_ATTENDANCE.filter(a => a.student_id === studentId);
@@ -116,7 +139,7 @@ export default function StudentDashboard() {
         getSubmissionsByStudent(studentId),
         kvGet<HomeworkItem[]>("tutorhub_teacher_homework", []).catch(() => [] as HomeworkItem[]),
       ]);
-      const teacher = allTeacherHw.filter(h => classIds.includes(h.class_id));
+      const teacher = allTeacherHw.filter(h => classIds.includes(h.class_id) && isAssignedToStudent(h.assigned_to, studentId));
       setTeacherHw(teacher);
       const kvIds = new Set(teacher.map(h => h.id));
       const hw = [

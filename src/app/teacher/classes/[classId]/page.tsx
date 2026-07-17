@@ -598,7 +598,7 @@ export default function TeacherClassDetailPage() {
 
           {/* ── Lectures ── */}
           {activeTab === "lectures" && (
-            <LecturesTab lectures={lectures} addButton={addButton("lecture", "Thêm bài giảng")} />
+            <LecturesTab classId={classId} lectures={lectures} materials={uploadedMaterials} addButton={addButton("lecture", "Thêm bài giảng")} setUploadedMaterials={setUploadedMaterials} />
           )}
 
           {/* ── Materials ── */}
@@ -613,7 +613,7 @@ export default function TeacherClassDetailPage() {
 
           {/* ── Notes ── */}
           {activeTab === "notes" && (
-            <NotesTab notes={notes} addButton={addButton("note", "Viết ghi chú")} />
+            <NotesTab classId={classId} notes={notes} materials={uploadedMaterials} addButton={addButton("note", "Viết ghi chú")} setUploadedMaterials={setUploadedMaterials} />
           )}
 
           {/* ── Students ── */}

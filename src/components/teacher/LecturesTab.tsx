@@ -1,7 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, useCallback } from "react";
-import { useParams } from "next/navigation";
+import React from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -10,23 +9,21 @@ import { Clock, PlayCircle, Eye, Trash2, Lock, FileText } from "lucide-react";
 import { formatDate } from "./classDetail.types";
 
 export default function LecturesTab({
+  classId,
   lectures,
+  materials,
   addButton,
+  setUploadedMaterials,
 }: {
+  classId: string;
   lectures: any[];
+  materials: StoredClassMaterial[];
   addButton: React.ReactNode;
+  setUploadedMaterials: (mats: StoredClassMaterial[]) => void;
 }) {
-  const params = useParams();
-  const classId = params?.classId as string;
-  const [uploaded, setUploaded] = useState<StoredClassMaterial[]>([]);
-
-  const reload = useCallback(async () => {
-    if (!classId) return;
-    const mats = await getClassMaterials(classId);
-    setUploaded(mats.filter(m => m.kind === "lecture"));
-  }, [classId]);
-
-  useEffect(() => { reload(); }, [reload]);
+  // Nguồn dữ liệu là prop từ page → tự cập nhật ngay khi upload xong (trước đây
+  // tab tự load nên nội dung mới chỉ hiện sau khi rời/vào lại tab).
+  const uploaded = materials.filter(m => m.kind === "lecture");
 
   const sortedMocks = [...lectures].sort((a, b) => a.order - b.order);
   const total = sortedMocks.length + uploaded.length;
@@ -78,7 +75,7 @@ export default function LecturesTab({
                       size="icon"
                       variant="ghost"
                       className="h-8 w-8 text-red-500 hover:text-red-600 hover:bg-red-50"
-                      onClick={async () => { await deleteClassMaterial(lec.id); await reload(); }}
+                      onClick={async () => { await deleteClassMaterial(lec.id); setUploadedMaterials(await getClassMaterials(classId)); }}
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </Button>

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { getCurriculum, getClasses, saveExamResult, getExamResult, kvUpdate, kvDelete, type CurriculumLesson, type ExamQuestion } from "@/lib/storage";
+import { getCurriculum, getClasses, saveExamResult, getExamResult, kvUpdate, kvDelete, isAssignedToStudent, type CurriculumLesson, type ExamQuestion } from "@/lib/storage";
 import { MOCK_CLASSES } from "@/lib/mock-data";
 import { Button } from "@/components/ui/button";
 import "katex/dist/katex.min.css";
@@ -899,7 +899,10 @@ export default function ExamPage() {
           const now = new Date();
           const isOpen = status === "open" || (status === "draft" && !!opensAt && new Date(opensAt) <= now);
           // Chưa công bố (is_published === false) — thiếu trường coi như đã công bố (legacy)
-          if (found.is_published === false) {
+          if (!isAssignedToStudent(found.assigned_to, studentId)) {
+            // Bài thi giao riêng cho học viên khác — chặn cả khi mở bằng URL trực tiếp
+            setExamLocked(true); setLockReason("Bài thi này không được giao cho bạn.");
+          } else if (found.is_published === false) {
             setExamLocked(true); setLockReason("Bài thi chưa được công bố.");
           } else if (status === "closed") {
             setExamLocked(true); setLockReason("Bài thi đã kết thúc.");

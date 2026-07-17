@@ -1,11 +1,10 @@
 "use client";
 
-import React, { useEffect, useState, useCallback } from "react";
-import { useParams } from "next/navigation";
+import React from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { getClassMaterials, deleteClassMaterial } from "@/lib/storage";
+import { getClassMaterials, deleteClassMaterial, type StoredClassMaterial } from "@/lib/storage";
 import { StickyNote, Pin, Tag, Trash2 } from "lucide-react";
 import { formatDate } from "./classDetail.types";
 
@@ -20,30 +19,27 @@ interface NoteItem {
 }
 
 export default function NotesTab({
+  classId,
   notes,
+  materials,
   addButton,
+  setUploadedMaterials,
 }: {
+  classId: string;
   notes: any[];
+  materials: StoredClassMaterial[];
   addButton: React.ReactNode;
+  setUploadedMaterials: (mats: StoredClassMaterial[]) => void;
 }) {
-  const params = useParams();
-  const classId = params?.classId as string;
-  const [uploaded, setUploaded] = useState<NoteItem[]>([]);
-
-  const reload = useCallback(async () => {
-    if (!classId) return;
-    const mats = await getClassMaterials(classId);
-    setUploaded(mats.filter(m => m.kind === "note").map(m => ({
-      id: m.id,
-      title: m.title,
-      content: m.description,
-      is_pinned: !!m.pinned,
-      created_at: m.created_at,
-      isUploaded: true,
-    })));
-  }, [classId]);
-
-  useEffect(() => { reload(); }, [reload]);
+  // Derive từ prop → tự cập nhật ngay khi upload/xóa (không tự load riêng).
+  const uploaded: NoteItem[] = materials.filter(m => m.kind === "note").map(m => ({
+    id: m.id,
+    title: m.title,
+    content: m.description,
+    is_pinned: !!m.pinned,
+    created_at: m.created_at,
+    isUploaded: true,
+  }));
 
   const merged: NoteItem[] = [
     ...uploaded,
@@ -89,7 +85,7 @@ export default function NotesTab({
                     size="icon"
                     variant="ghost"
                     className="h-8 w-8 text-red-500 hover:bg-red-50"
-                    onClick={async () => { await deleteClassMaterial(note.id); await reload(); }}
+                    onClick={async () => { await deleteClassMaterial(note.id); setUploadedMaterials(await getClassMaterials(classId)); }}
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                   </Button>

@@ -36,11 +36,12 @@ const formatDateTime = (iso: string) =>
     hour: "2-digit", minute: "2-digit",
   });
 
-const TODAY = new Date();
-TODAY.setHours(0, 0, 0, 0);
-
 function isOverdue(due_date: string) {
-  return new Date(due_date) < TODAY;
+  // Tính "hôm nay" tại thời điểm gọi — không cache lúc load module (tab mở qua
+  // nửa đêm sẽ so sai ngày cho tới khi reload).
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return new Date(due_date) < today;
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────

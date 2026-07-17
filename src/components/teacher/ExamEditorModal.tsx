@@ -658,12 +658,29 @@ export default function ExamEditorModal({
         is_published: published,
         exam_opens_at: opensAt ? new Date(opensAt).toISOString() : undefined,
         exam_content: {
-          // Giữ id câu hỏi cũ theo vị trí — bài học sinh đã nộp (chấm theo id)
-          // không bị mồ côi sau mỗi lần giáo viên sửa đề
-          questions: parsedToExamQuestions(parsed.questions, registry).map((q, i) => ({
-            ...q,
-            id: initial?.exam_content?.questions?.[i]?.id ?? q.id,
-          })),
+          // Giữ id câu hỏi cũ để bài học sinh đã nộp (chấm theo id) không bị mồ côi.
+          // Ưu tiên khớp theo NỘI DUNG (content_html) — bền với chèn/xóa/đổi thứ tự;
+          // nếu không khớp (VD sửa nội dung tại chỗ) thì fallback theo VỊ TRÍ, nhưng
+          // chỉ khi id đó chưa bị câu khác dùng → không bao giờ tạo id trùng.
+          questions: (() => {
+            const prev = initial?.exam_content?.questions ?? [];
+            const used = new Set<string>();
+            const fresh = parsedToExamQuestions(parsed.questions, registry);
+            const byContent = fresh.map(q => {
+              const m = prev.find(p => p.content_html === q.content_html && !used.has(p.id));
+              if (m) { used.add(m.id); return m.id; }
+              return undefined;
+            });
+            return fresh.map((q, i) => {
+              let id = byContent[i];
+              if (!id) {
+                const idxId = prev[i]?.id;
+                if (idxId && !used.has(idxId)) { used.add(idxId); id = idxId; }
+                else id = q.id;
+              }
+              return { ...q, id };
+            });
+          })(),
           time_limit: timeLimit ? parseInt(timeLimit) : undefined,
           show_solution_after_submit: showSolution,
           allow_retry: allowRetry,

@@ -112,13 +112,12 @@ export async function kvGet<T>(key: string, fallback: T): Promise<T> {
         kvWriteLocal(key, data.value);
         return data.value as T;
       }
-      // Chưa có trên DB — nếu máy này còn dữ liệu cũ thì sync lên luôn
+      // DB không có row: có thể đã bị xóa (VD "làm lại bài thi") hoặc chưa từng
+      // tồn tại. KHÔNG đẩy cache local ngược lên DB — làm vậy sẽ "hồi sinh" bản
+      // đã xóa cho mọi thiết bị. Vẫn trả local (đọc offline/legacy), nhưng deletion
+      // trên server được tôn trọng.
       const local = kvReadLocal<T>(key);
-      if (local !== null) {
-        void kvSet(key, local);
-        return local;
-      }
-      return fallback;
+      return local !== null ? local : fallback;
     }
   } catch { /* offline */ }
   const local = kvReadLocal<T>(key);
@@ -638,11 +637,11 @@ export async function saveExamResult(
 ): Promise<void> {
   const stored: StoredExamResult = { student_id: studentId, student_name: studentName, ...result };
   await kvSet(examResultKey(classId, lessonId, studentId), stored);
-  // Track submission registry so teacher can list all results
-  const subs: string[] = await getExamSubmissionIds(classId, lessonId);
-  if (!subs.includes(studentId)) {
-    await kvSet(examSubmissionsKey(classId, lessonId), [...subs, studentId]);
-  }
+  // Track submission registry so teacher can list all results — đọc-sửa-ghi nguyên
+  // tử để 2 học sinh nộp gần như đồng thời không ghi đè registry của nhau.
+  await kvUpdate<string[]>(examSubmissionsKey(classId, lessonId), [], subs =>
+    subs.includes(studentId) ? subs : [...subs, studentId]
+  );
 }
 
 export async function getExamResult(classId: string, lessonId: string, studentId: string): Promise<StoredExamResult | null> {
@@ -871,24 +870,21 @@ export async function approveEnrollment(
   id: string,
   opts: { assigned_class_id: string; account_username: string; account_password: string }
 ): Promise<void> {
+  const all = await getEnrollments();
+  const enr = all.find(e => e.id === id);
+  if (!enr) throw new Error("Không tìm thấy đơn ghi danh.");
+
   const patch = {
     status: "approved" as EnrollmentStatus,
     ...opts,
     reviewed_at: new Date().toISOString(),
   };
-  try {
-    const { error } = await supabase.from("enrollment_requests").update(patch).eq("id", id);
-    if (error) console.error("Error approving enrollment:", error);
-  } catch { /* offline */ }
-  const all = await getEnrollments();
-  const updated = all.map(e => (e.id === id ? { ...e, ...patch } : e));
-  writeEnrollmentsLocal(updated);
 
-  const enr = updated.find(e => e.id === id)!;
-
-  // Tạo tài khoản Supabase Auth thật (server route dùng service role key).
-  // Nếu key chưa cấu hình (501) hoặc offline, đăng nhập vẫn hoạt động qua
-  // fallback so khớp enrollment_requests — không chặn luồng duyệt.
+  // Tạo tài khoản Supabase Auth thật (server route dùng service role key) TRƯỚC KHI
+  // đánh dấu "approved". Nếu tạo tài khoản lỗi (VD email đã tồn tại) mà đã set
+  // approved trước thì đơn kẹt ở trạng thái dở dang (approved nhưng không có học
+  // viên/lớp). Key chưa cấu hình (501) hoặc offline vẫn cho duyệt (login fallback).
+  let supabaseUserId: string | undefined;
   let res: Response | null = null;
   try {
     res = await fetch("/api/admin/create-student-account", {
@@ -906,15 +902,23 @@ export async function approveEnrollment(
   if (res) {
     if (res.ok) {
       const { user_id } = await res.json();
-      try {
-        await supabase.from("enrollment_requests").update({ supabase_user_id: user_id }).eq("id", id);
-      } catch { /* offline */ }
+      supabaseUserId = user_id;
     } else if (res.status !== 501) {
-      // Báo lỗi lên ApproveModal thay vì báo thành công giả
+      // Báo lỗi lên ApproveModal — CHƯA thay đổi trạng thái nên đơn vẫn "pending"
       const msg = await res.text().catch(() => "");
       throw new Error(msg || "Không tạo được tài khoản đăng nhập cho học viên.");
     }
   }
+
+  // Tài khoản OK (hoặc 501/offline) → giờ mới đánh dấu approved
+  try {
+    const { error } = await supabase
+      .from("enrollment_requests")
+      .update(supabaseUserId ? { ...patch, supabase_user_id: supabaseUserId } : patch)
+      .eq("id", id);
+    if (error) console.error("Error approving enrollment:", error);
+  } catch { /* offline */ }
+  writeEnrollmentsLocal(all.map(e => (e.id === id ? { ...e, ...patch } : e)));
 
   const account: StudentAccount = {
     student_id:        `enr_${id}`,
@@ -1071,9 +1075,11 @@ export async function changeStudentPassword(
   return "ok";
 }
 
-export async function getCurrentStudentAccount(): Promise<StudentAccount | null> {
+export async function getCurrentStudentAccount(studentId: string): Promise<StudentAccount | null> {
+  // Phải tra theo studentId của phiên hiện tại — trước đây trả account thêm cuối
+  // cùng nên trên máy dùng chung sẽ ra nhầm học sinh.
   const accounts = await getStudentAccounts();
-  return accounts.length > 0 ? accounts[accounts.length - 1] : null;
+  return accounts.find(a => a.student_id === studentId) ?? null;
 }
 
 // ── Exam scores (localStorage) ────────────────────────────────────────────────
@@ -1138,23 +1144,22 @@ export async function getClassMaterials(classId: string): Promise<StoredClassMat
 }
 
 export async function saveClassMaterial(mat: Omit<StoredClassMaterial, "id" | "download_count">): Promise<StoredClassMaterial> {
-  const record: StoredClassMaterial = { ...mat, id: `mat_${Date.now()}`, download_count: 0 };
-  await kvSet(MATERIALS_KEY, [...(await getStoredMaterials()), record]);
+  // id ngẫu nhiên (randomUUID) thay vì Date.now() để tránh trùng khi thêm 2 mục
+  // trong cùng mili-giây (bulk / 2 tab) → deleteClassMaterial xóa nhầm cả hai.
+  const record: StoredClassMaterial = { ...mat, id: `mat_${crypto.randomUUID()}`, download_count: 0 };
+  await kvUpdate<StoredClassMaterial[]>(MATERIALS_KEY, [], all => [...all, record]);
   return record;
 }
 
 export async function deleteClassMaterial(materialId: string): Promise<void> {
-  const updated = (await getStoredMaterials()).filter(m => m.id !== materialId);
-  await kvSet(MATERIALS_KEY, updated);
+  await kvUpdate<StoredClassMaterial[]>(MATERIALS_KEY, [], all => all.filter(m => m.id !== materialId));
 }
 
 export async function incrementMaterialDownload(materialId: string): Promise<void> {
-  const all = await getStoredMaterials();
-  const idx = all.findIndex(m => m.id === materialId);
-  if (idx >= 0) {
-    all[idx] = { ...all[idx], download_count: all[idx].download_count + 1 };
-    await kvSet(MATERIALS_KEY, all);
-  }
+  // Bộ đếm — đọc-sửa-ghi nguyên tử để 2 lượt tải đồng thời không ghi đè nhau.
+  await kvUpdate<StoredClassMaterial[]>(MATERIALS_KEY, [], all =>
+    all.map(m => m.id === materialId ? { ...m, download_count: m.download_count + 1 } : m)
+  );
 }
 
 // ── Homework file attachments (localStorage) ──────────────────────────────────
@@ -1221,7 +1226,12 @@ export async function getClassTuition(classId: string): Promise<ClassTuitionConf
   if (typeof parsed.default_fee === "number" && !parsed.package_fees) {
     return { package_fees: { online: parsed.default_fee, advanced: parsed.default_fee, offline: parsed.default_fee }, students: parsed.students ?? {} };
   }
-  return parsed;
+  // Chuẩn hóa: dữ liệu cũ/hỏng có thể thiếu package_fees hoặc students →
+  // caller đọc config.package_fees.online sẽ crash. Luôn đảm bảo đủ field.
+  return {
+    package_fees: parsed.package_fees ?? { ...DEFAULT_TUITION.package_fees },
+    students: parsed.students ?? {},
+  };
 }
 
 export async function saveClassTuition(classId: string, config: ClassTuitionConfig): Promise<void> {
