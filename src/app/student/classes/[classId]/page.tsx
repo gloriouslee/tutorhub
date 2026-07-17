@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -173,13 +173,33 @@ interface HomeworkItem {
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
+const VALID_TABS: TabKey[] = ["overview", "curriculum", "sessions", "attendance", "homework", "materials", "lectures", "notes"];
+
 export default function StudentClassDetailPage() {
   const { studentId, studentName, assignedClassId, ready } = useStudentContext();
   const CURRENT_STUDENT_ID = studentId;
   const params  = useParams();
   const classId = params.classId as string;
+  const router = useRouter();
 
-  const [activeTab,    setActiveTab]    = useState<TabKey>("overview");
+  // Tab hiện tại đồng bộ với URL (?tab=) để nút back của trình duyệt khôi phục đúng tab.
+  // Đọc từ URL khi mount + khi back/forward (popstate); mặc định "overview" để khớp SSR.
+  const [activeTab, setActiveTabState] = useState<TabKey>("overview");
+  useEffect(() => {
+    const sync = () => {
+      const t = new URLSearchParams(window.location.search).get("tab") as TabKey | null;
+      setActiveTabState(t && VALID_TABS.includes(t) ? t : "overview");
+    };
+    sync();
+    window.addEventListener("popstate", sync);
+    return () => window.removeEventListener("popstate", sync);
+  }, []);
+  const setActiveTab = (key: TabKey) => {
+    setActiveTabState(key);
+    const sp = new URLSearchParams(window.location.search);
+    sp.set("tab", key);
+    router.replace(`?${sp.toString()}`, { scroll: false });
+  };
   const [watched,      setWatched]      = useState<Set<string>>(new Set());
   const [submissions,  setSubmissions]  = useState<SubmissionRecord[]>([]);
   const [onlineLink,   setOnlineLink]   = useState<string>("");

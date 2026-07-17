@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { Button } from "@/components/ui/button";
@@ -68,10 +68,31 @@ const TABS: { key: TabKey; label: string; icon: React.ElementType }[] = [
 
 // ── Main page ────────────────────────────────────────────────────────────────
 
+const VALID_TABS: TabKey[] = TABS.map(t => t.key);
+
 export default function TeacherClassDetailPage() {
   const params = useParams();
   const classId = params.classId as string;
-  const [activeTab, setActiveTab] = useState<TabKey>("overview");
+  const router = useRouter();
+
+  // Tab hiện tại đồng bộ với URL (?tab=) để nút back của trình duyệt khôi phục đúng tab.
+  // Đọc từ URL khi mount + khi back/forward (popstate); mặc định "overview" để khớp SSR.
+  const [activeTab, setActiveTabState] = useState<TabKey>("overview");
+  useEffect(() => {
+    const sync = () => {
+      const t = new URLSearchParams(window.location.search).get("tab") as TabKey | null;
+      setActiveTabState(t && VALID_TABS.includes(t) ? t : "overview");
+    };
+    sync();
+    window.addEventListener("popstate", sync);
+    return () => window.removeEventListener("popstate", sync);
+  }, []);
+  const setActiveTab = (key: TabKey) => {
+    setActiveTabState(key);
+    const sp = new URLSearchParams(window.location.search);
+    sp.set("tab", key);
+    router.replace(`?${sp.toString()}`, { scroll: false });
+  };
   const [uploadModal, setUploadModal] = useState<"lecture" | "material" | "note" | null>(null);
   const [commentModalStudent, setCommentModalStudent] = useState<any | null>(null);
   const [comments, setComments] = useState<Record<string, { text: string; date: string; rating: number }[]>>({});
