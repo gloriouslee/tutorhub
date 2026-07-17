@@ -1,10 +1,10 @@
 "use client";
 
-import { Users, BookOpen, DollarSign, GraduationCap } from "lucide-react";
+import { Users, BookOpen, DollarSign, GraduationCap, Loader2 } from "lucide-react";
 import StatCard from "@/components/shared/StatCard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { PaymentBadge, LearningModeBadge } from "@/components/shared";
+import { LearningModeBadge } from "@/components/shared";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import Link from "next/link";
@@ -13,69 +13,51 @@ import {
   LineChart, Line, CartesianGrid, PieChart, Pie, Cell, Legend,
 } from "recharts";
 import { useState, useEffect } from "react";
-import { getStudents, getTeachers, getClasses, getPayments, getAttendance } from "@/lib/storage";
+import { getInvoicesRaw, type TuitionInvoice } from "@/lib/storage";
+import {
+  loadAnalyticsData, computeKpis, revenueTrend, attendanceTrend, learningModeDist,
+  type AnalyticsData,
+} from "@/lib/analytics";
 
-const MONTHS = ["Th.1", "Th.2", "Th.3", "Th.4", "Th.5", "Th.6", "Th.7", "Th.8", "Th.9", "Th.10", "Th.11", "Th.12"];
+const AXIS = { fontSize: 11, fill: "rgb(var(--muted-foreground))" };
+const TOOLTIP = { background: "rgb(var(--card))", border: "1px solid rgb(var(--border))", borderRadius: 12, fontSize: 12 };
+const INV_STATUS: Record<string, { label: string; cls: string }> = {
+  paid:                 { label: "Đã thu",     cls: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" },
+  pending:              { label: "Chờ thu",    cls: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400" },
+  pending_verification: { label: "Chờ xác minh", cls: "bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-400" },
+};
 
 export default function AdminDashboard() {
-  const [students,   setStudents]   = useState<any[]>([]);
-  const [teachers,   setTeachers]   = useState<any[]>([]);
-  const [classes,    setClasses]    = useState<any[]>([]);
-  const [payments,   setPayments]   = useState<any[]>([]);
-  const [attendance, setAttendance] = useState<any[]>([]);
+  const [data, setData] = useState<AnalyticsData | null>(null);
+  const [invoices, setInvoices] = useState<TuitionInvoice[]>([]);
 
   useEffect(() => {
-    async function loadData() {
-      const [s, t, c, p, a] = await Promise.all([
-        getStudents(), getTeachers(), getClasses(), getPayments(), getAttendance(),
-      ]);
-      setStudents(s); setTeachers(t); setClasses(c); setPayments(p); setAttendance(a);
-    }
-    loadData();
+    loadAnalyticsData().then(setData);
+    getInvoicesRaw().then(setInvoices);
   }, []);
 
-  const totalRevenue   = payments.filter(p => p.payment_status === "paid").reduce((s, p) => s + p.amount, 0);
-  const pendingRevenue = payments.filter(p => p.payment_status !== "paid").reduce((s, p) => s + p.amount, 0);
+  if (!data) {
+    return (
+      <div className="flex flex-col items-center justify-center py-24">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <p className="text-sm text-muted-foreground mt-3">Đang tải dữ liệu…</p>
+      </div>
+    );
+  }
 
-  const onlineCount  = students.filter(s => s.learning_type === "online").length;
-  const offlineCount = students.filter(s => s.learning_type === "offline").length;
-  const hybridCount  = students.filter(s => s.learning_type === "hybrid").length;
+  const { students, teachers, classes } = data;
+  const kpis = computeKpis(data);
+  const totalRevenue = kpis.totalRevenue;
 
-  const pieData = [
-    { name: "Trực tuyến", value: onlineCount,  color: "#3b82f6" },
-    { name: "Tại lớp",    value: offlineCount, color: "#8b5cf6" },
-    { name: "Kết hợp",    value: hybridCount,  color: "#14b8a6" },
-  ];
+  const pieData = learningModeDist(data);
+  const revenueChartData = revenueTrend(data, 5);
+  const attendanceChartData = attendanceTrend(data, 5).map(d => ({ month: d.month, diemDanh: d.coMat }));
 
-  // Last 5 months (including current), computed from real data
-  const now = new Date();
-  const lastMonths = Array.from({ length: 5 }, (_, i) => {
-    const d = new Date(now.getFullYear(), now.getMonth() - (4 - i), 1);
-    return { year: d.getFullYear(), month: d.getMonth() };
-  });
-
-  const revenueChartData = lastMonths.map(({ year, month }) => {
-    const doanhThu = payments
-      .filter(p => {
-        if (p.payment_status !== "paid") return false;
-        const d = new Date(p.paid_date || p.due_date);
-        return d.getFullYear() === year && d.getMonth() === month;
-      })
-      .reduce((s, p) => s + p.amount, 0);
-    return { month: MONTHS[month], doanhThu, mucTieu: 90000000 };
-  });
-
-  const attendanceChartData = lastMonths.map(({ year, month }) => {
-    const monthRecords = attendance.filter(a => {
-      const d = new Date(a.attendance_date);
-      return d.getFullYear() === year && d.getMonth() === month;
-    });
-    const attended = monthRecords.filter(a => a.status === "present" || a.status === "late").length;
-    return {
-      month: MONTHS[month],
-      diemDanh: monthRecords.length > 0 ? Math.round((attended / monthRecords.length) * 100) : 0,
-    };
-  });
+  const paidInvoices    = invoices.filter(i => i.status === "paid");
+  const pendingInvoices = invoices.filter(i => i.status !== "paid");
+  const pendingRevenue  = pendingInvoices.reduce((s, i) => s + i.amount, 0);
+  const recentInvoices  = [...invoices].sort((a, b) => (b.paid_at ?? b.due_date).localeCompare(a.paid_at ?? a.due_date)).slice(0, 5);
+  const studentName = (id: string) => students.find(s => s.id === id)?.full_name ?? id;
 
   return (
     <div className="space-y-6">
@@ -103,28 +85,22 @@ export default function AdminDashboard() {
         <StatCard title="Tổng học viên"  value={students.length}          icon={GraduationCap} iconBg="bg-rose-100 dark:bg-rose-900/30"    iconColor="text-rose-600"    delay={0} />
         <StatCard title="Giáo viên"      value={teachers.length}          icon={Users}         iconBg="bg-pink-100 dark:bg-pink-900/30"    iconColor="text-pink-600"    delay={100} />
         <StatCard title="Lớp đang hoạt động" value={classes.length}      icon={BookOpen}      iconBg="bg-fuchsia-100 dark:bg-fuchsia-900/30" iconColor="text-fuchsia-600" delay={200} />
-        <StatCard title="Doanh thu tháng" value={formatCurrency(totalRevenue)} icon={DollarSign} iconBg="bg-purple-100 dark:bg-purple-900/30" iconColor="text-purple-600" delay={300} />
+        <StatCard title="Tổng doanh thu" value={formatCurrency(totalRevenue)} icon={DollarSign} iconBg="bg-purple-100 dark:bg-purple-900/30" iconColor="text-purple-600" delay={300} />
       </div>
 
       {/* Charts row */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 animate-fade-in delay-100">
         {/* Revenue bar chart */}
         <Card className="md:col-span-2 border border-border">
-          <CardHeader><CardTitle className="text-sm">Doanh thu vs Mục tiêu</CardTitle></CardHeader>
+          <CardHeader><CardTitle className="text-sm">Xu hướng doanh thu</CardTitle></CardHeader>
           <CardContent>
             <ResponsiveContainer width="100%" height={200}>
-              <BarChart data={revenueChartData} barSize={14}>
+              <BarChart data={revenueChartData} barSize={22}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgb(var(--border))" vertical={false} />
-                <XAxis dataKey="month" tick={{ fontSize: 11, fill: "rgb(var(--muted-foreground))" }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fontSize: 11, fill: "rgb(var(--muted-foreground))" }} axisLine={false} tickLine={false}
-                  tickFormatter={v => `${(v / 1000000).toFixed(0)}tr`} />
-                <Tooltip
-                  contentStyle={{ background: "rgb(var(--card))", border: "1px solid rgb(var(--border))", borderRadius: 12, fontSize: 12 }}
-                  formatter={(v: any) => [formatCurrency(v)]}
-                  cursor={{ fill: "rgb(var(--muted))" }}
-                />
+                <XAxis dataKey="month" tick={AXIS} axisLine={false} tickLine={false} />
+                <YAxis tick={AXIS} axisLine={false} tickLine={false} tickFormatter={v => `${(v / 1000000).toFixed(0)}tr`} />
+                <Tooltip contentStyle={TOOLTIP} formatter={(v: any) => [formatCurrency(v), "Doanh thu"]} cursor={{ fill: "rgb(var(--muted))" }} />
                 <Bar dataKey="doanhThu" fill="#e11d48" radius={[6, 6, 0, 0]} name="Doanh thu" />
-                <Bar dataKey="mucTieu"  fill="rgb(var(--muted))" radius={[6, 6, 0, 0]} name="Mục tiêu" />
               </BarChart>
             </ResponsiveContainer>
           </CardContent>
@@ -141,10 +117,7 @@ export default function AdminDashboard() {
                 </Pie>
                 <Legend iconType="circle" iconSize={8}
                   formatter={val => <span style={{ fontSize: 11, color: "rgb(var(--muted-foreground))" }}>{val}</span>} />
-                <Tooltip
-                  contentStyle={{ background: "rgb(var(--card))", border: "1px solid rgb(var(--border))", borderRadius: 12, fontSize: 12 }}
-                  formatter={(v: any, name: any) => [v, name]}
-                />
+                <Tooltip contentStyle={TOOLTIP} formatter={(v: any, name: any) => [v, name]} />
               </PieChart>
             </ResponsiveContainer>
           </CardContent>
@@ -179,7 +152,7 @@ export default function AdminDashboard() {
           </CardContent>
         </Card>
 
-        {/* Payment overview */}
+        {/* Payment overview (from real invoices) */}
         <Card className="border border-border">
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
@@ -190,24 +163,28 @@ export default function AdminDashboard() {
             </div>
           </CardHeader>
           <CardContent>
-            <div className="space-y-2">
-              {payments.slice(0, 5).map(pay => {
-                const student = students.find(s => s.id === pay.student_id);
-                return (
-                  <div key={pay.id} className="flex items-center gap-3 p-2.5 rounded-xl hover:bg-muted transition-colors">
-                    <Avatar size="sm"><AvatarFallback name={student?.full_name ?? "?"} /></Avatar>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-foreground truncate">{student?.full_name}</p>
-                      <p className="text-xs text-muted-foreground">{pay.description} · Hạn {formatDate(pay.due_date)}</p>
+            {recentInvoices.length === 0 ? (
+              <p className="py-8 text-center text-sm text-muted-foreground">Chưa có hóa đơn học phí nào</p>
+            ) : (
+              <div className="space-y-2">
+                {recentInvoices.map(inv => {
+                  const st = INV_STATUS[inv.status] ?? INV_STATUS.pending;
+                  return (
+                    <div key={inv.id} className="flex items-center gap-3 p-2.5 rounded-xl hover:bg-muted transition-colors">
+                      <Avatar size="sm"><AvatarFallback name={studentName(inv.child_id)} /></Avatar>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-foreground truncate">{studentName(inv.child_id)}</p>
+                        <p className="text-xs text-muted-foreground truncate">{inv.title} · Hạn {formatDate(inv.due_date)}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-sm font-semibold text-foreground">{formatCurrency(inv.amount)}</p>
+                        <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${st.cls}`}>{st.label}</span>
+                      </div>
                     </div>
-                    <div className="text-right">
-                      <p className="text-sm font-semibold text-foreground">{formatCurrency(pay.amount)}</p>
-                      <PaymentBadge status={pay.payment_status} />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+                  );
+                })}
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -221,13 +198,9 @@ export default function AdminDashboard() {
             <ResponsiveContainer width="100%" height={180}>
               <LineChart data={attendanceChartData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgb(var(--border))" />
-                <XAxis dataKey="month" tick={{ fontSize: 11, fill: "rgb(var(--muted-foreground))" }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fontSize: 11, fill: "rgb(var(--muted-foreground))" }} axisLine={false} tickLine={false}
-                  tickFormatter={v => `${v}%`} domain={[0, 100]} />
-                <Tooltip
-                  contentStyle={{ background: "rgb(var(--card))", border: "1px solid rgb(var(--border))", borderRadius: 12, fontSize: 12 }}
-                  formatter={(v: any) => [`${v}%`, "Có mặt"]}
-                />
+                <XAxis dataKey="month" tick={AXIS} axisLine={false} tickLine={false} />
+                <YAxis tick={AXIS} axisLine={false} tickLine={false} tickFormatter={v => `${v}%`} domain={[0, 100]} />
+                <Tooltip contentStyle={TOOLTIP} formatter={(v: any) => [`${v}%`, "Có mặt"]} />
                 <Line type="monotone" dataKey="diemDanh" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} name="Có mặt %" />
               </LineChart>
             </ResponsiveContainer>
@@ -246,8 +219,8 @@ export default function AdminDashboard() {
           </CardHeader>
           <CardContent className="space-y-3">
             {teachers.slice(0, 4).map(t => {
-              const teacherClasses   = classes.filter(c => c.tutor_id === t.id);
-              const totalStudents    = teacherClasses.reduce((s: number, c: any) => s + (c.student_ids?.length ?? 0), 0);
+              const teacherClasses = classes.filter(c => data.teacherOf[c.id] === t.id);
+              const totalStudents  = teacherClasses.reduce((s, c) => s + (c.student_ids?.length ?? 0), 0);
               return (
                 <div key={t.id} className="flex items-center gap-3 p-2.5 rounded-xl hover:bg-muted transition-colors">
                   <Avatar size="sm"><AvatarFallback name={t.full_name} /></Avatar>
