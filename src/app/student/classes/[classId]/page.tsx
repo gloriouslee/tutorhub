@@ -13,7 +13,7 @@ import {
   MOCK_LECTURES, MOCK_CLASS_NOTES, MOCK_EXAM_SCORES, MOCK_HOMEWORK, MOCK_ATTENDANCE,
 } from "@/lib/mock-data";
 import { getSubmissionsByStudent, type SubmissionRecord } from "@/lib/supabase/submissions";
-import { kvGet, getClasses, getClassScheduleOverride, getOnlineLink, getStudentPackages, getCurriculum, getClassMaterials, incrementMaterialDownload, type StudentPackage, type CurriculumSession, type StoredClassMaterial } from "@/lib/storage";
+import { kvGet, getClasses, getClassScheduleOverride, getOnlineLink, getStudentPackages, getCurriculum, getClassMaterials, incrementMaterialDownload, isLessonVisibleToStudent, type StudentPackage, type CurriculumSession, type StoredClassMaterial } from "@/lib/storage";
 import CurriculumView from "@/components/student/CurriculumView";
 import {
   BookOpen, Clock, Video, MapPin, Users, ArrowLeft, FileText, Download,
@@ -103,9 +103,9 @@ const LESSON_TYPE_META: Record<string, { label: string; icon: React.ElementType;
   exam:     { label: "Bài kiểm tra",   icon: GraduationCap,   color: "text-violet-600 dark:text-violet-400" },
 };
 
-function StudentCurriculumSessionPreview({ session, classId }: { session: CurriculumSession; classId: string }) {
+function StudentCurriculumSessionPreview({ session, classId, studentId }: { session: CurriculumSession; classId: string; studentId: string }) {
   const [open, setOpen] = useState(false);
-  const published = session.lessons.filter(l => l.is_published);
+  const published = session.lessons.filter(l => isLessonVisibleToStudent(l, studentId));
   if (published.length === 0) return null;
   return (
     <div className="border border-border/60 rounded-lg overflow-hidden text-xs">
@@ -263,7 +263,7 @@ export default function StudentClassDetailPage() {
       chapters.forEach(ch => ch.sessions.forEach(s => {
         if (s.date) byDate[s.date] = s;
         s.lessons.forEach(lesson => {
-          if (lesson.type === "homework" && lesson.is_published) {
+          if (lesson.type === "homework" && isLessonVisibleToStudent(lesson, studentId)) {
             currHws.push({
               id: lesson.id,
               class_id: classId,
@@ -742,7 +742,7 @@ export default function StudentClassDetailPage() {
                                 <p className="text-xs text-blue-800 dark:text-blue-300 leading-relaxed">{upNote}</p>
                               </div>
                             )}
-                            {upCurrSession && <StudentCurriculumSessionPreview session={upCurrSession} classId={classId} />}
+                            {upCurrSession && <StudentCurriculumSessionPreview session={upCurrSession} classId={classId} studentId={CURRENT_STUDENT_ID} />}
                           </div>
                         )}
                       </div>
@@ -815,7 +815,7 @@ export default function StudentClassDetailPage() {
 
                               {/* Curriculum session content */}
                               {currSession && (
-                                <StudentCurriculumSessionPreview session={currSession} classId={classId} />
+                                <StudentCurriculumSessionPreview session={currSession} classId={classId} studentId={CURRENT_STUDENT_ID} />
                               )}
 
                               {/* Homework for this session */}
@@ -856,6 +856,7 @@ export default function StudentClassDetailPage() {
           {activeTab === "curriculum" && (
             <CurriculumView
               classId={classId}
+              studentId={CURRENT_STUDENT_ID}
               watched={watched}
               onWatch={(id) => {
                 const next = new Set(watched);

@@ -533,6 +533,8 @@ export interface CurriculumLesson {
   description?: string;
   due_date?: string;
   is_published: boolean;
+  /** undefined/null hoặc mảng rỗng = hiển thị cho cả lớp; string[] = chỉ các student_id được chọn mới thấy */
+  assigned_to?: string[] | null;
   exam_content?: ExamContent;
   // Exam scheduling / access control
   exam_status?: "draft" | "open" | "closed"; // default: "draft"
@@ -552,6 +554,14 @@ export interface CurriculumChapter {
   title: string;
   order: number;
   sessions: CurriculumSession[];
+}
+
+/** Nội dung lộ trình có hiển thị cho học viên `studentId` không?
+ *  Điều kiện: đã publish VÀ (giao cả lớp HOẶC nằm trong danh sách được chọn). */
+export function isLessonVisibleToStudent(lesson: CurriculumLesson, studentId: string): boolean {
+  if (!lesson.is_published) return false;
+  if (!lesson.assigned_to || lesson.assigned_to.length === 0) return true;
+  return lesson.assigned_to.includes(studentId);
 }
 
 export async function getCurriculum(classId: string): Promise<CurriculumChapter[]> {

@@ -18,9 +18,11 @@ import {
   PlayCircle, FileText, ClipboardList, Video, Eye, EyeOff,
   GripVertical, BookOpen, CalendarDays, Link2, Link2Off,
   Upload, Loader2, AlertCircle, PenSquare, Lock, Unlock,
-  Clock, Users,
+  Clock, Users, User,
 } from "lucide-react";
 import { ClassSchedule } from "@/types";
+
+interface StudentLite { id: string; full_name: string }
 
 // ── Session generation (same logic as sessions tab) ───────────────────────────
 const DAY_TO_NUM: Record<string, number> = {
@@ -70,12 +72,14 @@ function uid() { return `${Date.now()}_${Math.random().toString(36).slice(2, 7)}
 function LessonModal({
   classId,
   initial,
+  students = [],
   onSave,
   onClose,
   onOpenExam,
 }: {
   classId: string;
   initial?: Partial<CurriculumLesson>;
+  students?: StudentLite[];
   onSave: (lesson: CurriculumLesson) => void;
   onClose: () => void;
   onOpenExam?: (title: string) => void;
@@ -87,6 +91,19 @@ function LessonModal({
   const [desc,       setDesc]       = useState(initial?.description ?? "");
   const [dueDate,    setDueDate]    = useState(initial?.due_date ?? "");
   const [published,  setPublished]  = useState(initial?.is_published ?? true);
+
+  // Phạm vi hiển thị: "all" = cả lớp, "select" = chọn từng học viên
+  const [scope, setScope] = useState<"all" | "select">(
+    initial?.assigned_to && initial.assigned_to.length > 0 ? "select" : "all"
+  );
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set(initial?.assigned_to ?? []));
+  function toggleStudent(id: string) {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
 
   // File upload state for material type
   const [fileMode,    setFileMode]   = useState<"url" | "upload">("url");
@@ -124,6 +141,7 @@ function LessonModal({
       description:  desc.trim() || undefined,
       due_date:     type === "homework" ? dueDate || undefined : undefined,
       is_published: published,
+      assigned_to:  scope === "select" ? Array.from(selectedIds) : null,
     });
     setUploading(false);
     onClose();
@@ -283,6 +301,54 @@ function LessonModal({
             </div>
             <span className="text-xs text-muted-foreground">{published ? "Hiển thị với học viên" : "Ẩn (bản nháp)"}</span>
           </label>
+
+          {/* Phạm vi hiển thị — ai được thấy nội dung này */}
+          {published && students.length > 0 && (
+            <div>
+              <label className="text-xs font-medium text-muted-foreground block mb-1.5">Hiển thị cho</label>
+              <div className="flex gap-2 mb-2">
+                <button
+                  type="button"
+                  onClick={() => setScope("all")}
+                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-all ${scope === "all" ? "border-primary bg-primary/5 text-primary" : "border-border text-muted-foreground hover:border-primary/40"}`}
+                >
+                  <Users className="h-3.5 w-3.5" /> Cả lớp
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setScope("select")}
+                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-all ${scope === "select" ? "border-primary bg-primary/5 text-primary" : "border-border text-muted-foreground hover:border-primary/40"}`}
+                >
+                  <User className="h-3.5 w-3.5" /> Chọn học viên
+                </button>
+              </div>
+              {scope === "select" && (
+                <div className="space-y-1.5 rounded-xl border border-border p-2.5 bg-muted/20 max-h-44 overflow-y-auto">
+                  <div className="flex items-center justify-between mb-0.5">
+                    <span className="text-[11px] text-muted-foreground">{selectedIds.size}/{students.length} được chọn</span>
+                    <button
+                      type="button"
+                      className="text-[11px] text-primary hover:underline"
+                      onClick={() => setSelectedIds(selectedIds.size === students.length ? new Set() : new Set(students.map(s => s.id)))}
+                    >
+                      {selectedIds.size === students.length ? "Bỏ chọn tất cả" : "Chọn tất cả"}
+                    </button>
+                  </div>
+                  {students.map(s => (
+                    <label key={s.id} className="flex items-center gap-2.5 p-1.5 rounded-lg hover:bg-muted/40 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(s.id)}
+                        onChange={() => toggleStudent(s.id)}
+                        className="h-3.5 w-3.5 rounded accent-primary"
+                      />
+                      <span className="text-xs text-foreground">{s.full_name}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="flex justify-end gap-2 px-5 py-4 border-t border-border">
@@ -334,7 +400,7 @@ function InlineEdit({ value, onSave, placeholder }: { value: string; onSave: (v:
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
-export default function CurriculumTab({ classId, schedule }: { classId: string; schedule: ClassSchedule[] }) {
+export default function CurriculumTab({ classId, schedule, students = [] }: { classId: string; schedule: ClassSchedule[]; students?: StudentLite[] }) {
   const slots = generateSlots(schedule);
   const [chapters,     setChapters]     = useState<CurriculumChapter[]>([]);
   const [expanded,     setExpanded]     = useState<Set<string>>(new Set());
@@ -683,6 +749,14 @@ export default function CurriculumTab({ classId, schedule }: { classId: string; 
                                       </div>
                                     )}
                                   </div>
+                                  {lesson.is_published && lesson.assigned_to && lesson.assigned_to.length > 0 && (
+                                    <span
+                                      className="flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full shrink-0 bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400"
+                                      title={`Chỉ ${lesson.assigned_to.length} học viên thấy nội dung này`}
+                                    >
+                                      <User className="h-2.5 w-2.5" />{lesson.assigned_to.length}
+                                    </span>
+                                  )}
                                   <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full shrink-0 ${meta.color}`}>
                                     {meta.label}
                                   </span>
@@ -764,6 +838,7 @@ export default function CurriculumTab({ classId, schedule }: { classId: string; 
         <LessonModal
           classId={classId}
           initial={lessonModal.lesson}
+          students={students}
           onSave={lesson => saveLesson(lessonModal.chapterId, lessonModal.sessionId, lesson)}
           onClose={() => setLessonModal(null)}
           onOpenExam={title => setExamModal({

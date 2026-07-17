@@ -536,7 +536,7 @@ export default function TeacherClassDetailPage() {
 
           {/* ── Curriculum ── */}
           {activeTab === "curriculum" && (
-            <CurriculumTab classId={classId} schedule={scheduleForDisplay} />
+            <CurriculumTab classId={classId} schedule={scheduleForDisplay} students={classStudents} />
           )}
 
           {/* ── Sessions ── */}

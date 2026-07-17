@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { getCurriculum, type CurriculumLesson } from "@/lib/storage";
+import { getCurriculum, isLessonVisibleToStudent, type CurriculumLesson } from "@/lib/storage";
 import {
   ChevronDown, ChevronRight, PlayCircle, FileText,
   ClipboardList, Video, CheckCircle2, ExternalLink,
@@ -40,6 +40,7 @@ function getYouTubeId(url: string): string | null {
 
 interface Props {
   classId: string;
+  studentId: string;
   watched: Set<string>;
   onWatch: (id: string, url?: string) => void;
   submissions: { homework_id: string }[];
@@ -47,7 +48,8 @@ interface Props {
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export default function CurriculumView({ classId, watched, onWatch, submissions }: Props) {
+export default function CurriculumView({ classId, studentId, watched, onWatch, submissions }: Props) {
+  const isVisible = (l: CurriculumLesson) => isLessonVisibleToStudent(l, studentId);
   const [chapters,     setChapters]     = useState<Awaited<ReturnType<typeof getCurriculum>>>([]);
   const [expanded,     setExpanded]     = useState<Set<string>>(new Set());
   const [activeLesson, setActiveLesson] = useState<CurriculumLesson | null>(null);
@@ -108,7 +110,7 @@ export default function CurriculumView({ classId, watched, onWatch, submissions 
     );
   }
 
-  const allPublished  = chapters.flatMap(ch => ch.sessions.flatMap(s => s.lessons.filter(l => l.is_published)));
+  const allPublished  = chapters.flatMap(ch => ch.sessions.flatMap(s => s.lessons.filter(isVisible)));
   const completedCount = allPublished.filter(l => isCompleted(l)).length;
   const totalCount     = allPublished.length;
   const pct            = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
@@ -192,7 +194,7 @@ export default function CurriculumView({ classId, watched, onWatch, submissions 
         <div className="flex-1 overflow-y-auto divide-y divide-border/40">
           {chapters.map((chapter, ci) => {
             const chExpanded = expanded.has(chapter.id);
-            const chLessons  = chapter.sessions.flatMap(s => s.lessons.filter(l => l.is_published));
+            const chLessons  = chapter.sessions.flatMap(s => s.lessons.filter(isVisible));
             const chDone     = chLessons.filter(l => isCompleted(l)).length;
 
             return (
@@ -214,7 +216,7 @@ export default function CurriculumView({ classId, watched, onWatch, submissions 
                 {/* Sessions */}
                 {chExpanded && chapter.sessions.map((session, si) => {
                   const sExpanded  = expanded.has(session.id);
-                  const pubLessons = session.lessons.filter(l => l.is_published);
+                  const pubLessons = session.lessons.filter(isVisible);
                   const sDone      = pubLessons.filter(l => isCompleted(l)).length;
                   if (pubLessons.length === 0) return null;
 

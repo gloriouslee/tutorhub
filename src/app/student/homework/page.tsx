@@ -18,7 +18,7 @@ import {
   getSubmissionsByStudent,
   type SubmissionRecord,
 } from "@/lib/supabase/submissions";
-import { kvGet, kvSet, getCurriculum } from "@/lib/storage";
+import { kvGet, kvSet, getCurriculum, isLessonVisibleToStudent } from "@/lib/storage";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const ACCEPTED = ".pdf,.doc,.docx,.jpg,.jpeg,.png";
@@ -89,7 +89,7 @@ export default function StudentHomeworkPage() {
         const items: HomeworkItem[] = [];
         chapters.forEach(ch => ch.sessions.forEach(s => {
           s.lessons.forEach(lesson => {
-            if (lesson.type === "homework" && lesson.is_published) {
+            if (lesson.type === "homework" && isLessonVisibleToStudent(lesson, STUDENT_ID)) {
               items.push({
                 id: lesson.id,
                 class_id: cid,
