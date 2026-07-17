@@ -1,19 +1,25 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import StatCard from "@/components/shared/StatCard";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, LineChart, Line,
   CartesianGrid, PieChart, Pie, Cell, Legend, AreaChart, Area,
 } from "recharts";
-import { DollarSign, Users, GraduationCap, BookOpen, CheckSquare, Trophy } from "lucide-react";
+import { DollarSign, Users, GraduationCap, BookOpen, CheckSquare, Trophy, SlidersHorizontal } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
 import {
   computeKpis, revenueByTeacher, revenueByClass, revenueTrend, studentGrowth,
   enrollmentByClass, examPerfByClass, attendanceTrend, attendanceByClass,
-  learningModeDist, topStudents, type AnalyticsData,
+  learningModeDist, topStudents, filterByMonths, type AnalyticsData,
 } from "@/lib/analytics";
+
+const RANGES = [
+  { months: 3,  label: "3 tháng" },
+  { months: 6,  label: "6 tháng" },
+  { months: 12, label: "12 tháng" },
+];
 
 const AXIS = { fontSize: 11, fill: "rgb(var(--muted-foreground))" };
 const TOOLTIP_STYLE = { background: "rgb(var(--card))", border: "1px solid rgb(var(--border))", borderRadius: 12, fontSize: 12 };
@@ -56,20 +62,96 @@ export default function AnalyticsDashboard({
   showTeacherBreakdown?: boolean;
   months?: number;
 }) {
-  const kpis = useMemo(() => computeKpis(data, classIds), [data, classIds]);
-  const byTeacher = useMemo(() => revenueByTeacher(data, classIds), [data, classIds]);
-  const byClass = useMemo(() => revenueByClass(data, classIds), [data, classIds]);
-  const revTrend = useMemo(() => revenueTrend(data, months, classIds), [data, classIds, months]);
-  const growth = useMemo(() => studentGrowth(data, months, classIds), [data, classIds, months]);
-  const enroll = useMemo(() => enrollmentByClass(data, classIds), [data, classIds]);
-  const examPerf = useMemo(() => examPerfByClass(data, classIds), [data, classIds]);
-  const attTrend = useMemo(() => attendanceTrend(data, months, classIds), [data, classIds, months]);
-  const attByClass = useMemo(() => attendanceByClass(data, classIds), [data, classIds]);
-  const modeDist = useMemo(() => learningModeDist(data, classIds), [data, classIds]);
-  const tops = useMemo(() => topStudents(data, 5, classIds), [data, classIds]);
+  // ── Bộ lọc ──
+  const [range, setRange] = useState<number>(months);
+  const [teacherId, setTeacherId] = useState<string>("");   // "" = tất cả GV
+  const [classId, setClassId] = useState<string>("");       // "" = tất cả lớp
+
+  // Danh sách lớp/GV trong phạm vi (view GV đã bị prop classIds giới hạn)
+  const scopeClasses = useMemo(
+    () => data.classes.filter(c => !classIds || classIds.has(c.id)),
+    [data.classes, classIds]
+  );
+  const teacherClassOptions = useMemo(
+    () => (teacherId ? scopeClasses.filter(c => data.teacherOf[c.id] === teacherId) : scopeClasses),
+    [scopeClasses, teacherId, data.teacherOf]
+  );
+
+  // classIds hiệu lực = phạm vi prop ∩ (lọc lớp | lọc GV)
+  const effectiveClassIds = useMemo<Set<string> | undefined>(() => {
+    if (classId) return new Set([classId]);
+    if (teacherId) {
+      const t = new Set(scopeClasses.filter(c => data.teacherOf[c.id] === teacherId).map(c => c.id));
+      return classIds ? new Set([...t].filter(id => classIds.has(id))) : t;
+    }
+    return classIds;
+  }, [classId, teacherId, classIds, scopeClasses, data.teacherOf]);
+
+  // Lọc dữ liệu theo thời gian → KPI và biểu đồ luôn nhất quán trong cùng khoảng
+  const fdata = useMemo(() => filterByMonths(data, range), [data, range]);
+  const cids = effectiveClassIds;
+
+  const kpis = useMemo(() => computeKpis(fdata, cids), [fdata, cids]);
+  const byTeacher = useMemo(() => revenueByTeacher(fdata, cids), [fdata, cids]);
+  const byClass = useMemo(() => revenueByClass(fdata, cids), [fdata, cids]);
+  const revTrend = useMemo(() => revenueTrend(fdata, range, cids), [fdata, cids, range]);
+  const growth = useMemo(() => studentGrowth(fdata, range, cids), [fdata, cids, range]);
+  const enroll = useMemo(() => enrollmentByClass(fdata, cids), [fdata, cids]);
+  const examPerf = useMemo(() => examPerfByClass(fdata, cids), [fdata, cids]);
+  const attTrend = useMemo(() => attendanceTrend(fdata, range, cids), [fdata, cids, range]);
+  const attByClass = useMemo(() => attendanceByClass(fdata, cids), [fdata, cids]);
+  const modeDist = useMemo(() => learningModeDist(fdata, cids), [fdata, cids]);
+  const tops = useMemo(() => topStudents(fdata, 5, cids), [fdata, cids]);
+
+  const selectCls = "h-9 px-2.5 rounded-lg border border-border bg-background text-sm text-foreground outline-none focus:ring-2 focus:ring-primary/40";
 
   return (
     <div className="space-y-6">
+      {/* ── Filter bar ── */}
+      <div className="flex flex-wrap items-center gap-3 p-3 rounded-2xl border border-border bg-muted/20">
+        <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+          <SlidersHorizontal className="h-3.5 w-3.5" /> Bộ lọc
+        </span>
+
+        {/* Time range segmented */}
+        <div className="flex rounded-lg border border-border overflow-hidden">
+          {RANGES.map(r => (
+            <button
+              key={r.months}
+              onClick={() => setRange(r.months)}
+              className={`px-3 h-9 text-xs font-medium transition-colors ${range === r.months ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"}`}
+            >
+              {r.label}
+            </button>
+          ))}
+        </div>
+
+        {showTeacherBreakdown && (
+          <select
+            value={teacherId}
+            onChange={e => { setTeacherId(e.target.value); setClassId(""); }}
+            className={selectCls}
+          >
+            <option value="">Tất cả giáo viên</option>
+            {data.teachers.map(t => <option key={t.id} value={t.id}>{t.full_name}</option>)}
+          </select>
+        )}
+
+        <select value={classId} onChange={e => setClassId(e.target.value)} className={selectCls}>
+          <option value="">Tất cả lớp</option>
+          {teacherClassOptions.map(c => <option key={c.id} value={c.id}>{c.class_name}</option>)}
+        </select>
+
+        {(teacherId || classId || range !== months) && (
+          <button
+            onClick={() => { setRange(months); setTeacherId(""); setClassId(""); }}
+            className="text-xs text-primary hover:underline ml-auto"
+          >
+            Đặt lại
+          </button>
+        )}
+      </div>
+
       {/* ── KPI cards ── */}
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">
         <StatCard title="Doanh thu" value={compactVND(kpis.totalRevenue)} subtitle={formatCurrency(kpis.totalRevenue)} icon={DollarSign} iconColor="text-rose-500" iconBg="bg-rose-50 dark:bg-rose-950/20" delay={0} />

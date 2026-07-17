@@ -20,6 +20,7 @@ export interface RevenueEvent {
   amount: number;
   date: string;            // ISO hoặc YYYY-MM-DD
   classId?: string;
+  studentId?: string;
   teacherId?: string;
   source: "tuition" | "invoice";
 }
@@ -79,29 +80,51 @@ export async function loadAnalyticsData(): Promise<AnalyticsData> {
 
   // 1) Học phí do giáo viên ghi nhận (chính xác nhất: có classId + studentId)
   const tuitionConfigs = await Promise.all(classes.map(c => getClassTuition(c.id).then(cfg => ({ classId: c.id, cfg })).catch(() => null)));
+  const tuitionKeys = new Set<string>();  // classId|studentId|period đã ghi nhận
   for (const item of tuitionConfigs) {
     if (!item) continue;
-    for (const sdata of Object.values(item.cfg.students)) {
+    for (const [sid, sdata] of Object.entries(item.cfg.students)) {
       for (const p of sdata.payments ?? []) {
-        revenueEvents.push({ amount: p.amount, date: p.paid_at, classId: item.classId, teacherId: teacherOf[item.classId], source: "tuition" });
+        revenueEvents.push({ amount: p.amount, date: p.paid_at, classId: item.classId, studentId: sid, teacherId: teacherOf[item.classId], source: "tuition" });
+        tuitionKeys.add(`${item.classId}|${sid}|${p.period}`);
       }
     }
   }
 
-  // 2) Hoá đơn đã thanh toán (có class_id thì chính xác, không thì gán lớp đầu tiên của HV)
+  // 2) Hoá đơn đã thanh toán (có class_id thì chính xác, không thì gán lớp đầu tiên của HV).
+  //    Chống ĐẾM TRÙNG: recordTuitionPayment vừa lưu học phí vừa gạch nợ hoá đơn cùng
+  //    lớp+HV+kỳ → nếu đã có khoản học phí tương ứng thì bỏ qua hoá đơn (cùng một tiền).
   for (const inv of invoices as TuitionInvoice[]) {
     if (inv.status !== "paid") continue;
     const classId = inv.class_id ?? firstClassOf(inv.child_id);
+    if (classId && inv.period && tuitionKeys.has(`${classId}|${inv.child_id}|${inv.period}`)) continue;
     revenueEvents.push({
       amount: inv.amount,
       date: inv.paid_at ?? inv.due_date,
       classId,
+      studentId: inv.child_id,
       teacherId: classId ? teacherOf[classId] : undefined,
       source: "invoice",
     });
   }
 
   return { classes, students, teachers, attendance, examScores, revenueEvents, teacherOf };
+}
+
+// ── Lọc dữ liệu theo khoảng thời gian (N tháng gần nhất) ────────────────────────
+// Trả về AnalyticsData MỚI với revenue/attendance/exam đã lọc theo ngày, để KPI và
+// biểu đồ luôn nhất quán trong cùng khoảng. months=undefined/0 = toàn thời gian.
+export function filterByMonths(data: AnalyticsData, months?: number): AnalyticsData {
+  if (!months) return data;
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth() - (months - 1), 1);
+  const inRange = (d?: string) => !!d && parseLocalDate(d) >= start;
+  return {
+    ...data,
+    revenueEvents: data.revenueEvents.filter(e => inRange(e.date)),
+    attendance: data.attendance.filter(a => inRange(a.attendance_date)),
+    examScores: data.examScores.filter(s => inRange(s.exam_date)),
+  };
 }
 
 // ── Helpers lọc theo tập lớp (dùng cho view giáo viên) ──────────────────────────
