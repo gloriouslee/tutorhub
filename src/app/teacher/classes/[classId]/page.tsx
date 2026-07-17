@@ -197,16 +197,37 @@ export default function TeacherClassDetailPage() {
       .catch(() => {});
   }, [classId]);
 
-  // Build curriculum date-index
+  // Build curriculum date-index + extract curriculum homework
   useEffect(() => {
     getCurriculum(classId).then(chapters => {
       const map: Record<string, CurriculumSessionData> = {};
+      const currHws: Homework[] = [];
       for (const ch of chapters) {
         for (const s of ch.sessions) {
           if (s.date) map[s.date] = s;
+          for (const lesson of s.lessons) {
+            if (lesson.type === "homework") {
+              currHws.push({
+                id: lesson.id,
+                class_id: classId,
+                title: lesson.title,
+                description: (lesson as any).description,
+                due_date: (lesson as any).due_date ?? s.date ?? new Date().toISOString().slice(0, 10),
+                created_at: s.date ?? new Date().toISOString().slice(0, 10),
+                source: "curriculum",
+              });
+            }
+          }
         }
       }
       setCurriculumByDate(map);
+      if (currHws.length > 0) {
+        setHomeworks(prev => {
+          const existingIds = new Set(prev.map(h => h.id));
+          const fresh = currHws.filter(h => !existingIds.has(h.id));
+          return fresh.length > 0 ? [...prev, ...fresh] : prev;
+        });
+      }
     });
   }, [classId, activeTab]);
 

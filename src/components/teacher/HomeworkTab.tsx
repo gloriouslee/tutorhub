@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Plus, Edit3, Trash2, CheckSquare, Users, ChevronDown, ChevronUp } from "lucide-react";
+import { Plus, Edit3, Trash2, CheckSquare, Users, ChevronDown, ChevronUp, Map } from "lucide-react";
 import { formatDate, dueStatus, type Homework, type Submission } from "./classDetail.types";
 
 interface Student {
@@ -94,14 +94,22 @@ export default function HomeworkTab({
                         {isExpanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
                       </span>
                     )}
-                    <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground"
-                      onClick={e => { e.stopPropagation(); onEditHomework(hw); }}>
-                      <Edit3 className="h-3.5 w-3.5" />
-                    </Button>
-                    <Button size="icon" variant="ghost" className="h-8 w-8 text-red-500 hover:bg-red-50"
-                      onClick={e => { e.stopPropagation(); onDeleteHomework(hw.id); }}>
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
+                    {hw.source === "curriculum" ? (
+                      <span className="flex items-center gap-1 text-[10px] font-semibold px-2 py-1 rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 shrink-0">
+                        <Map className="h-3 w-3" /> Lộ trình
+                      </span>
+                    ) : (
+                      <>
+                        <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground"
+                          onClick={e => { e.stopPropagation(); onEditHomework(hw); }}>
+                          <Edit3 className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button size="icon" variant="ghost" className="h-8 w-8 text-red-500 hover:bg-red-50"
+                          onClick={e => { e.stopPropagation(); onDeleteHomework(hw.id); }}>
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </>
+                    )}
                   </div>
                 </div>
 

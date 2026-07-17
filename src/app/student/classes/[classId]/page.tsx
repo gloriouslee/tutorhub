@@ -236,11 +236,33 @@ export default function StudentClassDetailPage() {
     getStudentPackages(classId).then(pkgs => setMyPackage(pkgs[CURRENT_STUDENT_ID] ?? null));
     // Load attendance records
     loadSavedAttendance().then(setSavedAttendance);
-    // Load curriculum → build date map
+    // Load curriculum → build date map + extract published homework lessons
     getCurriculum(classId).then(chapters => {
       const byDate: Record<string, CurriculumSession> = {};
-      chapters.forEach(ch => ch.sessions.forEach(s => { if (s.date) byDate[s.date] = s; }));
+      const currHws: HomeworkItem[] = [];
+      chapters.forEach(ch => ch.sessions.forEach(s => {
+        if (s.date) byDate[s.date] = s;
+        s.lessons.forEach(lesson => {
+          if (lesson.type === "homework" && lesson.is_published) {
+            currHws.push({
+              id: lesson.id,
+              class_id: classId,
+              title: lesson.title,
+              description: (lesson as any).description,
+              due_date: (lesson as any).due_date ?? s.date ?? new Date().toISOString().slice(0, 10),
+              created_at: s.date,
+            });
+          }
+        });
+      }));
       setCurriculumByDate(byDate);
+      if (currHws.length > 0) {
+        setTeacherHomework(prev => {
+          const existingIds = new Set(prev.map(h => h.id));
+          const fresh = currHws.filter(h => !existingIds.has(h.id));
+          return fresh.length > 0 ? [...prev, ...fresh] : prev;
+        });
+      }
     });
     // Load session notes written by teacher
     kvGet<Record<string, string>>(`tutorhub_session_notes_${classId}`, {}).then(setSessionNotes);
@@ -296,6 +318,12 @@ export default function StudentClassDetailPage() {
     ...teacherHomework,
     ...MOCK_HOMEWORK.filter(h => h.class_id === classId && !kvHwIds.has(h.id)),
   ];
+  const incompleteClassHomework = classHomework.filter(hw => {
+    const submission = submissions.find(
+      s => s.homework_id === hw.id && s.student_id === CURRENT_STUDENT_ID
+    );
+    return !submission || submission.status === "returned";
+  });
   const publishedLectures = lectures.filter(l => l.is_published);
 
   // Completion: per-student localStorage tracking
@@ -346,7 +374,7 @@ export default function StudentClassDetailPage() {
     { key: "curriculum",  label: "Lộ trình",   icon: Map },
     { key: "sessions",    label: "Buổi học",   icon: CalendarDays, badge: pastSessions.length },
     { key: "attendance",  label: "Chuyên cần", icon: CheckSquare },
-    { key: "homework",    label: "Bài tập",    icon: CheckCircle2, badge: classHomework.length },
+    { key: "homework",    label: "Bài tập",    icon: CheckCircle2, badge: incompleteClassHomework.length },
     { key: "materials",   label: "Tài liệu",   icon: FileText,     badge: materials.length },
     { key: "lectures",    label: "Bài giảng",  icon: Presentation, badge: publishedLectures.length },
     { key: "notes",       label: "Ghi chú",    icon: StickyNote,   badge: notes.length > 0 ? notes.length : undefined },
@@ -1194,14 +1222,15 @@ export default function StudentClassDetailPage() {
           {/* ── Homework ── */}
           {activeTab === "homework" && (
             <div className="space-y-4">
-              {classHomework.length === 0 ? (
+              {incompleteClassHomework.length === 0 ? (
                 <Card><CardContent className="py-16 text-center text-muted-foreground">
                   <CheckCircle2 className="h-12 w-12 mx-auto opacity-20 mb-3" />
-                  <p className="text-sm font-medium">Chưa có bài tập nào cho lớp này</p>
+                  <p className="text-sm font-medium">Bạn đã hoàn thành tất cả bài tập của lớp này</p>
                 </CardContent></Card>
               ) : (
-                classHomework.map((hw, i) => {
+                incompleteClassHomework.map((hw, i) => {
                   const sub     = submissions.find(s => s.homework_id === hw.id && s.student_id === CURRENT_STUDENT_ID);
+                  const returned = sub?.status === "returned";
                   const days    = Math.ceil((new Date(hw.due_date).setHours(23,59,59) - Date.now()) / 86400000);
                   const overdue = days < 0;
 
@@ -1213,22 +1242,19 @@ export default function StudentClassDetailPage() {
                     >
                       <CardContent className="p-5">
                         <div className="flex items-start gap-4">
-                          <div className={`h-11 w-11 rounded-xl flex items-center justify-center shrink-0 ${sub ? "bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400" : overdue ? "bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400" : "bg-primary/10 text-primary"}`}>
-                            {sub ? <CheckCircle2 className="h-5 w-5" />
-                              : overdue ? <AlertCircle className="h-5 w-5" />
+                          <div className={`h-11 w-11 rounded-xl flex items-center justify-center shrink-0 ${returned || overdue ? "bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400" : "bg-primary/10 text-primary"}`}>
+                            {returned || overdue ? <AlertCircle className="h-5 w-5" />
                               : <FileText className="h-5 w-5" />}
                           </div>
                           <div className="flex-1 min-w-0">
                             <div className="flex flex-wrap items-start justify-between gap-2 mb-1">
                               <h3 className="font-semibold text-foreground">{hw.title}</h3>
                               <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full ${
-                                sub?.status === "graded" ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400"
-                                : sub ? "bg-blue-100 text-blue-700 dark:bg-blue-900/20 dark:text-blue-400"
+                                returned ? "bg-red-100 text-red-700 dark:bg-red-900/20 dark:text-red-400"
                                 : overdue ? "bg-red-100 text-red-700 dark:bg-red-900/20 dark:text-red-400"
                                 : "bg-amber-100 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400"
                               }`}>
-                                {sub?.status === "graded" ? `Đã chấm · ${sub.score}/10`
-                                  : sub ? "Đã nộp"
+                                {returned ? "Cần làm lại"
                                   : overdue ? "Quá hạn"
                                   : days === 0 ? "Hôm nay"
                                   : `Còn ${days} ngày`}
@@ -1250,7 +1276,7 @@ export default function StudentClassDetailPage() {
                               </div>
                             )}
 
-                            {!sub && (
+                            {(!sub || returned) && (
                               <div className="mt-3">
                                 <Link href="/student/homework">
                                   <Button size="sm" variant="gradient">

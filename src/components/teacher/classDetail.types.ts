@@ -101,6 +101,8 @@ export interface Homework {
   attachment?: HomeworkAttachment;
   /** undefined/null = giao cho cả lớp; string[] = danh sách student_id được giao */
   assigned_to?: string[] | null;
+  /** "curriculum" = lấy từ lộ trình, undefined = tạo trực tiếp từ tab Bài tập */
+  source?: "curriculum";
 }
 
 export interface Submission {
