@@ -24,7 +24,7 @@ export default function AdminReportsPage() {
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
 
-  const buildReportRows = (): string[][] => {
+  const buildReportRows = (): (string | number)[][] => {
     if (!data) return [];
     const teacherName = (id?: string) => data.teachers.find(t => t.id === id)?.full_name ?? id ?? "—";
     switch (reportType) {
