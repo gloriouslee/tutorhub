@@ -37,6 +37,7 @@ function AdminClassesPageInner() {
   const [formData, setFormData] = useState({
     class_name: "",
     subject: "Toán học",
+    grade: 12,
     learning_mode: "online" as "online" | "offline" | "hybrid",
     tutor_id: "",
     classroom: "",
@@ -68,6 +69,7 @@ function AdminClassesPageInner() {
     setFormData({
       class_name: "",
       subject: "Toán học",
+      grade: 12,
       learning_mode: "online",
       tutor_id: defaultTutor,
       classroom: "Phòng 101",
@@ -87,6 +89,7 @@ function AdminClassesPageInner() {
     setFormData({
       class_name: cls.class_name,
       subject: cls.subject,
+      grade: cls.grade ?? 12,
       learning_mode: cls.learning_mode,
       tutor_id: cls.tutor_id,
       classroom: cls.classroom || "",
@@ -127,6 +130,7 @@ function AdminClassesPageInner() {
               ...c,
               class_name: formData.class_name,
               subject: formData.subject,
+              grade: Number(formData.grade),
               learning_mode: formData.learning_mode,
               tutor_id: formData.tutor_id,
               // null (không phải undefined) để cột DB được xóa khi đổi hình thức học
@@ -149,6 +153,7 @@ function AdminClassesPageInner() {
         id: newId,
         class_name: formData.class_name,
         subject: formData.subject,
+        grade: Number(formData.grade),
         learning_mode: formData.learning_mode,
         tutor_id: formData.tutor_id,
         classroom: formData.learning_mode === "offline" ? formData.classroom : undefined,
@@ -264,9 +269,16 @@ function AdminClassesPageInner() {
                     <div className="space-y-3.5">
                       <div className="flex items-start justify-between">
                         <div>
-                          <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-rose-50 dark:bg-rose-950/20 text-rose-500">
-                            {cls.subject}
-                          </span>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-rose-50 dark:bg-rose-950/20 text-rose-500">
+                              {cls.subject}
+                            </span>
+                            {cls.grade != null && (
+                              <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-muted text-muted-foreground">
+                                Khối {cls.grade}
+                              </span>
+                            )}
+                          </div>
                           <h4 className="text-base font-bold text-foreground mt-1.5">{cls.class_name}</h4>
                         </div>
                         <LearningModeBadge mode={cls.learning_mode} />
@@ -362,17 +374,30 @@ function AdminClassesPageInner() {
                   </select>
                 </div>
                 <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-muted-foreground uppercase">Hình thức học *</label>
+                  <label className="text-xs font-semibold text-muted-foreground uppercase">Khối lớp *</label>
                   <select
                     className="flex h-10 w-full items-center justify-between rounded-xl border border-input bg-card px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
-                    value={formData.learning_mode}
-                    onChange={e => setFormData({ ...formData, learning_mode: e.target.value as any })}
+                    value={formData.grade}
+                    onChange={e => setFormData({ ...formData, grade: Number(e.target.value) })}
                   >
-                    <option value="online">Trực tuyến</option>
-                    <option value="offline">Tại lớp</option>
-                    <option value="hybrid">Kết hợp</option>
+                    {[6, 7, 8, 9, 10, 11, 12].map(g => (
+                      <option key={g} value={g}>Lớp {g}</option>
+                    ))}
                   </select>
                 </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-muted-foreground uppercase">Hình thức học *</label>
+                <select
+                  className="flex h-10 w-full items-center justify-between rounded-xl border border-input bg-card px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                  value={formData.learning_mode}
+                  onChange={e => setFormData({ ...formData, learning_mode: e.target.value as any })}
+                >
+                  <option value="online">Trực tuyến</option>
+                  <option value="offline">Tại lớp</option>
+                  <option value="hybrid">Kết hợp</option>
+                </select>
               </div>
 
               <div className="space-y-1.5">
