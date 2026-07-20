@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import { useStudentContext } from "@/hooks/useStudentContext";
 import { uploadClassFile } from "@/lib/upload";
-import { autoQuestionScore, maxQuestionScore, calcAutoScore, calcMaxScore, countCorrectStatements } from "@/lib/exam-scoring";
+import { autoQuestionScore, maxQuestionScore, calcAutoScore, calcMaxScore, countCorrectStatements, type TrueFalseScale } from "@/lib/exam-scoring";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -487,13 +487,14 @@ function EssayInput({ answer, onAnswer, classId }: { answer: StudentAnswer; onAn
 
 // ── Result view ───────────────────────────────────────────────────────────────
 
-function ResultView({ questions, result, onRetry, examTitle, showSolution, allowRetry }: {
+function ResultView({ questions, result, onRetry, examTitle, showSolution, allowRetry, scale }: {
   questions: ExamQuestion[];
   result: ExamResult;
   onRetry: () => void;
   examTitle: string;
   showSolution: boolean;
   allowRetry: boolean;
+  scale?: TrueFalseScale;
 }) {
   const router = useRouter();
   const manualScores = result.manual_scores ?? {};
@@ -619,7 +620,7 @@ function ResultView({ questions, result, onRetry, examTitle, showSolution, allow
               const open    = expanded.has(q.id);
               const OPTS    = ["A", "B", "C", "D"];
               // Điểm thực nhận / tối đa (Đúng/Sai có thể được điểm thành phần)
-              const earned  = q.type === "essay" ? 0 : autoQuestionScore(q, ans);
+              const earned  = q.type === "essay" ? 0 : autoQuestionScore(q, ans, scale);
               const maxPts  = maxQuestionScore(q);
               const partial = q.type !== "essay" && earned > 0 && earned < maxPts;
 
@@ -779,8 +780,8 @@ function ResultView({ questions, result, onRetry, examTitle, showSolution, allow
 // ── Score calculation ─────────────────────────────────────────────────────────
 
 // Fallback offline — dùng chung thang điểm với server (exam-scoring.ts)
-function calcScore(questions: ExamQuestion[], answers: Record<string, StudentAnswer>): number {
-  return calcAutoScore(questions, answers);
+function calcScore(questions: ExamQuestion[], answers: Record<string, StudentAnswer>, scale?: TrueFalseScale): number {
+  return calcAutoScore(questions, answers, scale);
 }
 
 // ── Main page ─────────────────────────────────────────────────────────────────
@@ -985,7 +986,7 @@ export default function ExamPage() {
       } catch { /* offline → fallback client */ }
     }
 
-    const score = calcScore(questions, answers);
+    const score = calcScore(questions, answers, lesson?.exam_content?.true_false_scale);
     const total = calcMaxScore(questions);
     const submitted_at = new Date().toISOString();
     const res: ExamResult = { answers, score, total, submitted_at };
@@ -1043,6 +1044,7 @@ export default function ExamPage() {
       allowRetry={lesson.exam_content?.allow_retry !== false}
       examTitle={lesson.title}
       showSolution={lesson.exam_content?.show_solution_after_submit !== false}
+      scale={lesson.exam_content?.true_false_scale}
     />
   );
 

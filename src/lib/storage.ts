@@ -533,6 +533,9 @@ export interface ExamContent {
   show_solution_after_submit?: boolean;
   // Cho học sinh làm lại sau khi nộp. Mặc định: true.
   allow_retry?: boolean;
+  // Thang điểm câu Đúng/Sai — % điểm câu theo số ý đúng (1/2/3/4 ý).
+  // Không đặt = dùng khung chuẩn THPT (DEFAULT_TF_SCALE: 10/25/50/100%).
+  true_false_scale?: { one: number; two: number; three: number; four: number };
 }
 
 export interface CurriculumLesson {
@@ -550,6 +553,8 @@ export interface CurriculumLesson {
   // Exam scheduling / access control
   exam_status?: "draft" | "open" | "closed"; // default: "draft"
   exam_opens_at?: string;                     // ISO datetime for scheduled auto-open
+  // Video chữa bài: liên kết (tuỳ chọn) tới bài tập về nhà tương ứng (id lesson homework/exam).
+  linked_homework_id?: string;
 }
 
 export interface CurriculumSession {

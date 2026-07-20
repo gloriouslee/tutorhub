@@ -1,19 +1,19 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
 import "katex/dist/katex.min.css";
 import { Button } from "@/components/ui/button";
 import type { CurriculumLesson } from "@/lib/storage";
 import { uploadClassFile } from "@/lib/upload";
 import { parseExamText, parsedToText, parsedToExamQuestions, tokenizeConventionText, resolveRegistryTokens, normalizeConventionText, examQuestionsToText, MATH_TOKEN_RE, type ParseResult, type ParsedQuestion, type ExamAssetRegistry } from "@/lib/examTextParser";
-import { calcMaxScore, TRUE_FALSE_MAX, FILL_BLANK_SCORE } from "@/lib/exam-scoring";
+import { calcMaxScore, TRUE_FALSE_MAX, FILL_BLANK_SCORE, MC_DEFAULT_SCORE, DEFAULT_TF_SCALE, type TrueFalseScale } from "@/lib/exam-scoring";
 import { renderMathInHtml } from "@/lib/mathRender";
 import { docxHtmlToConventionText, stripExamBoilerplate, FORMULA_PLACEHOLDER_SRC, FORMULA_MARKER } from "@/lib/docxToText";
 import ConventionEditor from "@/components/teacher/ConventionEditor";
 import {
   X, Check, Clock, Eye, EyeOff,
-  FileUp, ChevronDown, AlertTriangle, PencilLine, Lightbulb, RotateCcw,
+  FileUp, ChevronDown, AlertTriangle, PencilLine, Lightbulb, RotateCcw, Scale,
 } from "lucide-react";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -260,9 +260,12 @@ function ParsedQuestionCard({ q, num, update, registry, onUpdateTex }: {
         ) : (
           <span className="flex items-center gap-1 text-[11px] text-muted-foreground ml-auto" title="Điểm của câu này">
             <input
-              type="number" min={0.25} step={0.25}
-              value={q.score ?? 1}
-              onChange={e => update({ score: e.target.value === "" ? undefined : Math.max(0.25, parseFloat(e.target.value) || 1) })}
+              type="number" min={0.05} step={0.05}
+              value={q.score ?? (q.type === "multiple_choice" ? MC_DEFAULT_SCORE : 1)}
+              onChange={e => {
+                const dflt = q.type === "multiple_choice" ? MC_DEFAULT_SCORE : 1;
+                update({ score: e.target.value === "" ? undefined : Math.max(0.05, parseFloat(e.target.value) || dflt) });
+              }}
               className="w-14 h-6 px-1.5 rounded-md border border-border bg-background text-xs text-center text-foreground outline-none focus:ring-2 focus:ring-primary/40"
             />
             điểm
@@ -606,6 +609,231 @@ function TextImportPanel({ text, setText, registry, setRegistry, parsed, setPars
   );
 }
 
+// ── "Chia điểm nhanh" dialog ─────────────────────────────────────────────────
+
+// Điểm mặc định mỗi câu theo loại (để so sánh và dọn tag round-trip).
+function typeDefaultScore(type: ParsedQuestion["type"]): number {
+  if (type === "multiple_choice") return MC_DEFAULT_SCORE;
+  if (type === "fill_blank") return FILL_BLANK_SCORE;
+  return 1; // true_false (khung chuẩn, max = 1) & tự luận
+}
+
+// Chia đều `total` cho `count` câu, làm tròn 2 chữ số, dồn phần dư vào câu cuối
+// để tổng khớp chính xác.
+function distributeScore(total: number, count: number): number[] {
+  if (count <= 0) return [];
+  const per = Math.round((total / count) * 100) / 100;
+  const arr = Array(count).fill(per);
+  arr[count - 1] = Math.round((total - per * (count - 1)) * 100) / 100;
+  return arr;
+}
+
+const fmtScoreShort = (n: number) => Number.isInteger(n) ? String(n) : String(Math.round(n * 100) / 100);
+
+const SPLIT_TYPE_LABEL: Record<ParsedQuestion["type"], string> = {
+  multiple_choice: "Tổng điểm câu trắc nghiệm 1 đáp án",
+  true_false:      "Tổng điểm câu đúng sai",
+  fill_blank:      "Tổng điểm câu trả lời ngắn",
+  essay:           "Tổng điểm câu tự luận",
+};
+
+const SCALE_FIELDS: { key: keyof TrueFalseScale; label: string }[] = [
+  { key: "one",   label: "Trả lời đúng 1 ý" },
+  { key: "two",   label: "Trả lời đúng 2 ý" },
+  { key: "three", label: "Trả lời đúng 3 ý" },
+  { key: "four",  label: "Trả lời đúng 4 ý" },
+];
+
+function ScoreSplitDialog({ questions, sectionsAt, tfScale, setTfScale, onApply, onClose }: {
+  questions: ParsedQuestion[];
+  sectionsAt: { index: number; text: string }[];
+  tfScale: TrueFalseScale;
+  setTfScale: (s: TrueFalseScale) => void;
+  onApply: (scoreByIndex: Record<number, number | undefined>) => void;
+  onClose: () => void;
+}) {
+  const [tab, setTab] = useState<"type" | "section">("type");
+
+  // Nhóm chỉ số câu theo loại (đúng thứ tự loại xuất hiện)
+  const typeGroups = useMemo(() => {
+    const order: ParsedQuestion["type"][] = [];
+    const map: Partial<Record<ParsedQuestion["type"], number[]>> = {};
+    questions.forEach((q, i) => {
+      if (!map[q.type]) { map[q.type] = []; order.push(q.type); }
+      map[q.type]!.push(i);
+    });
+    return order.map(type => ({ type, indices: map[type]! }));
+  }, [questions]);
+
+  // Nhóm chỉ số câu theo phần/nhóm (tiêu đề "Phần …")
+  const sectionBuckets = useMemo(() => {
+    const sorted = [...sectionsAt].sort((a, b) => a.index - b.index);
+    const labelAt = (i: number) => {
+      let label = "(Không thuộc phần nào)";
+      for (const s of sorted) { if (s.index <= i) label = s.text; else break; }
+      return label;
+    };
+    const order: string[] = [];
+    const map = new Map<string, number[]>();
+    questions.forEach((_, i) => {
+      const label = labelAt(i);
+      if (!map.has(label)) { map.set(label, []); order.push(label); }
+      map.get(label)!.push(i);
+    });
+    return order.map(label => ({ label, indices: map.get(label)! }));
+  }, [questions, sectionsAt]);
+
+  const curSum = (idxs: number[]) =>
+    idxs.reduce((s, i) => s + (questions[i].score ?? typeDefaultScore(questions[i].type)), 0);
+
+  const [typeTotals, setTypeTotals] = useState<Record<string, string>>(() =>
+    Object.fromEntries(typeGroups.map(g => [g.type, fmtScoreShort(curSum(g.indices))])));
+  const [sectionTotals, setSectionTotals] = useState<Record<string, string>>(() =>
+    Object.fromEntries(sectionBuckets.map(b => [b.label, fmtScoreShort(curSum(b.indices))])));
+
+  // Điểm bằng đúng mặc định của loại → bỏ score (undefined) để văn bản gọn,
+  // engine tự dùng khung chuẩn; khác mặc định → giữ điểm tùy chỉnh.
+  const normalize = (type: ParsedQuestion["type"], val: number): number | undefined =>
+    Math.abs(val - typeDefaultScore(type)) < 1e-9 ? undefined : Math.round(val * 100) / 100;
+
+  const handleApply = () => {
+    const scoreByIndex: Record<number, number | undefined> = {};
+    if (tab === "type") {
+      typeGroups.forEach(g => {
+        const total = parseFloat((typeTotals[g.type] ?? "").replace(",", "."));
+        if (!isFinite(total)) return;
+        const dist = distributeScore(total, g.indices.length);
+        g.indices.forEach((idx, k) => { scoreByIndex[idx] = normalize(g.type, dist[k]); });
+      });
+    } else {
+      sectionBuckets.forEach(b => {
+        const total = parseFloat((sectionTotals[b.label] ?? "").replace(",", "."));
+        if (!isFinite(total)) return;
+        const dist = distributeScore(total, b.indices.length);
+        b.indices.forEach((idx, k) => { scoreByIndex[idx] = normalize(questions[idx].type, dist[k]); });
+      });
+    }
+    onApply(scoreByIndex);
+    onClose();
+  };
+
+  const rows = tab === "type"
+    ? typeGroups.map(g => ({
+        key: g.type,
+        label: SPLIT_TYPE_LABEL[g.type],
+        count: g.indices.length,
+        value: typeTotals[g.type] ?? "",
+        set: (v: string) => setTypeTotals(prev => ({ ...prev, [g.type]: v })),
+      }))
+    : sectionBuckets.map(b => ({
+        key: b.label,
+        label: b.label,
+        count: b.indices.length,
+        value: sectionTotals[b.label] ?? "",
+        set: (v: string) => setSectionTotals(prev => ({ ...prev, [b.label]: v })),
+      }));
+
+  const hasTrueFalse = questions.some(q => q.type === "true_false");
+
+  return createPortal(
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+      <div
+        onClick={e => e.stopPropagation()}
+        className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl border border-border bg-card shadow-2xl"
+      >
+        {/* Header */}
+        <div className="flex items-center gap-2 px-5 py-4 border-b border-border">
+          <Scale className="h-5 w-5 text-primary" />
+          <h2 className="text-base font-semibold text-foreground">Chia điểm nhanh</h2>
+          <button onClick={onClose} className="ml-auto p-1.5 rounded-lg hover:bg-muted text-muted-foreground transition-colors">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {/* Tabs */}
+        <div className="grid grid-cols-2 gap-1 m-4 p-1 rounded-xl bg-muted/50">
+          {([["type", "Theo loại câu hỏi"], ["section", "Theo phần/nhóm"]] as const).map(([k, label]) => (
+            <button
+              key={k}
+              onClick={() => setTab(k)}
+              className={`py-2 rounded-lg text-sm font-medium transition-colors ${tab === k ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {/* Rows: tổng điểm mỗi nhóm — số câu hệ thống tự đếm */}
+        <div className="px-5 space-y-2.5">
+          {rows.length === 0 && (
+            <p className="text-sm text-muted-foreground text-center py-4">Chưa có câu hỏi nào để chia điểm.</p>
+          )}
+          {rows.map(row => {
+            const total = parseFloat((row.value || "").replace(",", "."));
+            const per = isFinite(total) && row.count > 0 ? Math.round((total / row.count) * 100) / 100 : null;
+            return (
+              <div key={row.key} className="flex items-center gap-3 flex-wrap">
+                <div className="flex-1 min-w-0">
+                  <span className="text-sm text-foreground">{row.label} </span>
+                  <span className="text-xs text-muted-foreground">({row.count} câu)</span>
+                  {per !== null && (
+                    <span className="ml-1 text-[11px] text-muted-foreground">≈ {fmtScoreShort(per)}đ/câu</span>
+                  )}
+                </div>
+                <input
+                  type="number" min={0} step={0.05}
+                  value={row.value}
+                  onChange={e => row.set(e.target.value)}
+                  className="w-24 h-9 px-2.5 rounded-lg border border-border bg-background text-sm text-center text-foreground outline-none focus:ring-2 focus:ring-primary/40"
+                />
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Cấu hình thang điểm câu Đúng/Sai */}
+        <div className="mx-5 mt-5 p-4 rounded-xl border border-border bg-muted/20">
+          <p className="text-sm font-semibold text-foreground">Cấu hình thang điểm cho câu hỏi đúng sai</p>
+          <p className="text-xs text-muted-foreground mt-0.5 mb-3">
+            % điểm câu theo số ý trả lời đúng{hasTrueFalse ? "" : " (áp dụng khi có câu đúng sai)"}.
+          </p>
+          <div className="grid grid-cols-2 gap-3">
+            {SCALE_FIELDS.map(f => (
+              <label key={f.key} className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground flex-1">{f.label}</span>
+                <span className="flex items-center gap-1">
+                  <input
+                    type="number" min={0} max={100} step={1}
+                    value={tfScale[f.key]}
+                    onChange={e => setTfScale({ ...tfScale, [f.key]: Math.max(0, Math.min(100, parseFloat(e.target.value) || 0)) })}
+                    className="w-16 h-8 px-2 rounded-lg border border-border bg-background text-sm text-center text-foreground outline-none focus:ring-2 focus:ring-primary/40"
+                  />
+                  <span className="text-xs text-muted-foreground">%</span>
+                </span>
+              </label>
+            ))}
+          </div>
+          <button
+            onClick={() => setTfScale({ ...DEFAULT_TF_SCALE })}
+            className="mt-3 text-[11px] text-muted-foreground hover:text-primary transition-colors"
+          >
+            Về khung chuẩn (10 · 25 · 50 · 100%)
+          </button>
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-end gap-2 px-5 py-4 mt-2 border-t border-border">
+          <Button variant="outline" size="sm" onClick={onClose}>Đóng</Button>
+          <Button variant="gradient" size="sm" onClick={handleApply} disabled={rows.length === 0}>
+            <Scale className="h-3.5 w-3.5 mr-1.5" />Chia
+          </Button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 // ── Main modal ────────────────────────────────────────────────────────────────
 
 export default function ExamEditorModal({
@@ -628,6 +856,10 @@ export default function ExamEditorModal({
   const [showSolution, setShowSolution] = useState(initial?.exam_content?.show_solution_after_submit ?? true);
   // Cho học sinh làm lại bài sau khi nộp (mặc định: bật)
   const [allowRetry, setAllowRetry] = useState(initial?.exam_content?.allow_retry ?? true);
+  // Thang điểm câu Đúng/Sai (% theo số ý đúng) — mặc định khung chuẩn THPT
+  const [tfScale, setTfScale] = useState<TrueFalseScale>(initial?.exam_content?.true_false_scale ?? { ...DEFAULT_TF_SCALE });
+  // Dialog "Chia điểm nhanh"
+  const [splitOpen, setSplitOpen] = useState(false);
 
   // Đề đã lưu → văn bản quy ước + registry token (chỉ tính một lần khi mở modal)
   const [initialText] = useState(() => {
@@ -643,6 +875,21 @@ export default function ExamEditorModal({
   const questions = parsed?.questions ?? [];
   const hasErrors = (parsed?.errors.length ?? 0) > 0;
   const canSave   = !!title.trim() && !hasErrors && questions.length > 0;
+
+  // "Chia điểm nhanh" ghi điểm hàng loạt vào các câu, rồi serialize lại văn bản
+  // (điểm được mã hoá qua tag "(Xđ)" — round-trip an toàn như nút Chuẩn hóa).
+  const applyScores = (scoreByIndex: Record<number, number | undefined>) => {
+    if (!parsed) return;
+    const nextQuestions = parsed.questions.map((q, i) =>
+      i in scoreByIndex ? { ...q, score: scoreByIndex[i] } : q
+    );
+    setParsed({ ...parsed, questions: nextQuestions });
+    setText(parsedToText(nextQuestions, parsed.sectionsAt));
+  };
+
+  const isDefaultTfScale =
+    tfScale.one === DEFAULT_TF_SCALE.one && tfScale.two === DEFAULT_TF_SCALE.two &&
+    tfScale.three === DEFAULT_TF_SCALE.three && tfScale.four === DEFAULT_TF_SCALE.four;
 
   // QUAN TRỌNG: phải CHỜ ghi xong lên server rồi mới đóng modal — nếu đóng/
   // điều hướng ngay, request ghi bị hủy giữa chừng và bài thi mất trên prod.
@@ -684,6 +931,7 @@ export default function ExamEditorModal({
           time_limit: timeLimit ? parseInt(timeLimit) : undefined,
           show_solution_after_submit: showSolution,
           allow_retry: allowRetry,
+          true_false_scale: isDefaultTfScale ? undefined : tfScale,
         },
       });
       onClose();
@@ -745,6 +993,15 @@ export default function ExamEditorModal({
             </span>
           </div>
           <button
+            onClick={() => setSplitOpen(true)}
+            disabled={questions.length === 0}
+            title="Chia điểm nhanh theo loại câu hỏi hoặc theo phần/nhóm"
+            className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border border-border text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-50 disabled:pointer-events-none"
+          >
+            <Scale className="h-3.5 w-3.5" />
+            <span className="hidden lg:inline">Chia điểm nhanh</span>
+          </button>
+          <button
             onClick={() => setShowSolution(s => !s)}
             title="Cho học sinh xem lời giải sau khi nộp bài"
             className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border transition-colors ${showSolution ? "border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-400" : "border-border text-muted-foreground hover:bg-muted"}`}
@@ -793,6 +1050,17 @@ export default function ExamEditorModal({
           classId={classId}
         />
       </div>
+
+      {splitOpen && (
+        <ScoreSplitDialog
+          questions={questions}
+          sectionsAt={parsed?.sectionsAt ?? []}
+          tfScale={tfScale}
+          setTfScale={setTfScale}
+          onApply={applyScores}
+          onClose={() => setSplitOpen(false)}
+        />
+      )}
     </div>,
     document.body
   );

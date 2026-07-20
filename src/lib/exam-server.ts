@@ -7,7 +7,7 @@ import type {
   ExamQuestion,
   StoredExamResult,
 } from "@/lib/storage";
-import { calcAutoScore, calcMaxScore, type StudentAnswer } from "@/lib/exam-scoring";
+import { calcAutoScore, calcMaxScore, type StudentAnswer, type TrueFalseScale } from "@/lib/exam-scoring";
 export type { StudentAnswer };
 
 export function getServiceKey(): string | null {
@@ -101,9 +101,10 @@ export function sanitizeQuestions(questions: ExamQuestion[]): SanitizedQuestion[
 
 export function calcScoreServer(
   questions: ExamQuestion[],
-  answers: Record<string, StudentAnswer>
+  answers: Record<string, StudentAnswer>,
+  scale?: TrueFalseScale,
 ): number {
-  return calcAutoScore(questions, answers);
+  return calcAutoScore(questions, answers, scale);
 }
 
 // Tổng điểm tối đa của bài (Đúng/Sai = 1đ, Trả lời ngắn = 0.5đ, còn lại = q.score).

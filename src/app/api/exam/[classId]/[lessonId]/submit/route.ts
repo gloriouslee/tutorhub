@@ -75,7 +75,7 @@ export async function POST(
     }
 
     const questions = lesson.exam_content?.questions ?? [];
-    const score = calcScoreServer(questions, answers);
+    const score = calcScoreServer(questions, answers, lesson.exam_content?.true_false_scale);
     const total = calcTotalServer(questions);
     const result: StoredExamResult = {
       student_id: studentId,

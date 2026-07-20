@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -9,7 +10,7 @@ import { MOCK_HOMEWORK, MOCK_CLASSES } from "@/lib/mock-data";
 import { useStudentContext } from "@/hooks/useStudentContext";
 import {
   FileText, Clock, CheckCircle2, Upload, Calendar,
-  AlertCircle, X, Check, Download, Loader2, Star,
+  AlertCircle, X, Check, Download, Loader2, Star, NotebookPen, PenSquare, PlayCircle,
 } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import {
@@ -18,7 +19,7 @@ import {
   getSubmissionsByStudent,
   type SubmissionRecord,
 } from "@/lib/supabase/submissions";
-import { kvGet, kvSet, getCurriculum, isLessonVisibleToStudent, isAssignedToStudent } from "@/lib/storage";
+import { kvGet, kvSet, getCurriculum, getExamResult, isLessonVisibleToStudent, isAssignedToStudent } from "@/lib/storage";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const ACCEPTED = ".pdf,.doc,.docx,.jpg,.jpeg,.png";
@@ -49,10 +50,16 @@ interface HomeworkItem {
   due_date: string;
   created_at?: string;
   assigned_to?: string[] | null;
+  file_url?: string; // file đề bài giáo viên đính kèm (link hoặc upload)
+  kind?: "file" | "exam"; // "exam" = làm câu hỏi trên hệ thống
+  exam_done?: boolean;    // đã làm bài thi chưa (kind exam)
+  exam_score?: number;    // điểm đạt (kind exam)
+  exam_total?: number;    // điểm tối đa (kind exam)
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function StudentHomeworkPage() {
+  const router = useRouter();
   const { studentId: STUDENT_ID, studentName: STUDENT_NAME, myClasses } = useStudentContext();
   const myClassIds = myClasses.map(c => c.id);
   const [teacherHw,    setTeacherHw]    = useState<HomeworkItem[]>([]);
@@ -84,24 +91,39 @@ export default function StudentHomeworkPage() {
         return fresh.length > 0 ? [...prev, ...fresh] : prev.length === 0 ? manual : prev;
       }));
 
-    // Load curriculum homework (is_published lessons of type "homework")
+    // Load curriculum bài tập: nộp file (type "homework") + làm câu hỏi (type "exam")
     Promise.all(myClassIds.map(cid =>
-      getCurriculum(cid).then(chapters => {
+      getCurriculum(cid).then(async chapters => {
         const items: HomeworkItem[] = [];
-        chapters.forEach(ch => ch.sessions.forEach(s => {
-          s.lessons.forEach(lesson => {
-            if (lesson.type === "homework" && isLessonVisibleToStudent(lesson, STUDENT_ID)) {
-              items.push({
-                id: lesson.id,
-                class_id: cid,
-                title: lesson.title,
-                description: (lesson as any).description,
-                due_date: (lesson as any).due_date ?? s.date ?? new Date().toISOString().slice(0, 10),
-                created_at: s.date,
-              });
+        const today = new Date().toISOString().slice(0, 10);
+        for (const ch of chapters) {
+          for (const s of ch.sessions) {
+            for (const lesson of s.lessons) {
+              if (!isLessonVisibleToStudent(lesson, STUDENT_ID)) continue;
+              if (lesson.type === "homework") {
+                items.push({
+                  id: lesson.id, class_id: cid, title: lesson.title,
+                  description: (lesson as any).description,
+                  due_date: (lesson as any).due_date ?? s.date ?? today,
+                  created_at: s.date, kind: "file",
+                  file_url: (lesson as any).file_url,
+                });
+              } else if (lesson.type === "exam") {
+                const result = await getExamResult(cid, lesson.id, STUDENT_ID).catch(() => null);
+                const manual = result ? Object.values(result.manual_scores ?? {}).reduce((a, b) => a + b, 0) : 0;
+                items.push({
+                  id: lesson.id, class_id: cid, title: lesson.title,
+                  description: (lesson as any).description,
+                  due_date: (lesson as any).exam_opens_at?.slice(0, 10) ?? s.date ?? today,
+                  created_at: s.date, kind: "exam",
+                  exam_done: !!result,
+                  exam_score: result ? Math.round((result.score + manual) * 100) / 100 : undefined,
+                  exam_total: result?.total,
+                });
+              }
             }
-          });
-        }));
+          }
+        }
         return items;
       })
     )).then(results => {
@@ -149,15 +171,21 @@ export default function StudentHomeworkPage() {
     return { label: `Còn ${d} ngày`, color: "bg-muted text-muted-foreground", icon: Clock, key: "pending" as FilterTab };
   }
 
-  // Filtered list
-  const displayed = useMemo(() => myHomework.filter(hw => {
-    if (filterTab === "all") return true;
-    return hwStatus(hw.id, hw.due_date).key === filterTab;
+  // Trạng thái lọc (exam-aware): bài câu hỏi đã làm = "graded", chưa làm = "pending"
+  function statusKey(hw: HomeworkItem): FilterTab {
+    if (hw.kind === "exam") return hw.exam_done ? "graded" : "pending";
+    return hwStatus(hw.id, hw.due_date).key;
+  }
+
+  // Filtered list — mới nhất (giao gần đây) lên đầu
+  const displayed = useMemo(() => myHomework
+    .filter(hw => filterTab === "all" ? true : statusKey(hw) === filterTab)
+    .sort((a, b) => (b.created_at ?? b.due_date ?? "").localeCompare(a.created_at ?? a.due_date ?? "")),
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [filterTab, submissions, teacherHw]);
+  [filterTab, submissions, teacherHw]);
 
   // Sidebar stats
-  const submittedCount = myHomework.filter(hw => getSub(hw.id)).length;
+  const submittedCount = myHomework.filter(hw => hw.kind === "exam" ? hw.exam_done : !!getSub(hw.id)).length;
   const gradedSubs     = submissions.filter(s => s.score != null && myClassIds.includes(
     myHomework.find(h => h.id === s.homework_id)?.class_id ?? ""
   ));
@@ -168,9 +196,9 @@ export default function StudentHomeworkPage() {
   // Filter tab counts
   const tabCounts: Record<FilterTab, number> = {
     all: myHomework.length,
-    pending: myHomework.filter(hw => !getSub(hw.id)).length,
-    submitted: myHomework.filter(hw => { const s = getSub(hw.id); return s && s.status !== "graded"; }).length,
-    graded: myHomework.filter(hw => getSub(hw.id)?.status === "graded").length,
+    pending: myHomework.filter(hw => statusKey(hw) === "pending").length,
+    submitted: myHomework.filter(hw => statusKey(hw) === "submitted").length,
+    graded: myHomework.filter(hw => statusKey(hw) === "graded").length,
   };
 
   // Modal helpers
@@ -275,8 +303,66 @@ export default function StudentHomeworkPage() {
               </div>
             ) : (
               displayed.map((hw, i) => {
-                const sub    = getSub(hw.id);
                 const cls    = MOCK_CLASSES.find(c => c.id === hw.class_id);
+
+                // Bài làm câu hỏi trên hệ thống — mở trang làm bài, không nộp file
+                if (hw.kind === "exam") {
+                  return (
+                    <Card
+                      key={hw.id}
+                      className="hover:border-primary/40 transition-colors animate-fade-in group"
+                      style={{ animationDelay: `${(i % 6) * 70}ms` }}
+                    >
+                      <CardContent className="p-5">
+                        <div className="flex gap-4">
+                          <div className="h-11 w-11 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0 mt-0.5">
+                            <NotebookPen className="h-5 w-5" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex flex-wrap items-start justify-between gap-2 mb-1.5">
+                              <h3 className="font-semibold text-foreground text-base group-hover:text-primary transition-colors leading-snug">
+                                {hw.title}
+                              </h3>
+                              {hw.exam_done ? (
+                                <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full shrink-0 bg-emerald-100 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400">
+                                  <CheckCircle2 className="h-3 w-3" /> Đã làm{hw.exam_score != null ? ` · ${hw.exam_score}/${hw.exam_total}` : ""}
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full shrink-0 bg-amber-100 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400">
+                                  <Clock className="h-3 w-3" /> Chưa làm
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2.5 text-xs text-muted-foreground mb-3 flex-wrap">
+                              <span className="bg-muted px-2 py-0.5 rounded-md font-semibold text-foreground">
+                                {cls?.class_name ?? hw.class_id}
+                              </span>
+                              <span className="flex items-center gap-1 font-semibold text-rose-600 dark:text-rose-400">
+                                <PenSquare className="h-3.5 w-3.5" /> Làm trên hệ thống
+                              </span>
+                            </div>
+                            {hw.description && (
+                              <p className="text-sm text-muted-foreground line-clamp-2 leading-relaxed">{hw.description}</p>
+                            )}
+                            <div className="mt-4 pt-3.5 border-t border-border flex gap-2.5">
+                              <Button
+                                variant={hw.exam_done ? "outline" : "gradient"}
+                                size="sm"
+                                className="font-semibold"
+                                onClick={() => router.push(`/student/classes/${hw.class_id}/exam/${hw.id}`)}
+                              >
+                                <PlayCircle className="h-3.5 w-3.5 mr-1.5" />
+                                {hw.exam_done ? "Xem lại / Làm lại" : "Làm bài"}
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                }
+
+                const sub    = getSub(hw.id);
                 const status = hwStatus(hw.id, hw.due_date);
                 const { icon: StatusIcon } = status;
 
@@ -572,6 +658,25 @@ export default function StudentHomeworkPage() {
                         {selectedHw.description}
                       </div>
                     </div>
+
+                    {/* Đề bài đính kèm (giáo viên upload/dán link) */}
+                    {selectedHw.file_url && (
+                      <div>
+                        <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Đề bài đính kèm</p>
+                        <a
+                          href={selectedHw.file_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-2 bg-muted/20 hover:bg-muted/40 transition-colors rounded-xl px-3 py-2.5 border border-border text-sm"
+                        >
+                          <FileText className="h-4 w-4 text-primary shrink-0" />
+                          <span className="truncate flex-1 text-xs font-medium">
+                            {decodeURIComponent(selectedHw.file_url.split("?")[0].split("/").pop() || "Tải đề bài")}
+                          </span>
+                          <Download className="h-4 w-4 text-primary shrink-0" />
+                        </a>
+                      </div>
+                    )}
 
                     {/* Due + Status */}
                     <div className="grid grid-cols-2 gap-3">

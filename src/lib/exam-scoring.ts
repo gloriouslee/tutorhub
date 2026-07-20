@@ -9,6 +9,14 @@ import type { ExamQuestion } from "@/lib/storage";
 export const TRUE_FALSE_MAX = 1;
 // Trả lời ngắn (điền đáp án): mỗi câu đúng 0.5đ
 export const FILL_BLANK_SCORE = 0.5;
+// Trắc nghiệm một đáp án: điểm mặc định mỗi câu khi giáo viên không tự đặt.
+export const MC_DEFAULT_SCORE = 0.25;
+
+// Thang điểm Đúng/Sai: % điểm câu theo SỐ mệnh đề trả lời đúng (1/2/3/4 ý).
+// Có thể tùy chỉnh & lưu theo từng đề (ExamContent.true_false_scale); nếu không
+// cấu hình thì dùng khung chuẩn THPT bên dưới.
+export type TrueFalseScale = { one: number; two: number; three: number; four: number };
+export const DEFAULT_TF_SCALE: TrueFalseScale = { one: 10, two: 25, three: 50, four: 100 };
 
 // Đề không chuẩn form: giáo viên đặt score_mode="custom" để tự quyết điểm câu.
 // Đúng/Sai custom vẫn chấm thành phần theo TỈ LỆ khung chuẩn, nhân với điểm câu
@@ -25,13 +33,14 @@ export type StudentAnswer = {
   statement_answers?: Record<number, boolean>;
 };
 
-// Điểm Đúng/Sai theo số mệnh đề đúng.
-export function trueFalsePartialScore(correctCount: number): number {
-  if (correctCount >= 4) return 1;
-  if (correctCount === 3) return 0.5;
-  if (correctCount === 2) return 0.25;
-  if (correctCount === 1) return 0.1;
-  return 0;
+// Tỉ lệ (0..1) điểm câu Đúng/Sai theo số mệnh đề đúng, theo thang cấu hình.
+export function trueFalseFraction(correctCount: number, scale: TrueFalseScale = DEFAULT_TF_SCALE): number {
+  const pct =
+    correctCount >= 4 ? scale.four :
+    correctCount === 3 ? scale.three :
+    correctCount === 2 ? scale.two :
+    correctCount === 1 ? scale.one : 0;
+  return pct / 100;
 }
 
 // Số mệnh đề trả lời đúng của một câu Đúng/Sai.
@@ -49,16 +58,19 @@ function fillBlankMatches(q: ExamQuestion, ans: StudentAnswer | undefined): bool
 }
 
 // Điểm tự động của MỘT câu (tự luận = 0, giáo viên chấm tay riêng).
-export function autoQuestionScore(q: ExamQuestion, ans: StudentAnswer | undefined): number {
+export function autoQuestionScore(
+  q: ExamQuestion,
+  ans: StudentAnswer | undefined,
+  scale: TrueFalseScale = DEFAULT_TF_SCALE,
+): number {
   if (!ans) return 0;
   switch (q.type) {
     case "multiple_choice":
       return ans.selected_option === q.correct_option ? q.score : 0;
     case "true_false":
-      // Nhiều mệnh đề → điểm thành phần theo tỉ lệ khung, nhân điểm tối đa của câu
-      // (chuẩn: max = 1 nên giữ nguyên khung; custom: scale theo điểm giáo viên đặt).
+      // Nhiều mệnh đề → điểm thành phần theo tỉ lệ thang cấu hình, nhân điểm tối đa của câu.
       if (q.statements && q.statements.length > 0)
-        return round3(trueFalsePartialScore(countCorrectStatements(q, ans)) * (maxQuestionScore(q) / TRUE_FALSE_MAX));
+        return round3(trueFalseFraction(countCorrectStatements(q, ans), scale) * maxQuestionScore(q));
       return ans.selected_value === q.correct_value ? q.score : 0;
     case "fill_blank":
       return fillBlankMatches(q, ans) ? maxQuestionScore(q) : 0;
@@ -83,15 +95,17 @@ export function maxQuestionScore(q: ScorableShape): number {
     return q.score_mode === "custom" ? (q.score ?? TRUE_FALSE_MAX) : TRUE_FALSE_MAX;
   if (q.type === "fill_blank")
     return q.score_mode === "custom" ? (q.score ?? FILL_BLANK_SCORE) : FILL_BLANK_SCORE;
-  return q.score ?? 1;
+  if (q.type === "multiple_choice") return q.score ?? MC_DEFAULT_SCORE;
+  return q.score ?? 1; // tự luận
 }
 
 // Tổng điểm tự động của cả bài (không gồm tự luận).
 export function calcAutoScore(
   questions: ExamQuestion[],
-  answers: Record<string, StudentAnswer>
+  answers: Record<string, StudentAnswer>,
+  scale: TrueFalseScale = DEFAULT_TF_SCALE,
 ): number {
-  return round3(questions.reduce((total, q) => total + autoQuestionScore(q, answers[q.id]), 0));
+  return round3(questions.reduce((total, q) => total + autoQuestionScore(q, answers[q.id], scale), 0));
 }
 
 // Tổng điểm tối đa của cả bài.

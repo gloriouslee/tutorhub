@@ -10,8 +10,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SectionHeader } from "@/components/shared";
 import { MOCK_HOMEWORK, MOCK_CLASSES } from "@/lib/mock-data";
-import { kvGet, kvUpdate } from "@/lib/storage";
-import { FileText, Plus, Calendar, CheckCircle2, Clock, X, Trash2, Edit2, ArrowRight, BookOpen } from "lucide-react";
+import { kvGet, kvUpdate, getCurriculum, getAllExamResults } from "@/lib/storage";
+import { FileText, Plus, Calendar, CheckCircle2, Clock, X, Trash2, Edit2, ArrowRight, BookOpen, NotebookPen, PenSquare, Download } from "lucide-react";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const TEACHER_ID   = "t1";
@@ -28,6 +28,11 @@ interface Homework {
   description?: string;
   due_date: string;
   created_at: string;
+  source?: "curriculum";
+  kind?: "file" | "exam";
+  file_url?: string;
+  exam_status?: "draft" | "open" | "closed";
+  exam_submitted?: number; // số học sinh đã làm (kind exam)
 }
 
 interface Submission {
@@ -75,6 +80,38 @@ async function removeHw(id: string, fallback: Homework[]): Promise<Homework[]> {
 
 async function loadSubs(): Promise<Submission[]> {
   try { return await kvGet<Submission[]>(SUB_KEY, []); } catch { return []; }
+}
+
+// Bài tập từ lộ trình (nộp file + làm câu hỏi) cho các lớp của giáo viên.
+async function loadCurriculumHw(classes: { id: string }[]): Promise<Homework[]> {
+  const today = toLocalDateKey(new Date());
+  const out: Homework[] = [];
+  for (const c of classes) {
+    let chapters;
+    try { chapters = await getCurriculum(c.id); } catch { continue; }
+    for (const ch of chapters) {
+      for (const s of ch.sessions) {
+        for (const lesson of s.lessons) {
+          if (lesson.type === "homework") {
+            out.push({
+              id: lesson.id, class_id: c.id, title: lesson.title, description: lesson.description,
+              due_date: lesson.due_date ?? s.date ?? today, created_at: s.date ?? today,
+              source: "curriculum", kind: "file", file_url: lesson.file_url,
+            });
+          } else if (lesson.type === "exam") {
+            const results = await getAllExamResults(c.id, lesson.id).catch(() => []);
+            out.push({
+              id: lesson.id, class_id: c.id, title: lesson.title, description: lesson.description,
+              due_date: lesson.exam_opens_at?.slice(0, 10) ?? s.date ?? today, created_at: s.date ?? today,
+              source: "curriculum", kind: "exam", exam_status: lesson.exam_status ?? "draft",
+              exam_submitted: results.length,
+            });
+          }
+        }
+      }
+    }
+  }
+  return out;
 }
 
 function isOverdue(dueDate: string): boolean {
@@ -125,7 +162,10 @@ export default function TeacherHomeworkPage() {
       setFClass(all[0]?.id ?? "");
 
       const allIds = all.map(c => c.id);
-      setHomeworks(await loadHw(allIds));
+      const manual = await loadHw(allIds);
+      const curriculum = await loadCurriculumHw(all);
+      const currIds = new Set(curriculum.map(h => h.id));
+      setHomeworks([...manual.filter(h => !currIds.has(h.id)), ...curriculum]);
       setSubmissions(await loadSubs());
     })();
   }, []);
@@ -183,18 +223,21 @@ export default function TeacherHomeworkPage() {
     return map;
   }, [homeworks, submissions]);
 
+  // Bài "quá hạn": chỉ áp dụng cho bài nộp file; bài làm câu hỏi tính theo trạng thái mở/đóng.
+  const isHwOverdue = (h: Homework) => h.kind !== "exam" && isOverdue(h.due_date);
+
   const displayed = useMemo(() =>
     homeworks.filter(hw => {
       if (filterClass !== "all" && hw.class_id !== filterClass) return false;
-      if (filterStatus === "open"    &&  isOverdue(hw.due_date)) return false;
-      if (filterStatus === "overdue" && !isOverdue(hw.due_date)) return false;
+      if (filterStatus === "open"    &&  isHwOverdue(hw)) return false;
+      if (filterStatus === "overdue" && !isHwOverdue(hw)) return false;
       return true;
-    }),
+    }).sort((a, b) => (b.created_at ?? b.due_date ?? "").localeCompare(a.created_at ?? a.due_date ?? "")),
     [homeworks, filterClass, filterStatus]
   );
 
-  const openCount    = homeworks.filter(h => !isOverdue(h.due_date)).length;
-  const overdueCount = homeworks.filter(h =>  isOverdue(h.due_date)).length;
+  const openCount    = homeworks.filter(h => !isHwOverdue(h)).length;
+  const overdueCount = homeworks.filter(h =>  isHwOverdue(h)).length;
 
   return (
     <PortalLayout role="teacher" userName={TEACHER_NAME} pageTitle="Quản lý Bài tập">
@@ -249,9 +292,16 @@ export default function TeacherHomeworkPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
             {displayed.map((hw, i) => {
               const cls    = myClasses.find(c => c.id === hw.class_id);
+              const isExam = hw.kind === "exam";
               const status = dueStatus(hw.due_date);
               const stats  = subStats[hw.id] ?? { submitted: 0, ungraded: 0 };
               const total  = cls?.student_ids?.length ?? 0;
+              const submitted = isExam ? (hw.exam_submitted ?? 0) : stats.submitted;
+              const examBadge = hw.exam_status === "open"
+                ? { label: "● Đang mở", cls: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" }
+                : hw.exam_status === "closed"
+                ? { label: "Đã đóng", cls: "bg-muted text-muted-foreground" }
+                : { label: "Nháp", cls: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400" };
 
               return (
                 <Card
@@ -262,8 +312,8 @@ export default function TeacherHomeworkPage() {
                   <CardHeader className="pb-3 border-b border-border/50">
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex items-start gap-2.5 min-w-0">
-                        <div className="p-2 bg-primary/10 rounded-lg shrink-0 mt-0.5">
-                          <FileText className="h-4 w-4 text-primary" />
+                        <div className="p-2 bg-amber-500/10 rounded-lg shrink-0 mt-0.5">
+                          <NotebookPen className="h-4 w-4 text-amber-600 dark:text-amber-400" />
                         </div>
                         <div className="min-w-0">
                           <CardTitle className="text-sm line-clamp-2 leading-snug">{hw.title}</CardTitle>
@@ -273,35 +323,50 @@ export default function TeacherHomeworkPage() {
                           </div>
                         </div>
                       </div>
-                      {/* Hover actions */}
-                      <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button
-                          onClick={() => openEdit(hw)}
-                          className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 transition-all"
-                          title="Chỉnh sửa"
-                        >
-                          <Edit2 className="h-3.5 w-3.5" />
-                        </button>
-                        <button
-                          onClick={() => handleDelete(hw.id)}
-                          className="p-1.5 rounded-lg text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/10 transition-all"
-                          title="Xoá"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
+                      {/* Hover actions — chỉ cho bài tạo thủ công (không phải từ lộ trình) */}
+                      {hw.source !== "curriculum" && (
+                        <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button
+                            onClick={() => openEdit(hw)}
+                            className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 transition-all"
+                            title="Chỉnh sửa"
+                          >
+                            <Edit2 className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            onClick={() => handleDelete(hw.id)}
+                            className="p-1.5 rounded-lg text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/10 transition-all"
+                            title="Xoá"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      )}
                     </div>
 
-                    {/* Status + due date */}
-                    <div className="flex items-center justify-between mt-2.5 gap-2">
-                      <span className={`inline-flex items-center gap-1.5 text-[11px] font-semibold px-2 py-0.5 rounded-full ${status.color}`}>
-                        <span className={`h-1.5 w-1.5 rounded-full ${status.dot}`} />
-                        {status.label}
-                      </span>
-                      <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
-                        <Calendar className="h-3 w-3 shrink-0" />
-                        {new Date(hw.due_date).toLocaleDateString("vi-VN")}
-                      </span>
+                    {/* Status + kind */}
+                    <div className="flex items-center justify-between mt-2.5 gap-2 flex-wrap">
+                      {isExam ? (
+                        <>
+                          <span className={`inline-flex items-center gap-1.5 text-[11px] font-semibold px-2 py-0.5 rounded-full ${examBadge.cls}`}>
+                            {examBadge.label}
+                          </span>
+                          <span className="flex items-center gap-1 text-[11px] font-semibold text-rose-600 dark:text-rose-400">
+                            <PenSquare className="h-3 w-3 shrink-0" /> Làm trên hệ thống
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          <span className={`inline-flex items-center gap-1.5 text-[11px] font-semibold px-2 py-0.5 rounded-full ${status.color}`}>
+                            <span className={`h-1.5 w-1.5 rounded-full ${status.dot}`} />
+                            {status.label}
+                          </span>
+                          <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                            <Calendar className="h-3 w-3 shrink-0" />
+                            {new Date(hw.due_date).toLocaleDateString("vi-VN")}
+                          </span>
+                        </>
+                      )}
                     </div>
                   </CardHeader>
 
@@ -310,28 +375,53 @@ export default function TeacherHomeworkPage() {
                       <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">{hw.description}</p>
                     )}
 
+                    {/* File đề bài đính kèm (kind file) */}
+                    {!isExam && hw.file_url && (
+                      <a
+                        href={hw.file_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline"
+                      >
+                        <Download className="h-3.5 w-3.5" /> Đề bài đính kèm
+                      </a>
+                    )}
+
                     {/* Submission stats */}
-                    <div className="grid grid-cols-2 gap-2">
+                    {isExam ? (
                       <div className="bg-emerald-50 dark:bg-emerald-900/20 p-2.5 rounded-xl border border-emerald-100 dark:border-emerald-800/50">
                         <div className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 mb-1">
                           <CheckCircle2 className="h-3.5 w-3.5" />
-                          <span className="text-[10px] font-bold uppercase tracking-wide">Đã nộp</span>
+                          <span className="text-[10px] font-bold uppercase tracking-wide">Đã làm bài</span>
                         </div>
                         <p className="text-lg font-bold text-emerald-700 dark:text-emerald-300 leading-none">
-                          {stats.submitted}
+                          {submitted}
                           {total > 0 && <span className="text-xs font-normal opacity-60 ml-1">/ {total}</span>}
                         </p>
                       </div>
-                      <div className="bg-amber-50 dark:bg-amber-900/20 p-2.5 rounded-xl border border-amber-100 dark:border-amber-800/50">
-                        <div className="flex items-center gap-1.5 text-amber-600 dark:text-amber-400 mb-1">
-                          <Clock className="h-3.5 w-3.5" />
-                          <span className="text-[10px] font-bold uppercase tracking-wide">Chưa chấm</span>
+                    ) : (
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="bg-emerald-50 dark:bg-emerald-900/20 p-2.5 rounded-xl border border-emerald-100 dark:border-emerald-800/50">
+                          <div className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 mb-1">
+                            <CheckCircle2 className="h-3.5 w-3.5" />
+                            <span className="text-[10px] font-bold uppercase tracking-wide">Đã nộp</span>
+                          </div>
+                          <p className="text-lg font-bold text-emerald-700 dark:text-emerald-300 leading-none">
+                            {submitted}
+                            {total > 0 && <span className="text-xs font-normal opacity-60 ml-1">/ {total}</span>}
+                          </p>
                         </div>
-                        <p className="text-lg font-bold text-amber-700 dark:text-amber-300 leading-none">
-                          {stats.ungraded}
-                        </p>
+                        <div className="bg-amber-50 dark:bg-amber-900/20 p-2.5 rounded-xl border border-amber-100 dark:border-amber-800/50">
+                          <div className="flex items-center gap-1.5 text-amber-600 dark:text-amber-400 mb-1">
+                            <Clock className="h-3.5 w-3.5" />
+                            <span className="text-[10px] font-bold uppercase tracking-wide">Chưa chấm</span>
+                          </div>
+                          <p className="text-lg font-bold text-amber-700 dark:text-amber-300 leading-none">
+                            {stats.ungraded}
+                          </p>
+                        </div>
                       </div>
-                    </div>
+                    )}
                   </CardContent>
 
                   <CardFooter className="pt-0 pb-3.5 px-4">
@@ -339,9 +429,11 @@ export default function TeacherHomeworkPage() {
                       variant="outline"
                       size="sm"
                       className="w-full text-xs hover:bg-primary/5 hover:text-primary hover:border-primary/40 transition-colors group/btn"
-                      onClick={() => router.push(`/teacher/submissions?hw=${hw.id}`)}
+                      onClick={() => router.push(isExam
+                        ? `/teacher/classes/${hw.class_id}?tab=curriculum`
+                        : `/teacher/submissions?hw=${hw.id}`)}
                     >
-                      Xem bài nộp & Chấm bài
+                      {isExam ? "Mở & chấm trên lộ trình" : "Xem bài nộp & Chấm bài"}
                       <ArrowRight className="h-3.5 w-3.5 ml-1.5 group-hover/btn:translate-x-0.5 transition-transform" />
                     </Button>
                   </CardFooter>

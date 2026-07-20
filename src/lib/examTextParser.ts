@@ -15,13 +15,20 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import type { ExamQuestion } from "./storage";
+import { MC_DEFAULT_SCORE } from "./exam-scoring";
+
+// Điểm mặc định của một câu theo loại — dùng để quyết định có ghi "(Xđ)" round-trip
+// hay không (Đúng/Sai & Trả lời ngắn dùng khung chuẩn nên không có mặc định ở đây).
+function defaultScoreFor(type: ParsedQuestion["type"] | ExamQuestion["type"]): number {
+  return type === "multiple_choice" ? MC_DEFAULT_SCORE : 1;
+}
 
 export interface ParsedStatement { text: string; correct: boolean }
 
 export interface ParsedQuestion {
   index: number;                      // số câu trong văn bản ("Câu 3." → 3)
   type: "multiple_choice" | "true_false" | "fill_blank" | "essay";
-  score?: number;                     // điểm câu này — "(0,5đ)" sau "Câu N."; mặc định 1
+  score?: number;                     // điểm câu này — "(0,5đ)" sau "Câu N."; mặc định TN 0.25, tự luận 1
   content: string;                    // đề bài (text thuần)
   options?: string[];                 // trắc nghiệm A-D
   correctOption?: number;             // 0-based
@@ -309,9 +316,10 @@ export function parsedToText(
   const blocks = questions.map((q, i) => {
     // Ghi "(Xđ)" ngay sau số câu để round-trip.
     // Đúng/Sai & Trả lời ngắn: có score = điểm tùy chỉnh → luôn ghi (kể cả 1đ);
-    // không có score = chấm theo khung chuẩn THPT → không ghi.
+    //   không có score = chấm theo khung chuẩn THPT → không ghi.
+    // Trắc nghiệm / tự luận: chỉ ghi khi khác điểm mặc định của loại (TN 0.25, tự luận 1).
     const isTfOrFill = q.type === "true_false" || q.type === "fill_blank";
-    const scoreTag = q.score !== undefined && (isTfOrFill || q.score !== 1)
+    const scoreTag = q.score !== undefined && (isTfOrFill || q.score !== defaultScoreFor(q.type))
       ? `(${String(q.score).replace(".", ",")}đ) `
       : "";
     const lines: string[] = [`Câu ${i + 1}. ${scoreTag}${q.content}`.trimEnd()];
@@ -429,7 +437,7 @@ export function examQuestionsToText(questions: ExamQuestion[]): { text: string; 
     const isTfOrFill = q.type === "true_false" || q.type === "fill_blank";
     const score = isTfOrFill
       ? (q.score_mode === "custom" ? q.score : undefined)
-      : (q.score !== 1 ? q.score : undefined);
+      : (q.score !== defaultScoreFor(q.type) ? q.score : undefined);
     const base = { index: i + 1, content, solution, warnings: [] as string[], score };
 
     switch (q.type) {
@@ -469,7 +477,7 @@ export function parsedToExamQuestions(parsed: ParsedQuestion[], registry?: ExamA
       order: i,
       content_html: toHtml(p.content, registry),
       explanation_html: p.solution ? toHtml(p.solution, registry) : undefined,
-      score: p.score ?? 1,
+      score: p.score ?? defaultScoreFor(p.type),
     };
     switch (p.type) {
       case "multiple_choice":

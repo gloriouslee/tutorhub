@@ -3,6 +3,7 @@
 import { toLocalDateKey } from "@/lib/utils";
 
 import { useState, useEffect, useRef } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -18,7 +19,7 @@ import {
   PlayCircle, FileText, ClipboardList, Video, Eye, EyeOff,
   GripVertical, BookOpen, CalendarDays, Link2, Link2Off,
   Upload, Loader2, AlertCircle, PenSquare, Lock, Unlock,
-  Clock, Users, User,
+  Clock, Users, User, NotebookPen,
 } from "lucide-react";
 import { ClassSchedule } from "@/types";
 
@@ -61,10 +62,16 @@ type LessonType = CurriculumLesson["type"];
 const LESSON_META: Record<LessonType, { label: string; icon: React.ElementType; color: string }> = {
   lecture:  { label: "Bài giảng",       icon: PlayCircle,    color: "text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20" },
   material: { label: "Tài liệu",        icon: FileText,      color: "text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20" },
-  homework: { label: "Bài tập về nhà",  icon: ClipboardList, color: "text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20" },
+  homework: { label: "Bài tập về nhà",  icon: NotebookPen,   color: "text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20" },
   solution: { label: "Video chữa bài",  icon: Video,         color: "text-violet-600 dark:text-violet-400 bg-violet-50 dark:bg-violet-900/20" },
-  exam:     { label: "Bài thi",         icon: PenSquare,     color: "text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-900/20" },
+  // Bài tập dạng câu hỏi (làm trên hệ thống) — hiển thị chung nhãn + icon "Bài tập về nhà",
+  // phân biệt với dạng nộp file qua badge trạng thái + ghi chú "Làm trên hệ thống".
+  exam:     { label: "Bài tập về nhà",  icon: NotebookPen,   color: "text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20" },
 };
+
+// Các loại hiện trong menu "Thêm nội dung" (Bài thi được gộp vào "Bài tập về nhà"
+// dưới dạng phương thức "Soạn câu hỏi", nên không có chip riêng).
+const CREATE_TYPES: LessonType[] = ["lecture", "material", "homework", "solution"];
 
 function uid() { return `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`; }
 
@@ -73,6 +80,7 @@ function LessonModal({
   classId,
   initial,
   students = [],
+  homeworkOptions = [],
   onSave,
   onClose,
   onOpenExam,
@@ -80,6 +88,7 @@ function LessonModal({
   classId: string;
   initial?: Partial<CurriculumLesson>;
   students?: StudentLite[];
+  homeworkOptions?: { id: string; title: string }[];
   onSave: (lesson: CurriculumLesson) => void;
   onClose: () => void;
   onOpenExam?: (title: string, assignedTo: string[] | null) => void;
@@ -88,6 +97,7 @@ function LessonModal({
   const [title,      setTitle]      = useState(initial?.title ?? "");
   const [videoUrl,   setVideoUrl]   = useState(initial?.video_url ?? "");
   const [fileUrl,    setFileUrl]    = useState(initial?.file_url ?? "");
+  const [linkedHw,   setLinkedHw]   = useState(initial?.linked_homework_id ?? "");
   const [desc,       setDesc]       = useState(initial?.description ?? "");
   const [dueDate,    setDueDate]    = useState(initial?.due_date ?? "");
   const [published,  setPublished]  = useState(initial?.is_published ?? true);
@@ -121,7 +131,7 @@ function LessonModal({
 
     let resolvedFileUrl = fileUrl.trim() || undefined;
 
-    if (type === "material" && fileMode === "upload" && file) {
+    if ((type === "material" || type === "homework") && fileMode === "upload" && file) {
       try {
         const uploaded = await uploadClassFile(file, classId, "materials");
         resolvedFileUrl = uploaded.url;
@@ -137,11 +147,12 @@ function LessonModal({
       type,
       title:        title.trim(),
       video_url:    (type === "lecture" || type === "solution") ? videoUrl.trim() || undefined : undefined,
-      file_url:     type === "material" ? resolvedFileUrl : undefined,
+      file_url:     (type === "material" || type === "homework") ? resolvedFileUrl : undefined,
       description:  desc.trim() || undefined,
       due_date:     type === "homework" ? dueDate || undefined : undefined,
       is_published: published,
       assigned_to:  scope === "select" ? Array.from(selectedIds) : null,
+      linked_homework_id: type === "solution" ? (linkedHw || undefined) : undefined,
     });
     setUploading(false);
     onClose();
@@ -164,18 +175,54 @@ function LessonModal({
             <div>
               <label className="text-xs font-medium text-muted-foreground block mb-2">Loại nội dung</label>
               <div className="grid grid-cols-2 gap-2">
-                {(Object.entries(LESSON_META) as [LessonType, typeof LESSON_META[LessonType]][]).map(([key, meta]) => (
-                  <button
-                    key={key}
-                    onClick={() => setType(key)}
-                    className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs font-medium transition-all ${
-                      type === key ? "border-primary bg-primary/5 text-primary" : "border-border text-muted-foreground hover:border-primary/40"
-                    }`}
-                  >
-                    <meta.icon className="h-4 w-4 shrink-0" />
-                    {meta.label}
-                  </button>
-                ))}
+                {CREATE_TYPES.map(key => {
+                  const meta = LESSON_META[key];
+                  // Chip "Bài tập về nhà" đại diện cả 2 phương thức (nộp file = homework,
+                  // soạn câu hỏi = exam) nên sáng khi type là homework HOẶC exam.
+                  const active = key === "homework" ? (type === "homework" || type === "exam") : type === key;
+                  return (
+                    <button
+                      key={key}
+                      onClick={() => {
+                        if (key === "homework") setType(prev => (prev === "homework" || prev === "exam") ? prev : "homework");
+                        else setType(key);
+                      }}
+                      className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs font-medium transition-all ${
+                        active ? "border-primary bg-primary/5 text-primary" : "border-border text-muted-foreground hover:border-primary/40"
+                      }`}
+                    >
+                      <meta.icon className="h-4 w-4 shrink-0" />
+                      {meta.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Cách giao bài tập: nộp file (homework) hoặc soạn câu hỏi làm trên hệ thống (exam) */}
+          {!isEdit && (type === "homework" || type === "exam") && (
+            <div>
+              <label className="text-xs font-medium text-muted-foreground block mb-2">Cách giao bài</label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setType("homework")}
+                  className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs font-medium transition-all ${
+                    type === "homework" ? "border-primary bg-primary/5 text-primary" : "border-border text-muted-foreground hover:border-primary/40"
+                  }`}
+                >
+                  <Upload className="h-4 w-4 shrink-0" /> Học sinh nộp file
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setType("exam")}
+                  className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs font-medium transition-all ${
+                    type === "exam" ? "border-primary bg-primary/5 text-primary" : "border-border text-muted-foreground hover:border-primary/40"
+                  }`}
+                >
+                  <PenSquare className="h-4 w-4 shrink-0" /> Soạn câu hỏi (làm trên hệ thống)
+                </button>
               </div>
             </div>
           )}
@@ -186,7 +233,7 @@ function LessonModal({
             <input
               value={title}
               onChange={e => setTitle(e.target.value)}
-              placeholder={type === "lecture" ? "VD: Bài 1 — Hàm số bậc nhất" : type === "material" ? "VD: Slide chương 1" : type === "homework" ? "VD: Bài tập hàm số" : "VD: Chữa bài tập buổi 1"}
+              placeholder={type === "lecture" ? "VD: Bài 1 — Hàm số bậc nhất" : type === "material" ? "VD: Slide chương 1" : type === "homework" ? "VD: Bài tập hàm số" : type === "exam" ? "VD: Bài tập trắc nghiệm chương 3" : "VD: Chữa bài tập buổi 1"}
               className="w-full h-9 rounded-xl border border-border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-primary/40"
             />
           </div>
@@ -204,11 +251,31 @@ function LessonModal({
             </div>
           )}
 
-          {/* File — URL or upload */}
-          {type === "material" && (
+          {/* Video chữa bài: liên kết tới bài tập tương ứng (tuỳ chọn) */}
+          {type === "solution" && (
+            <div>
+              <label className="text-xs font-medium text-muted-foreground block mb-1.5">Bài tập tương ứng <span className="font-normal">(tuỳ chọn)</span></label>
+              <select
+                value={linkedHw}
+                onChange={e => setLinkedHw(e.target.value)}
+                className="w-full h-9 rounded-xl border border-border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-primary/40"
+              >
+                <option value="">— Không liên kết —</option>
+                {(homeworkOptions ?? []).map(hw => (
+                  <option key={hw.id} value={hw.id}>{hw.title}</option>
+                ))}
+              </select>
+              {linkedHw && !(homeworkOptions ?? []).some(hw => hw.id === linkedHw) && (
+                <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-1">Bài tập đã liên kết không còn tồn tại.</p>
+              )}
+            </div>
+          )}
+
+          {/* File — URL or upload (tài liệu, hoặc file đề bài cho bài tập nộp file) */}
+          {(type === "material" || type === "homework") && (
             <div>
               <div className="flex items-center justify-between mb-1.5">
-                <label className="text-xs font-medium text-muted-foreground">Tài liệu</label>
+                <label className="text-xs font-medium text-muted-foreground">{type === "homework" ? "File đề bài (tuỳ chọn)" : "Tài liệu"}</label>
                 <div className="flex rounded-lg border border-border overflow-hidden text-xs">
                   <button
                     onClick={() => setFileMode("url")}
@@ -355,7 +422,7 @@ function LessonModal({
           <Button variant="outline" size="sm" onClick={onClose} disabled={uploading}>Huỷ</Button>
           {type === "exam" && !isEdit ? (
             <Button variant="gradient" size="sm" onClick={() => { onOpenExam?.(title.trim(), scope === "select" ? Array.from(selectedIds) : null); onClose(); }} disabled={!title.trim()}>
-              <PenSquare className="h-3.5 w-3.5 mr-1.5" />Soạn bài thi
+              <PenSquare className="h-3.5 w-3.5 mr-1.5" />Soạn câu hỏi
             </Button>
           ) : (
             <Button variant="gradient" size="sm" onClick={handleSave} disabled={!title.trim() || uploading}>
@@ -401,6 +468,7 @@ function InlineEdit({ value, onSave, placeholder }: { value: string; onSave: (v:
 
 // ── Main component ────────────────────────────────────────────────────────────
 export default function CurriculumTab({ classId, schedule, students = [] }: { classId: string; schedule: ClassSchedule[]; students?: StudentLite[] }) {
+  const router = useRouter();
   const slots = generateSlots(schedule);
   const [chapters,     setChapters]     = useState<CurriculumChapter[]>([]);
   const [expanded,     setExpanded]     = useState<Set<string>>(new Set());
@@ -419,6 +487,28 @@ export default function CurriculumTab({ classId, schedule, students = [] }: { cl
     lessonTitle: string;
   } | null>(null);
 
+  // Trình soạn bài thi đồng bộ với URL (?editExam=) để reload / back giữ nguyên
+  // giao diện soạn bài thay vì rơi về danh sách curriculum.
+  function setExamParams(params: Record<string, string | null>) {
+    const sp = new URLSearchParams(window.location.search);
+    for (const [k, v] of Object.entries(params)) {
+      if (v === null) sp.delete(k); else sp.set(k, v);
+    }
+    router.replace(`?${sp.toString()}`, { scroll: false });
+  }
+  function openExamEditor(chapterId: string, sessionId: string, lesson?: CurriculumLesson) {
+    setExamModal({ chapterId, sessionId, lesson });
+    // Bài đã lưu → khóa theo id; bài mới (chưa có id) → ghi vị trí chapter/session
+    // để reload mở lại trình soạn (nội dung chưa lưu vẫn mất — điều này không tránh được).
+    setExamParams(lesson?.id
+      ? { editExam: lesson.id, editChapter: null, editSession: null }
+      : { editExam: "new", editChapter: chapterId, editSession: sessionId });
+  }
+  function closeExamEditor() {
+    setExamModal(null);
+    setExamParams({ editExam: null, editChapter: null, editSession: null });
+  }
+
   useEffect(() => {
     (async () => {
       const data = await getCurriculum(classId);
@@ -427,7 +517,25 @@ export default function CurriculumTab({ classId, schedule, students = [] }: { cl
       const ids = new Set<string>();
       data.forEach(ch => { ids.add(ch.id); ch.sessions.forEach(s => ids.add(s.id)); });
       setExpanded(ids);
+      // Khôi phục trình soạn bài thi từ URL (sau reload / mở link trực tiếp)
+      const sp = new URLSearchParams(window.location.search);
+      const editExam = sp.get("editExam");
+      if (editExam === "new") {
+        const chapterId = sp.get("editChapter");
+        const sessionId = sp.get("editSession");
+        if (chapterId && sessionId) {
+          setExamModal({ chapterId, sessionId, lesson: { id: undefined as unknown as string, type: "exam", title: "", is_published: true } });
+        }
+      } else if (editExam) {
+        for (const ch of data) {
+          for (const s of ch.sessions) {
+            const l = s.lessons.find(x => x.id === editExam && x.type === "exam");
+            if (l) { setExamModal({ chapterId: ch.id, sessionId: s.id, lesson: l }); return; }
+          }
+        }
+      }
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [classId]);
 
   const [examResultsMap, setExamResultsMap] = useState<Record<string, StoredExamResult[]>>({});
@@ -572,6 +680,10 @@ export default function CurriculumTab({ classId, schedule, students = [] }: { cl
   // ── Total counts for header ──
   const totalSessions = chapters.reduce((acc, ch) => acc + ch.sessions.length, 0);
   const totalLessons  = chapters.reduce((acc, ch) => acc + ch.sessions.reduce((a, s) => a + s.lessons.length, 0), 0);
+
+  // Tra cứu tiêu đề bài học theo id (dùng hiển thị liên kết "chữa cho" trên video chữa bài)
+  const lessonTitleById: Record<string, string> = {};
+  chapters.forEach(ch => ch.sessions.forEach(s => s.lessons.forEach(l => { lessonTitleById[l.id] = l.title; })));
 
   return (
     <div className="space-y-4 max-w-3xl">
@@ -721,6 +833,13 @@ export default function CurriculumTab({ classId, schedule, students = [] }: { cl
                                   <div className="flex-1 min-w-0">
                                     <p className="text-xs font-medium text-foreground truncate">{lesson.title}</p>
                                     {lesson.description && <p className="text-[11px] text-muted-foreground truncate">{lesson.description}</p>}
+                                    {lesson.type === "homework" && <p className="text-[11px] text-muted-foreground">📎 Học sinh nộp file</p>}
+                                    {isExam && <p className="text-[11px] text-muted-foreground">✏️ Làm trên hệ thống</p>}
+                                    {lesson.type === "solution" && lesson.linked_homework_id && (
+                                      <p className="text-[11px] text-muted-foreground truncate">
+                                        ↪ Chữa cho: {lessonTitleById[lesson.linked_homework_id] ?? "(bài tập đã xoá)"}
+                                      </p>
+                                    )}
                                     {lesson.due_date && <p className="text-[11px] text-muted-foreground">Hạn: {new Date(lesson.due_date).toLocaleDateString("vi-VN")}</p>}
                                     {/* Exam status badge inline */}
                                     {isExam && (
@@ -789,7 +908,7 @@ export default function CurriculumTab({ classId, schedule, students = [] }: { cl
                                   </button>
                                   <button
                                     onClick={() => lesson.type === "exam"
-                                      ? setExamModal({ chapterId: chapter.id, sessionId: session.id, lesson })
+                                      ? openExamEditor(chapter.id, session.id, lesson)
                                       : setLessonModal({ chapterId: chapter.id, sessionId: session.id, lesson })}
                                     className="p-1 rounded-lg text-muted-foreground hover:text-primary transition-colors shrink-0"
                                   >
@@ -839,13 +958,16 @@ export default function CurriculumTab({ classId, schedule, students = [] }: { cl
           classId={classId}
           initial={lessonModal.lesson}
           students={students}
+          homeworkOptions={chapters.flatMap(ch => ch.sessions.flatMap(s => s.lessons))
+            .filter(l => l.type === "homework" || l.type === "exam")
+            .map(l => ({ id: l.id, title: l.title }))}
           onSave={lesson => saveLesson(lessonModal.chapterId, lessonModal.sessionId, lesson)}
           onClose={() => setLessonModal(null)}
-          onOpenExam={(title, assignedTo) => setExamModal({
-            chapterId: lessonModal.chapterId,
-            sessionId: lessonModal.sessionId,
-            lesson: { id: undefined as any, type: "exam", title, is_published: true, assigned_to: assignedTo },
-          })}
+          onOpenExam={(title, assignedTo) => openExamEditor(
+            lessonModal.chapterId,
+            lessonModal.sessionId,
+            { id: undefined as unknown as string, type: "exam", title, is_published: true, assigned_to: assignedTo },
+          )}
         />
       )}
 
@@ -855,7 +977,7 @@ export default function CurriculumTab({ classId, schedule, students = [] }: { cl
           classId={classId}
           initial={examModal.lesson}
           onSave={lesson => saveLesson(examModal.chapterId, examModal.sessionId, lesson)}
-          onClose={() => setExamModal(null)}
+          onClose={closeExamEditor}
         />
       )}
 
@@ -868,6 +990,7 @@ export default function CurriculumTab({ classId, schedule, students = [] }: { cl
             lessonId={gradingView.lessonId}
             examTitle={gradingView.lessonTitle}
             questions={examLesson?.exam_content?.questions ?? []}
+            scale={examLesson?.exam_content?.true_false_scale}
             initialResults={examResultsMap[gradingView.lessonId] ?? []}
             onClose={() => setGradingView(null)}
             onResultsChange={results => setExamResultsMap(prev => ({ ...prev, [gradingView.lessonId]: results }))}

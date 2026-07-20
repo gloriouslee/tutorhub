@@ -16,6 +16,7 @@ import {
   getClassScheduleOverride,
   getOnlineLink, saveOnlineLink,
   getCurriculum, type CurriculumSession as CurriculumSessionData,
+  getAllExamResults,
   getStudentPackages, saveStudentPackages, type StudentPackage,
   getClassMaterials, type StoredClassMaterial,
   kvGet, kvSet, kvUpdate,
@@ -218,39 +219,71 @@ export default function TeacherClassDetailPage() {
       .catch(() => {});
   }, [classId]);
 
-  // Build curriculum date-index + extract curriculum homework
+  // Build curriculum date-index + extract curriculum bài tập (nộp file + làm câu hỏi)
   useEffect(() => {
-    getCurriculum(classId).then(chapters => {
+    (async () => {
+      const chapters = await getCurriculum(classId);
+      const today = new Date().toISOString().slice(0, 10);
       const map: Record<string, CurriculumSessionData> = {};
-      const currHws: Homework[] = [];
+      const fileHws: Homework[] = [];
+      const examLessons: { id: string; title: string; description?: string; date?: string; assigned_to?: string[] | null; exam_status?: "draft" | "open" | "closed"; opens_at?: string }[] = [];
       for (const ch of chapters) {
         for (const s of ch.sessions) {
           if (s.date) map[s.date] = s;
           for (const lesson of s.lessons) {
             if (lesson.type === "homework") {
-              currHws.push({
+              fileHws.push({
                 id: lesson.id,
                 class_id: classId,
                 title: lesson.title,
-                description: (lesson as any).description,
-                due_date: (lesson as any).due_date ?? s.date ?? new Date().toISOString().slice(0, 10),
-                created_at: s.date ?? new Date().toISOString().slice(0, 10),
+                description: lesson.description,
+                due_date: lesson.due_date ?? s.date ?? today,
+                created_at: s.date ?? today,
                 assigned_to: lesson.assigned_to ?? null,
                 source: "curriculum",
+                kind: "file",
+                file_url: lesson.file_url,
+              });
+            } else if (lesson.type === "exam") {
+              examLessons.push({
+                id: lesson.id, title: lesson.title, description: lesson.description,
+                date: s.date, assigned_to: lesson.assigned_to ?? null,
+                exam_status: lesson.exam_status ?? "draft", opens_at: lesson.exam_opens_at,
               });
             }
           }
         }
       }
+      // Kết quả bài thi (kind "exam") → đếm số bài nộp + điểm từng học sinh
+      const examHws: Homework[] = await Promise.all(examLessons.map(async ex => {
+        const results = await getAllExamResults(classId, ex.id).catch(() => []);
+        const exam_results: Record<string, { score: number; total: number }> = {};
+        for (const r of results) {
+          const manual = Object.values(r.manual_scores ?? {}).reduce((a, b) => a + b, 0);
+          exam_results[r.student_id] = { score: Math.round((r.score + manual) * 100) / 100, total: r.total };
+        }
+        return {
+          id: ex.id, class_id: classId, title: ex.title, description: ex.description,
+          due_date: ex.opens_at?.slice(0, 10) ?? ex.date ?? today,
+          created_at: ex.date ?? today,
+          assigned_to: ex.assigned_to ?? null,
+          source: "curriculum" as const,
+          kind: "exam" as const,
+          exam_status: ex.exam_status,
+          exam_results,
+        };
+      }));
       setCurriculumByDate(map);
+      const currHws = [...fileHws, ...examHws];
       if (currHws.length > 0) {
         setHomeworks(prev => {
-          const existingIds = new Set(prev.map(h => h.id));
-          const fresh = currHws.filter(h => !existingIds.has(h.id));
-          return fresh.length > 0 ? [...prev, ...fresh] : prev;
+          // Cập nhật lại các bài lộ trình (kết quả bài thi có thể đổi) + thêm bài mới
+          const currIds = new Set(currHws.map(h => h.id));
+          const kept = prev.filter(h => !currIds.has(h.id));
+          return [...kept, ...currHws];
         });
       }
-    });
+    })();
   }, [classId, activeTab]);
 
   // Load homework from localStorage
@@ -570,6 +603,7 @@ export default function TeacherClassDetailPage() {
           {/* ── Homework ── */}
           {activeTab === "homework" && (
             <HomeworkTab
+              classId={classId}
               homeworks={homeworks}
               submissions={submissions}
               students={classStudents}

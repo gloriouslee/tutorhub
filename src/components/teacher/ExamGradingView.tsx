@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { Button } from "@/components/ui/button";
 import { gradeExamResult, type StoredExamResult, type ExamQuestion } from "@/lib/storage";
-import { maxQuestionScore, calcMaxScore, autoQuestionScore, countCorrectStatements } from "@/lib/exam-scoring";
+import { maxQuestionScore, calcMaxScore, autoQuestionScore, countCorrectStatements, type TrueFalseScale } from "@/lib/exam-scoring";
 import { renderMathInHtml } from "@/lib/mathRender";
 import "katex/dist/katex.min.css";
 import {
@@ -65,6 +65,7 @@ export default function ExamGradingView({
   initialResults,
   onClose,
   onResultsChange,
+  scale,
 }: {
   classId: string;
   lessonId: string;
@@ -74,6 +75,7 @@ export default function ExamGradingView({
   initialResults: StoredExamResult[];
   onClose: () => void;
   onResultsChange?: (results: StoredExamResult[]) => void;
+  scale?: TrueFalseScale;
 }) {
   const [results, setResults] = useState<StoredExamResult[]>(initialResults);
   const [selectedId, setSelectedId] = useState<string | null>(initialResults[0]?.student_id ?? null);
@@ -244,7 +246,7 @@ export default function ExamGradingView({
                 const correct = isCorrect(q, ans);
                 const isEssay = q.type === "essay";
                 const qMax    = maxQuestionScore(q);
-                const qEarned = isEssay ? 0 : autoQuestionScore(q, ans);
+                const qEarned = isEssay ? 0 : autoQuestionScore(q, ans, scale);
                 const qPartial = !isEssay && qEarned > 0 && qEarned < qMax;
 
                 return (

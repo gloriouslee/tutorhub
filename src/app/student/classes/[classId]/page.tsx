@@ -13,14 +13,14 @@ import {
   MOCK_LECTURES, MOCK_CLASS_NOTES, MOCK_EXAM_SCORES, MOCK_HOMEWORK, MOCK_ATTENDANCE,
 } from "@/lib/mock-data";
 import { getSubmissionsByStudent, type SubmissionRecord } from "@/lib/supabase/submissions";
-import { kvGet, getClasses, getClassScheduleOverride, getOnlineLink, getStudentPackages, getCurriculum, getClassMaterials, incrementMaterialDownload, isLessonVisibleToStudent, isAssignedToStudent, type StudentPackage, type CurriculumSession, type StoredClassMaterial } from "@/lib/storage";
+import { kvGet, getClasses, getClassScheduleOverride, getOnlineLink, getStudentPackages, getCurriculum, getClassMaterials, getExamResult, incrementMaterialDownload, isLessonVisibleToStudent, isAssignedToStudent, type StudentPackage, type CurriculumSession, type StoredClassMaterial } from "@/lib/storage";
 import CurriculumView from "@/components/student/CurriculumView";
 import {
   BookOpen, Clock, Video, MapPin, Users, ArrowLeft, FileText, Download,
   PlayCircle, StickyNote, Pin, Eye, ChevronRight, GraduationCap,
   Calendar, Presentation, Tag, Lock, ShieldAlert, CheckCircle2, AlertCircle,
   ExternalLink, Check, Map, CalendarDays, UserCheck, UserX, Timer, Minus,
-  ClipboardList, ChevronDown, Send, XCircle, CheckSquare,
+  ClipboardList, ChevronDown, Send, XCircle, CheckSquare, NotebookPen, PenSquare, Search,
 } from "lucide-react";
 import { formatDate, toLocalDateKey } from "@/lib/utils";
 import { useStudentContext } from "@/hooks/useStudentContext";
@@ -171,6 +171,31 @@ interface HomeworkItem {
   due_date: string;
   created_at?: string;
   assigned_to?: string[] | null;
+  kind?: "file" | "exam";  // "exam" = làm câu hỏi trên hệ thống
+  exam_done?: boolean;
+  exam_score?: number;
+  exam_total?: number;
+}
+
+// Video trong tab Bài giảng: gồm bài giảng (lecture) và video chữa bài (solution).
+interface LectureCard {
+  id: string;
+  title: string;
+  description?: string;
+  video_url: string | null;
+  is_published: boolean;
+  kind: "lecture" | "solution";
+  order?: number;
+  duration?: string;
+  views?: number;
+  slides_url?: string | null;
+  created_at?: string;
+  linkedHomeworkTitle?: string;
+}
+
+// Sắp xếp mới nhất lên đầu: ưu tiên created_at, fallback due_date.
+function recentFirst(a: { created_at?: string; due_date?: string }, b: { created_at?: string; due_date?: string }) {
+  return (b.created_at ?? b.due_date ?? "").localeCompare(a.created_at ?? a.due_date ?? "");
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
@@ -214,6 +239,15 @@ export default function StudentClassDetailPage() {
   const [cls, setCls] = useState<ClassInfo | null | undefined>(undefined);
   const [scheduleOverride, setScheduleOverride] = useState<ClassInfo["schedule"] | null>(null);
   const [teacherHomework, setTeacherHomework] = useState<HomeworkItem[]>([]);
+  // Bài giảng + video chữa bài + tài liệu lấy từ lộ trình của lớp
+  const [curriculumLectures, setCurriculumLectures] = useState<LectureCard[]>([]);
+  const [curriculumMaterials, setCurriculumMaterials] = useState<StoredClassMaterial[]>([]);
+  // Bộ lọc / tìm kiếm cho các tab (giảm ngợp thông tin)
+  const [hwFilter, setHwFilter]   = useState<"all" | "todo" | "done">("all");
+  const [lecFilter, setLecFilter] = useState<"all" | "lecture" | "solution">("all");
+  const [lecQuery, setLecQuery]   = useState("");
+  const [matCat, setMatCat]       = useState<string>("all");
+  const [matQuery, setMatQuery]   = useState("");
 
   // Resolve class from DB (includes admin-created), fallback to mock
   useEffect(() => {
@@ -241,8 +275,9 @@ export default function StudentClassDetailPage() {
       if (!m.packages || m.packages.length === 0) return true;
       return studentPkg ? m.packages.includes(studentPkg) : false;
     });
-    return [...mockMats, ...realMats];
-  }, [classId, uploadedMaterials, studentPkg]);
+    // Tài liệu từ lộ trình + mock + upload, mới nhất lên đầu
+    return [...curriculumMaterials, ...mockMats, ...realMats].sort(recentFirst);
+  }, [classId, uploadedMaterials, studentPkg, curriculumMaterials]);
 
   useEffect(() => {
     setWatched(loadWatched(studentId));
@@ -257,26 +292,69 @@ export default function StudentClassDetailPage() {
     getStudentPackages(classId).then(pkgs => setMyPackage(pkgs[CURRENT_STUDENT_ID] ?? null));
     // Load attendance records
     loadSavedAttendance().then(setSavedAttendance);
-    // Load curriculum → build date map + extract published homework lessons
-    getCurriculum(classId).then(chapters => {
+    // Load curriculum → build date map + đẩy bài tập / bài giảng / video chữa bài / tài liệu về các tab
+    getCurriculum(classId).then(async chapters => {
+      const today = new Date().toISOString().slice(0, 10);
       const byDate: Record<string, CurriculumSession> = {};
       const currHws: HomeworkItem[] = [];
-      chapters.forEach(ch => ch.sessions.forEach(s => {
-        if (s.date) byDate[s.date] = s;
-        s.lessons.forEach(lesson => {
-          if (lesson.type === "homework" && isLessonVisibleToStudent(lesson, studentId)) {
-            currHws.push({
-              id: lesson.id,
-              class_id: classId,
-              title: lesson.title,
-              description: (lesson as any).description,
-              due_date: (lesson as any).due_date ?? s.date ?? new Date().toISOString().slice(0, 10),
-              created_at: s.date,
-            });
+      const lectureCards: LectureCard[] = [];
+      const matCards: StoredClassMaterial[] = [];
+      // Tra tiêu đề bài tập (để hiển thị "Chữa cho: …" trên video chữa bài)
+      const titleById: Record<string, string> = {};
+      chapters.forEach(ch => ch.sessions.forEach(s => s.lessons.forEach(l => { titleById[l.id] = l.title; })));
+
+      for (const ch of chapters) {
+        for (const s of ch.sessions) {
+          if (s.date) byDate[s.date] = s;
+          for (const lesson of s.lessons) {
+            if (!isLessonVisibleToStudent(lesson, studentId)) continue;
+            const created = s.date ?? today;
+            if (lesson.type === "homework") {
+              currHws.push({
+                id: lesson.id, class_id: classId, title: lesson.title,
+                description: (lesson as any).description,
+                due_date: (lesson as any).due_date ?? s.date ?? today,
+                created_at: created, kind: "file",
+              });
+            } else if (lesson.type === "exam") {
+              const result = await getExamResult(classId, lesson.id, studentId).catch(() => null);
+              const manual = result ? Object.values(result.manual_scores ?? {}).reduce((a, b) => a + b, 0) : 0;
+              currHws.push({
+                id: lesson.id, class_id: classId, title: lesson.title,
+                description: (lesson as any).description,
+                due_date: (lesson as any).exam_opens_at?.slice(0, 10) ?? s.date ?? today,
+                created_at: created, kind: "exam",
+                exam_done: !!result,
+                exam_score: result ? Math.round((result.score + manual) * 100) / 100 : undefined,
+                exam_total: result?.total,
+              });
+            } else if (lesson.type === "lecture" || lesson.type === "solution") {
+              lectureCards.push({
+                id: lesson.id, title: lesson.title, description: (lesson as any).description,
+                video_url: (lesson as any).video_url ?? null,
+                is_published: lesson.is_published, kind: lesson.type,
+                created_at: created,
+                linkedHomeworkTitle: lesson.type === "solution" && (lesson as any).linked_homework_id
+                  ? titleById[(lesson as any).linked_homework_id]
+                  : undefined,
+              });
+            } else if (lesson.type === "material" && (lesson as any).file_url) {
+              const url: string = (lesson as any).file_url;
+              const ext = (url.split("?")[0].split(".").pop() || "").toLowerCase();
+              matCards.push({
+                id: lesson.id, class_id: classId, title: lesson.title,
+                description: (lesson as any).description ?? "",
+                file_url: url, file_type: ext === "pdf" ? "pdf" : ext || "file",
+                file_size: "", category: "textbook", uploaded_by: cls?.tutor_id ?? "",
+                created_at: created, download_count: 0, kind: "material",
+              });
+            }
           }
-        });
-      }));
+        }
+      }
       setCurriculumByDate(byDate);
+      setCurriculumLectures(lectureCards);
+      setCurriculumMaterials(matCards);
       if (currHws.length > 0) {
         setTeacherHomework(prev => {
           const existingIds = new Set(prev.map(h => h.id));
@@ -331,21 +409,52 @@ export default function StudentClassDetailPage() {
   // ── Data ──────────────────────────────────────────────────────────────────
   const schedule          = scheduleOverride ?? cls.schedule ?? [];
   const teacher           = MOCK_TEACHERS.find(t => t.id === cls.tutor_id);
-  const lectures          = MOCK_LECTURES.filter(l => l.class_id === classId);
   const notes             = MOCK_CLASS_NOTES.filter(n => n.class_id === classId);
+  // Bài giảng + video chữa bài: lộ trình + mock, mới nhất lên đầu
+  const mockLectureCards: LectureCard[] = MOCK_LECTURES.filter(l => l.class_id === classId).map(l => ({
+    id: l.id, title: l.title, description: l.description, video_url: l.video_url,
+    is_published: l.is_published, kind: "lecture", order: l.order, duration: l.duration,
+    views: l.views, slides_url: l.slides_url, created_at: l.created_at,
+  }));
+  const mockLectureIds    = new Set(mockLectureCards.map(l => l.id));
+  const lectureItems: LectureCard[] = [
+    ...curriculumLectures.filter(l => !mockLectureIds.has(l.id)),
+    ...mockLectureCards,
+  ].sort(recentFirst);
+  const publishedLectures = lectureItems.filter(l => l.is_published);
   // Merge teacher-created homework (kv) with mock — kv wins on id collision
   const kvHwIds           = new Set(teacherHomework.map(h => h.id));
   const classHomework: HomeworkItem[] = [
     ...teacherHomework,
     ...MOCK_HOMEWORK.filter(h => h.class_id === classId && !kvHwIds.has(h.id)),
   ];
-  const incompleteClassHomework = classHomework.filter(hw => {
-    const submission = submissions.find(
-      s => s.homework_id === hw.id && s.student_id === CURRENT_STUDENT_ID
-    );
-    return !submission || submission.status === "returned";
-  });
-  const publishedLectures = lectures.filter(l => l.is_published);
+  // Tất cả bài tập của lớp, mới nhất lên đầu (dùng cho tab Bài tập)
+  const sortedClassHomework = [...classHomework].sort(recentFirst);
+  // "done" = đã làm/đã nộp xong; "todo" = chưa làm / cần làm lại
+  const isHwDone = (hw: HomeworkItem) => {
+    if (hw.kind === "exam") return !!hw.exam_done;
+    const s = submissions.find(x => x.homework_id === hw.id && x.student_id === CURRENT_STUDENT_ID);
+    return !!s && s.status !== "returned";
+  };
+  const incompleteClassHomework = classHomework.filter(hw => !isHwDone(hw));
+  const hwDoneCount = sortedClassHomework.length - incompleteClassHomework.length;
+  const hwView = sortedClassHomework.filter(hw =>
+    hwFilter === "all" ? true : hwFilter === "done" ? isHwDone(hw) : !isHwDone(hw));
+
+  // Bài giảng: lọc theo loại + tìm kiếm
+  const lecView = lectureItems.filter(l =>
+    (lecFilter === "all" || l.kind === lecFilter) &&
+    (!lecQuery.trim() || l.title.toLowerCase().includes(lecQuery.trim().toLowerCase())));
+  const lecSolutionCount = lectureItems.filter(l => l.kind === "solution").length;
+
+  // Tài liệu: các danh mục hiện có + lọc theo danh mục + tìm kiếm
+  const matCategories = Array.from(new Set(materials.map(m => m.category)));
+  const matView = materials.filter(m =>
+    (matCat === "all" || m.category === matCat) &&
+    (!matQuery.trim() || m.title.toLowerCase().includes(matQuery.trim().toLowerCase())));
+
+  const chipCls = (active: boolean) =>
+    `px-3 py-1.5 text-xs font-semibold rounded-xl transition-all ${active ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:bg-accent"}`;
 
   // Completion: per-student localStorage tracking
   const watchedCount    = publishedLectures.filter(l => watched.has(l.id)).length;
@@ -872,13 +981,36 @@ export default function StudentClassDetailPage() {
           {/* ── Lectures ── */}
           {activeTab === "lectures" && (
             <div className="space-y-4">
-              {lectures.length === 0 ? (
+              {lectureItems.length === 0 ? (
                 <Card><CardContent className="py-16 text-center text-muted-foreground">
                   <Presentation className="h-12 w-12 mx-auto opacity-20 mb-3" />
                   <p className="text-sm font-medium">Chưa có bài giảng nào</p>
                 </CardContent></Card>
               ) : (
-                lectures.sort((a, b) => a.order - b.order).map((lec, i) => {
+                <>
+                  {/* Lọc theo loại + tìm kiếm */}
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                    <div className="relative flex-1 sm:max-w-xs">
+                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                      <input
+                        value={lecQuery}
+                        onChange={e => setLecQuery(e.target.value)}
+                        placeholder="Tìm bài giảng…"
+                        className="w-full h-9 pl-8 pr-3 rounded-xl border border-border bg-background text-sm outline-none focus:ring-2 focus:ring-primary/40"
+                      />
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button onClick={() => setLecFilter("all")} className={chipCls(lecFilter === "all")}>Tất cả ({lectureItems.length})</button>
+                      <button onClick={() => setLecFilter("lecture")} className={chipCls(lecFilter === "lecture")}>Bài giảng</button>
+                      {lecSolutionCount > 0 && (
+                        <button onClick={() => setLecFilter("solution")} className={chipCls(lecFilter === "solution")}>Video chữa bài ({lecSolutionCount})</button>
+                      )}
+                    </div>
+                  </div>
+
+                  {lecView.length === 0 ? (
+                    <Card><CardContent className="py-10 text-center text-sm text-muted-foreground">Không tìm thấy bài giảng phù hợp.</CardContent></Card>
+                  ) : lecView.map((lec, i) => {
                   const isWatched = watched.has(lec.id);
                   return (
                     <Card
@@ -905,9 +1037,10 @@ export default function StudentClassDetailPage() {
                             <div className="flex items-start justify-between gap-4">
                               <div className="flex-1 min-w-0">
                                 <div className="flex items-center gap-2 mb-1.5">
-                                  <Badge variant={lec.is_published ? "info" : "outline"} className="text-[10px]">
-                                    {lec.is_published ? `Bài ${lec.order}` : "Sắp ra mắt"}
+                                  <Badge variant={lec.kind === "solution" ? "outline" : "info"} className={`text-[10px] ${lec.kind === "solution" ? "text-violet-600 border-violet-300 dark:text-violet-400" : ""}`}>
+                                    {lec.kind === "solution" ? "Video chữa bài" : "Bài giảng"}
                                   </Badge>
+                                  {!lec.is_published && <Badge variant="outline" className="text-[10px]">Sắp ra mắt</Badge>}
                                   {isWatched && (
                                     <Badge className="text-[10px] bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 border-0">
                                       Đã xem
@@ -915,11 +1048,14 @@ export default function StudentClassDetailPage() {
                                   )}
                                 </div>
                                 <h3 className="font-semibold text-foreground text-base">{lec.title}</h3>
-                                <p className="text-sm text-muted-foreground mt-1 line-clamp-2">{lec.description}</p>
+                                {lec.description && <p className="text-sm text-muted-foreground mt-1 line-clamp-2">{lec.description}</p>}
+                                {lec.linkedHomeworkTitle && (
+                                  <p className="text-xs text-violet-600 dark:text-violet-400 mt-1">↪ Chữa cho: {lec.linkedHomeworkTitle}</p>
+                                )}
                                 <div className="flex flex-wrap items-center gap-4 mt-3 text-xs text-muted-foreground">
-                                  <span className="flex items-center gap-1"><Clock className="h-3.5 w-3.5" />{lec.duration}</span>
-                                  {lec.is_published && <span className="flex items-center gap-1"><Eye className="h-3.5 w-3.5" />{lec.views} lượt xem</span>}
-                                  <span className="flex items-center gap-1"><Calendar className="h-3.5 w-3.5" />{formatDate(lec.created_at)}</span>
+                                  {lec.duration && <span className="flex items-center gap-1"><Clock className="h-3.5 w-3.5" />{lec.duration}</span>}
+                                  {lec.is_published && lec.views != null && <span className="flex items-center gap-1"><Eye className="h-3.5 w-3.5" />{lec.views} lượt xem</span>}
+                                  {lec.created_at && <span className="flex items-center gap-1"><Calendar className="h-3.5 w-3.5" />{formatDate(lec.created_at)}</span>}
                                 </div>
                               </div>
                               {lec.is_published && (
@@ -930,7 +1066,7 @@ export default function StudentClassDetailPage() {
                                     onClick={() => handleWatchLecture(lec.id, lec.video_url)}
                                   >
                                     <PlayCircle className="h-3.5 w-3.5 mr-1.5" />
-                                    {isWatched ? "Xem lại" : "Xem bài giảng"}
+                                    {isWatched ? "Xem lại" : lec.kind === "solution" ? "Xem video chữa" : "Xem bài giảng"}
                                   </Button>
                                   {lec.slides_url && (
                                     <Button
@@ -949,22 +1085,46 @@ export default function StudentClassDetailPage() {
                       </CardContent>
                     </Card>
                   );
-                })
+                })}
+                </>
               )}
             </div>
           )}
 
           {/* ── Materials ── */}
           {activeTab === "materials" && (
-            <>
+            <div className="space-y-4">
               {materials.length === 0 ? (
                 <Card><CardContent className="py-16 text-center text-muted-foreground">
                   <FileText className="h-12 w-12 mx-auto opacity-20 mb-3" />
                   <p className="text-sm font-medium">Chưa có tài liệu nào</p>
                 </CardContent></Card>
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
-                  {materials.map((mat, i) => {
+                <>
+                  {/* Tìm kiếm + lọc danh mục */}
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                    <div className="relative flex-1 sm:max-w-xs">
+                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                      <input
+                        value={matQuery}
+                        onChange={e => setMatQuery(e.target.value)}
+                        placeholder="Tìm tài liệu…"
+                        className="w-full h-9 pl-8 pr-3 rounded-xl border border-border bg-background text-sm outline-none focus:ring-2 focus:ring-primary/40"
+                      />
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button onClick={() => setMatCat("all")} className={chipCls(matCat === "all")}>Tất cả ({materials.length})</button>
+                      {matCategories.map(c => (
+                        <button key={c} onClick={() => setMatCat(c)} className={chipCls(matCat === c)}>{CATEGORY_MAP[c]?.label ?? c}</button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {matView.length === 0 ? (
+                    <Card><CardContent className="py-10 text-center text-sm text-muted-foreground">Không tìm thấy tài liệu phù hợp.</CardContent></Card>
+                  ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+                  {matView.map((mat, i) => {
                     const cat = CATEGORY_MAP[mat.category] ?? { label: mat.category, color: "bg-muted text-muted-foreground" };
                     return (
                       <Card
@@ -995,10 +1155,8 @@ export default function StudentClassDetailPage() {
                           )}
                           <p className="text-xs text-muted-foreground line-clamp-2 mb-3">{mat.description}</p>
                           <div className="flex items-center gap-2 text-[11px] text-muted-foreground mt-auto mb-3 flex-wrap">
-                            <span>{mat.file_size}</span>
-                            <span>·</span>
-                            <span className="flex items-center gap-1"><Download className="h-3 w-3" />{mat.download_count} lượt</span>
-                            <span>·</span>
+                            {mat.file_size && <><span>{mat.file_size}</span><span>·</span></>}
+                            {mat.download_count > 0 && <><span className="flex items-center gap-1"><Download className="h-3 w-3" />{mat.download_count} lượt</span><span>·</span></>}
                             <span>{formatDate(mat.created_at)}</span>
                           </div>
                           <div className="flex gap-2 pt-3 border-t border-border/50">
@@ -1030,9 +1188,11 @@ export default function StudentClassDetailPage() {
                       </Card>
                     );
                   })}
-                </div>
+                  </div>
+                  )}
+                </>
               )}
-            </>
+            </div>
           )}
 
           {/* ── Notes ── */}
@@ -1244,17 +1404,71 @@ export default function StudentClassDetailPage() {
           {/* ── Homework ── */}
           {activeTab === "homework" && (
             <div className="space-y-4">
-              {incompleteClassHomework.length === 0 ? (
+              {sortedClassHomework.length === 0 ? (
                 <Card><CardContent className="py-16 text-center text-muted-foreground">
-                  <CheckCircle2 className="h-12 w-12 mx-auto opacity-20 mb-3" />
-                  <p className="text-sm font-medium">Bạn đã hoàn thành tất cả bài tập của lớp này</p>
+                  <NotebookPen className="h-12 w-12 mx-auto opacity-20 mb-3" />
+                  <p className="text-sm font-medium">Lớp này chưa có bài tập nào</p>
                 </CardContent></Card>
               ) : (
-                incompleteClassHomework.map((hw, i) => {
+                <>
+                  {/* Bộ lọc trạng thái */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    {([["all", `Tất cả (${sortedClassHomework.length})`], ["todo", `Chưa làm (${incompleteClassHomework.length})`], ["done", `Đã xong (${hwDoneCount})`]] as const).map(([k, label]) => (
+                      <button
+                        key={k}
+                        onClick={() => setHwFilter(k)}
+                        className={`px-3 py-1.5 text-xs font-semibold rounded-xl transition-all ${hwFilter === k ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:bg-accent"}`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {hwView.length === 0 ? (
+                    <Card><CardContent className="py-10 text-center text-sm text-muted-foreground">Không có bài tập nào phù hợp bộ lọc.</CardContent></Card>
+                  ) : hwView.map((hw, i) => {
+                  // Bài làm câu hỏi trên hệ thống
+                  if (hw.kind === "exam") {
+                    return (
+                      <Card key={hw.id} className="animate-fade-in hover:shadow-md transition-all" style={{ animationDelay: `${i * 60}ms` }}>
+                        <CardContent className="p-5">
+                          <div className="flex items-start gap-4">
+                            <div className="h-11 w-11 rounded-xl flex items-center justify-center shrink-0 bg-amber-500/10 text-amber-600 dark:text-amber-400">
+                              <NotebookPen className="h-5 w-5" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex flex-wrap items-start justify-between gap-2 mb-1">
+                                <h3 className="font-semibold text-foreground">{hw.title}</h3>
+                                {hw.exam_done ? (
+                                  <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400">
+                                    Đã làm{hw.exam_score != null ? ` · ${hw.exam_score}/${hw.exam_total}` : ""}
+                                  </span>
+                                ) : (
+                                  <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400">Chưa làm</span>
+                                )}
+                              </div>
+                              {hw.description && <p className="text-sm text-muted-foreground leading-relaxed mb-2">{hw.description}</p>}
+                              <p className="flex items-center gap-1 text-xs font-semibold text-rose-600 dark:text-rose-400 mb-3">
+                                <PenSquare className="h-3.5 w-3.5" /> Làm trên hệ thống
+                              </p>
+                              <Link href={`/student/classes/${classId}/exam/${hw.id}`}>
+                                <Button size="sm" variant={hw.exam_done ? "outline" : "gradient"}>
+                                  <PlayCircle className="h-3.5 w-3.5 mr-1.5" /> {hw.exam_done ? "Xem lại / Làm lại" : "Làm bài"}
+                                </Button>
+                              </Link>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    );
+                  }
+
+                  // Bài nộp file
                   const sub     = submissions.find(s => s.homework_id === hw.id && s.student_id === CURRENT_STUDENT_ID);
                   const returned = sub?.status === "returned";
+                  const graded   = sub?.status === "graded";
                   const days    = Math.ceil((new Date(hw.due_date).setHours(23,59,59) - Date.now()) / 86400000);
-                  const overdue = days < 0;
+                  const overdue = !sub && days < 0;
 
                   return (
                     <Card
@@ -1264,25 +1478,29 @@ export default function StudentClassDetailPage() {
                     >
                       <CardContent className="p-5">
                         <div className="flex items-start gap-4">
-                          <div className={`h-11 w-11 rounded-xl flex items-center justify-center shrink-0 ${returned || overdue ? "bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400" : "bg-primary/10 text-primary"}`}>
+                          <div className={`h-11 w-11 rounded-xl flex items-center justify-center shrink-0 ${returned || overdue ? "bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400" : graded ? "bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400" : "bg-primary/10 text-primary"}`}>
                             {returned || overdue ? <AlertCircle className="h-5 w-5" />
-                              : <FileText className="h-5 w-5" />}
+                              : graded ? <CheckCircle2 className="h-5 w-5" />
+                              : <NotebookPen className="h-5 w-5" />}
                           </div>
                           <div className="flex-1 min-w-0">
                             <div className="flex flex-wrap items-start justify-between gap-2 mb-1">
                               <h3 className="font-semibold text-foreground">{hw.title}</h3>
                               <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full ${
-                                returned ? "bg-red-100 text-red-700 dark:bg-red-900/20 dark:text-red-400"
-                                : overdue ? "bg-red-100 text-red-700 dark:bg-red-900/20 dark:text-red-400"
+                                returned || overdue ? "bg-red-100 text-red-700 dark:bg-red-900/20 dark:text-red-400"
+                                : graded ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400"
+                                : sub ? "bg-blue-100 text-blue-700 dark:bg-blue-900/20 dark:text-blue-400"
                                 : "bg-amber-100 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400"
                               }`}>
                                 {returned ? "Cần làm lại"
+                                  : graded ? "Đã chấm"
+                                  : sub ? "Đã nộp"
                                   : overdue ? "Quá hạn"
                                   : days === 0 ? "Hôm nay"
                                   : `Còn ${days} ngày`}
                               </span>
                             </div>
-                            <p className="text-sm text-muted-foreground leading-relaxed mb-3">{hw.description}</p>
+                            {hw.description && <p className="text-sm text-muted-foreground leading-relaxed mb-3">{hw.description}</p>}
                             <div className="flex items-center gap-4 text-xs text-muted-foreground">
                               <span className="flex items-center gap-1">
                                 <Calendar className="h-3.5 w-3.5" />
@@ -1298,21 +1516,20 @@ export default function StudentClassDetailPage() {
                               </div>
                             )}
 
-                            {(!sub || returned) && (
-                              <div className="mt-3">
-                                <Link href="/student/homework">
-                                  <Button size="sm" variant="gradient">
-                                    <ExternalLink className="h-3.5 w-3.5 mr-1.5" /> Đến trang nộp bài
-                                  </Button>
-                                </Link>
-                              </div>
-                            )}
+                            <div className="mt-3">
+                              <Link href="/student/homework">
+                                <Button size="sm" variant={!sub || returned ? "gradient" : "outline"}>
+                                  <ExternalLink className="h-3.5 w-3.5 mr-1.5" /> {!sub || returned ? "Đến trang nộp bài" : "Xem bài nộp"}
+                                </Button>
+                              </Link>
+                            </div>
                           </div>
                         </div>
                       </CardContent>
                     </Card>
                   );
-                })
+                })}
+                </>
               )}
             </div>
           )}

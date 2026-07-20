@@ -103,6 +103,14 @@ export interface Homework {
   assigned_to?: string[] | null;
   /** "curriculum" = lấy từ lộ trình, undefined = tạo trực tiếp từ tab Bài tập */
   source?: "curriculum";
+  /** "file" = học sinh nộp file (mặc định); "exam" = làm câu hỏi trên hệ thống */
+  kind?: "file" | "exam";
+  /** File đề bài đính kèm (kind "file") */
+  file_url?: string;
+  /** Trạng thái bài (kind "exam") */
+  exam_status?: "draft" | "open" | "closed";
+  /** Kết quả bài thi theo học sinh (kind "exam"): student_id → điểm đã đạt / tối đa */
+  exam_results?: Record<string, { score: number; total: number }>;
 }
 
 export interface Submission {
