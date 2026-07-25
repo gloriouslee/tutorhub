@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { SectionHeader } from "@/components/shared";
 import {
-  getEnrollments, approveEnrollment, rejectEnrollment, getClasses,
+  getEnrollments, approveEnrollment, rejectEnrollment, getClasses, addNotification,
   type EnrollmentRequest, type EnrollmentStatus,
 } from "@/lib/storage";
 import { MOCK_CLASSES } from "@/lib/mock-data";
@@ -71,6 +71,14 @@ function ApproveModal({ enrollment, classes, onClose, onDone }: ApproveModalProp
         assigned_class_id: assignedClassId,
         account_username:  username.trim(),
         account_password:  password.trim(),
+      });
+      // Đẩy thông báo về giáo viên: có học viên mới được xếp vào lớp
+      const cls = classes.find(c => c.id === assignedClassId);
+      await addNotification({
+        title: "Học viên mới được xếp lớp",
+        content: `${enrollment.full_name} vừa được duyệt & xếp vào lớp ${cls?.class_name ?? assignedClassId}.`,
+        target_role: "teacher",
+        category: "system",
       });
       onDone();
     } catch (err: unknown) {

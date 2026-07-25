@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
-  getCurriculum, mutateCurriculum, getAllExamResults,
+  getCurriculum, mutateCurriculum, getAllExamResults, addNotification,
   type CurriculumChapter, type CurriculumSession, type CurriculumLesson, type StoredExamResult,
 } from "@/lib/storage";
 import { uploadClassFile } from "@/lib/upload";
@@ -667,6 +667,18 @@ export default function CurriculumTab({ classId, schedule, students = [], gradeL
 
   // ── Lesson ops ──
   function saveLesson(chapterId: string, sessionId: string, lesson: CurriculumLesson): Promise<unknown> {
+    // Giao bài mới (homework/exam) đã hiển thị → báo cho học sinh của lớp.
+    const isNew = !chapters.some(ch => ch.sessions.some(s => s.lessons.some(l => l.id === lesson.id)));
+    if (isNew && lesson.is_published && (lesson.type === "homework" || lesson.type === "exam")) {
+      const kind = lesson.type === "exam" ? "Bài tập trên hệ thống" : "Bài tập về nhà";
+      void addNotification({
+        title: "Bài tập mới được giao",
+        content: `${kind}: "${lesson.title}" vừa được giao. Vào làm nhé!`,
+        target_role: "student",
+        target_class_id: classId,
+        category: "assignment",
+      });
+    }
     return persist(chs => chs.map(ch =>
       ch.id === chapterId ? {
         ...ch,

@@ -63,6 +63,7 @@ const KV_PREFIX_ROUTES: Array<[string, string]> = [
   ["tutorhub_homework_attachments",   "kv_homework_attachments"],
   ["tutorhub_class_materials",        "kv_class_materials"],
   ["tutorhub_class_teacher_overrides","kv_class_overrides"],
+  ["tutorhub_teacher_settings_",      "kv_teacher_settings"],
   ["tutorhub_teacher_homework",       "kv_teacher_homework"],
   ["tutorhub_teacher_classes",        "kv_teacher_classes"],
   ["tutorhub_teacher_attendance",     "kv_teacher_attendance"],
@@ -312,16 +313,62 @@ export async function getAllTeacherAttendance(): Promise<TeacherAttendanceRecord
 }
 
 export async function getNotifications(): Promise<Notification[]> {
-  return getEntity(
+  // Chụp cache cục bộ TRƯỚC khi getEntity ghi đè bằng dữ liệu DB.
+  const localBefore = readLocal<Notification>(ENTITY_KEYS.notifications) ?? [];
+  const list = await getEntity(
     ENTITY_KEYS.notifications,
     "notifications",
     () => supabase.from("notifications").select("*").order("created_at", { ascending: false }) as any,
     MOCK_NOTIFICATIONS as unknown as Notification[]
   );
+  // Giữ lại thông báo tạo cục bộ chưa kịp đồng bộ lên DB (Supabase chập chờn),
+  // union theo id — vô hại khi đã đồng bộ (trùng id) và trên prod.
+  const ids = new Set(list.map(n => n.id));
+  const localOnly = localBefore.filter(n => !ids.has(n.id));
+  if (localOnly.length === 0) return list;
+  const merged = [...localOnly, ...list].sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""));
+  writeLocal(ENTITY_KEYS.notifications, merged);
+  return merged;
 }
 
 export async function saveNotifications(notifications: Notification[]): Promise<void> {
   return saveEntity(ENTITY_KEYS.notifications, "notifications", notifications);
+}
+
+export interface NewNotification {
+  title: string;
+  content: string;
+  target_role: Notification["target_role"];
+  category?: Notification["category"];
+  sent_by?: string;
+  // Giới hạn theo lớp (cột có sẵn trong bảng notifications) — VD báo học sinh của
+  // 1 lớp khi giao bài / chấm bài. Bỏ trống = gửi cho mọi người thuộc target_role.
+  target_class_id?: string;
+  target_class_name?: string;
+}
+
+/** Thêm một thông báo (đọc danh sách hiện tại rồi ghi kèm mục mới lên đầu). */
+export async function addNotification(n: NewNotification): Promise<void> {
+  return addNotifications([n]);
+}
+
+/** Thêm nhiều thông báo trong một lần đọc-ghi. */
+export async function addNotifications(items: NewNotification[]): Promise<void> {
+  if (items.length === 0) return;
+  const all = await getNotifications();
+  const now = Date.now();
+  const fulls: Notification[] = items.map((n, i) => ({
+    id: `ntf_${now}_${i}_${Math.random().toString(36).slice(2, 5)}`,
+    title: n.title,
+    content: n.content,
+    target_role: n.target_role,
+    is_read: false,
+    created_at: new Date(now + i).toISOString(),
+    category: n.category,
+    sent_by: n.sent_by,
+    target_class_id: n.target_class_id,
+  }));
+  await saveNotifications([...fulls, ...all]);
 }
 
 export async function resetAllStorage(): Promise<void> {
@@ -803,6 +850,26 @@ export async function confirmInvoicePaid(invoiceId: string): Promise<TuitionInvo
     })
   );
   return result;
+}
+
+// ── Teacher settings (QR thanh toán, thông tin ngân hàng) ────────────────────
+
+export interface TeacherSettings {
+  qr_image_url?: string;    // ảnh QR đã upload HOẶC link ảnh QR/VietQR
+  bank_name?: string;
+  account_holder?: string;
+  account_number?: string;
+  payment_note?: string;    // ghi chú thêm hiển thị khi thanh toán
+}
+
+const TEACHER_SETTINGS_KEY = "tutorhub_teacher_settings_";
+
+export async function getTeacherSettings(teacherId: string): Promise<TeacherSettings> {
+  return kvGet<TeacherSettings>(`${TEACHER_SETTINGS_KEY}${teacherId}`, {});
+}
+
+export async function saveTeacherSettings(teacherId: string, settings: TeacherSettings): Promise<void> {
+  await kvSet(`${TEACHER_SETTINGS_KEY}${teacherId}`, settings);
 }
 
 // ── Enrollment requests (Supabase) ───────────────────────────────────────────

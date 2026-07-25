@@ -9,7 +9,8 @@ import { Badge } from "@/components/ui/badge";
 import { SectionHeader } from "@/components/shared";
 import {
   createTransaction, getTransactions, getInvoices, updateInvoiceStatus,
-  type PurchaseTransaction, type TuitionInvoice,
+  getTeacherSettings, addNotification,
+  type PurchaseTransaction, type TuitionInvoice, type TeacherSettings,
 } from "@/lib/storage";
 import {
   DollarSign, CreditCard, Receipt, Clock, CheckCircle2,
@@ -63,6 +64,9 @@ function PaymentsContent() {
   const [modalTarget,    setModalTarget]     = useState<ModalTarget | null>(null);
   const [receiptFile,    setReceiptFile]     = useState<File | null>(null);
   const [submitting,     setSubmitting]      = useState(false);
+  // QR + thông tin ngân hàng do giáo viên cấu hình (Cài đặt). Demo: 1 giáo viên "t1".
+  const [teacherQR,      setTeacherQR]       = useState<TeacherSettings>({});
+  useEffect(() => { getTeacherSettings("t1").then(setTeacherQR); }, []);
 
   useEffect(() => {
     getInvoices().then(list => setInvoices(list.filter(inv => inv.child_id === STUDENT.id)));
@@ -103,6 +107,11 @@ function PaymentsContent() {
       );
       const list = await getInvoices();
       setInvoices(list.filter(inv => inv.child_id === STUDENT.id));
+      await addNotification({
+        title: "Học viên nộp học phí",
+        content: `${STUDENT.name} đã gửi biên lai học phí (${formatVND(modalAmt)}) — chờ xác nhận.`,
+        target_role: "admin", category: "system", sent_by: STUDENT.name,
+      });
     } else {
       await createTransaction({
         pkg_id:        modalTarget.pkgId,
@@ -112,6 +121,11 @@ function PaymentsContent() {
         student_name:  STUDENT.name,
         student_email: STUDENT.email,
         transfer_note: `TUTORHUB ${modalTarget.pkgId.toUpperCase()} ${STUDENT.id}`,
+      });
+      await addNotification({
+        title: "Giao dịch mua tài liệu",
+        content: `${STUDENT.name} đã tạo giao dịch mua "${modalTarget.title}" (${formatVND(modalTarget.amount)}) — chờ duyệt.`,
+        target_role: "admin", category: "system", sent_by: STUDENT.name,
       });
       reload();
     }
@@ -418,7 +432,9 @@ function PaymentsContent() {
                     <div className="p-3 bg-white rounded-2xl shadow-sm border border-border shrink-0">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
-                        src={`https://img.vietqr.io/image/970423-12604051999-compact.png?amount=${modalAmt}&addInfo=${encodeURIComponent(transferNote)}&accountName=LE%20HUY%20HOANG`}
+                        src={teacherQR.qr_image_url
+                          ? teacherQR.qr_image_url
+                          : `https://img.vietqr.io/image/970423-12604051999-compact.png?amount=${modalAmt}&addInfo=${encodeURIComponent(transferNote)}&accountName=LE%20HUY%20HOANG`}
                         alt="QR Code Thanh Toán"
                         className="w-40 h-40 object-contain"
                       />
@@ -426,9 +442,9 @@ function PaymentsContent() {
                     <div className="flex-1 w-full bg-muted/30 p-3 rounded-xl border border-border/50 space-y-2">
                       <p className="text-[11px] text-muted-foreground uppercase font-bold tracking-wider">Thông tin người nhận</p>
                       {[
-                        { label: "Ngân hàng",     value: "TPBank" },
-                        { label: "Số tài khoản",  value: "12604051999" },
-                        { label: "Chủ tài khoản", value: "LE HUY HOANG" },
+                        { label: "Ngân hàng",     value: teacherQR.bank_name || "TPBank" },
+                        { label: "Số tài khoản",  value: teacherQR.account_number || "12604051999" },
+                        { label: "Chủ tài khoản", value: teacherQR.account_holder || "LE HUY HOANG" },
                       ].map(row => (
                         <div key={row.label} className="flex justify-between items-center border-b border-border/50 pb-1.5 last:border-0 last:pb-0">
                           <span className="text-xs text-muted-foreground">{row.label}:</span>

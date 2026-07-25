@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { SectionHeader } from "@/components/shared";
 import {
-  getInvoices, updateInvoiceStatus, type TuitionInvoice,
+  getInvoices, updateInvoiceStatus, getTeacherSettings, addNotification,
+  type TuitionInvoice, type TeacherSettings,
 } from "@/lib/storage";
 import { useParentContext } from "@/hooks/useParentContext";
 import { formatCurrency } from "@/lib/utils";
@@ -24,6 +25,8 @@ export default function ParentPaymentsPage() {
   const [modalInvoice, setModalInvoice] = useState<TuitionInvoice | null>(null);
   const [receiptFile,  setReceiptFile]  = useState<File | null>(null);
   const [submitting,   setSubmitting]   = useState(false);
+  const [teacherQR,    setTeacherQR]    = useState<TeacherSettings>({});
+  useEffect(() => { getTeacherSettings("t1").then(setTeacherQR); }, []);
 
   const load = async () => setInvoices((await getInvoices()).filter(inv => childIds.includes(inv.child_id)));
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -73,6 +76,11 @@ export default function ParentPaymentsPage() {
     } else {
       await updateInvoiceStatus(modalInvoice.id, "pending_verification", "parent");
     }
+    await addNotification({
+      title: "Phụ huynh nộp học phí",
+      content: `${parentName} đã gửi biên lai học phí (${formatCurrency(modalInvoice.amount)}) — chờ xác nhận.`,
+      target_role: "admin", category: "system", sent_by: parentName,
+    });
     await load();
     setSubmitting(false);
     closeModal();
@@ -297,7 +305,9 @@ export default function ParentPaymentsPage() {
                 <div className="p-3 bg-white rounded-2xl shadow-sm border border-border shrink-0">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
-                    src={`https://img.vietqr.io/image/970423-12604051999-compact.png?amount=${modalInvoice.amount}&addInfo=${encodeURIComponent(transferNote)}&accountName=LE%20HUY%20HOANG`}
+                    src={teacherQR.qr_image_url
+                      ? teacherQR.qr_image_url
+                      : `https://img.vietqr.io/image/970423-12604051999-compact.png?amount=${modalInvoice.amount}&addInfo=${encodeURIComponent(transferNote)}&accountName=LE%20HUY%20HOANG`}
                     alt="VietQR"
                     className="w-40 h-40 object-contain"
                   />
@@ -305,9 +315,9 @@ export default function ParentPaymentsPage() {
                 <div className="flex-1 w-full bg-muted/30 p-3 rounded-xl border border-border/50 space-y-2">
                   <p className="text-[11px] text-muted-foreground uppercase font-bold tracking-wider">Thông tin người nhận</p>
                   {[
-                    { label: "Ngân hàng",     value: "TPBank" },
-                    { label: "Số tài khoản",  value: "12604051999" },
-                    { label: "Chủ tài khoản", value: "LE HUY HOANG" },
+                    { label: "Ngân hàng",     value: teacherQR.bank_name || "TPBank" },
+                    { label: "Số tài khoản",  value: teacherQR.account_number || "12604051999" },
+                    { label: "Chủ tài khoản", value: teacherQR.account_holder || "LE HUY HOANG" },
                   ].map(row => (
                     <div key={row.label} className="flex justify-between items-center border-b border-border/50 pb-1.5 last:border-0 last:pb-0">
                       <span className="text-xs text-muted-foreground">{row.label}:</span>

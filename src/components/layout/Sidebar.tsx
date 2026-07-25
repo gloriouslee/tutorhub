@@ -15,7 +15,7 @@ import { UserRole } from "@/types";
 import { MOCK_HOMEWORK } from "@/lib/mock-data";
 import {
   kvGet, getNotifications, getScheduleNotifications,
-  getEnrollments, getTransactions, getInvoices,
+  getEnrollments,
 } from "@/lib/storage";
 import { getSubmissionsByStudent } from "@/lib/supabase/submissions";
 import { useStudentContext } from "@/hooks/useStudentContext";
@@ -59,8 +59,10 @@ const navConfig: Record<UserRole, NavItem[]> = {
     { label: "Tài liệu",   href: "/teacher/materials",      icon: BookMarked },
     { label: "Học viên",   href: "/teacher/students",       icon: Users },
     { label: "Xu hướng",   href: "/teacher/analytics",      icon: BarChart3 },
+    { label: "Duyệt thu",  href: "/teacher/approvals",      icon: DollarSign },
     { label: "Tin tức",    href: "/teacher/announcements",  icon: MessageSquare },
     { label: "Thông báo",  href: "/teacher/notifications",  icon: Bell },
+    { label: "Cài đặt",    href: "/teacher/settings",       icon: Settings },
   ],
   admin: [
     { label: "Tổng quan",  href: "/admin",                  icon: LayoutDashboard },
@@ -68,8 +70,6 @@ const navConfig: Record<UserRole, NavItem[]> = {
     { label: "Giáo viên",  href: "/admin/teachers",         icon: Users },
     { label: "Lớp học",    href: "/admin/classes",          icon: BookOpen },
     { label: "Đăng ký HV", href: "/admin/enrollments",      icon: GraduationCap },
-    { label: "Bán tài liệu", href: "/admin/transactions",   icon: CheckSquare },
-    { label: "Học phí",      href: "/admin/payments",       icon: DollarSign },
     { label: "Báo cáo",    href: "/admin/reports",          icon: BarChart3 },
     { label: "Thông báo",  href: "/admin/notifications",    icon: Bell },
     { label: "Tài khoản",  href: "/admin/users",            icon: Shield },
@@ -164,18 +164,10 @@ async function computeBadges(
   }
 
   if (role === "admin") {
-    // Hàng đợi cần xử lý — khớp bộ đếm "Chờ duyệt/Chờ xác nhận" của từng trang
-    const [enrollments, transactions, invoices] = await Promise.all([
-      getEnrollments().catch(() => []),
-      getTransactions().catch(() => []),
-      getInvoices().catch(() => []),
-    ]);
+    // Chỉ còn hàng đợi duyệt đăng ký học viên; học phí & giao dịch do giáo viên duyệt.
+    const enrollments = await getEnrollments().catch(() => []);
     const pendingEnroll = enrollments.filter(e => e.status === "pending").length;
-    const pendingTx     = transactions.filter(t => t.status === "pending").length;
-    const pendingRcpt   = invoices.filter(i => i.status === "pending_verification").length;
-    if (pendingEnroll > 0) result["/admin/enrollments"]  = pendingEnroll;
-    if (pendingTx > 0)     result["/admin/transactions"] = pendingTx;
-    if (pendingRcpt > 0)   result["/admin/payments"]     = pendingRcpt;
+    if (pendingEnroll > 0) result["/admin/enrollments"] = pendingEnroll;
   }
 
   return result;

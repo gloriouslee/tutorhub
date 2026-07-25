@@ -121,12 +121,6 @@ export default function AdminPaymentsPage() {
     }
   };
 
-  // Từ chối biên lai — trả hóa đơn về trạng thái chờ thanh toán
-  const handleRejectReceipt = async (row: LedgerRow) => {
-    await updateInvoiceStatus(row.id, "pending", row.submitted_by ?? "parent");
-    setInvoices(await getInvoices());
-  };
-
   const handleOpenAddModal = () => {
     const defaultStudent = students[0]?.id || "";
     setFormData({
@@ -194,13 +188,13 @@ export default function AdminPaymentsPage() {
           ))}
         </div>
 
-        {/* Biên lai chờ xác nhận — phụ huynh/học viên vừa nộp */}
+        {/* Biên lai chờ xác nhận — giáo viên tự duyệt (Duyệt thu ở cổng giáo viên) */}
         {awaitingVerification.length > 0 && (
           <Card className="border-violet-200 dark:border-violet-800/50">
             <CardHeader className="pb-3">
               <div className="flex items-center gap-2">
                 <Receipt className="h-4 w-4 text-violet-500" />
-                <CardTitle className="text-sm">Biên lai chờ xác nhận ({awaitingVerification.length})</CardTitle>
+                <CardTitle className="text-sm">Biên lai chờ giáo viên xác nhận ({awaitingVerification.length})</CardTitle>
               </div>
             </CardHeader>
             <CardContent className="space-y-2">
@@ -215,14 +209,7 @@ export default function AdminPaymentsPage() {
                         {student?.full_name ?? row.student_id} · {formatCurrency(row.amount)} · {row.submitted_by === "parent" ? "Phụ huynh nộp" : "Học viên nộp"}
                       </p>
                     </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <Button size="sm" variant="gradient" onClick={() => handleMarkPaid(row)}>
-                        <CheckCircle2 className="h-3.5 w-3.5 mr-1.5" /> Xác nhận đã thu
-                      </Button>
-                      <Button size="sm" variant="outline" onClick={() => handleRejectReceipt(row)}>
-                        <RotateCcw className="h-3.5 w-3.5 mr-1.5" /> Từ chối
-                      </Button>
-                    </div>
+                    <span className="text-xs text-muted-foreground italic shrink-0">Chờ giáo viên duyệt</span>
                   </div>
                 );
               })}
@@ -298,14 +285,7 @@ export default function AdminPaymentsPage() {
                                   <CheckCircle2 className="h-3.5 w-3.5" /> Đã thu
                                 </span>
                               ) : row.status === "pending_verification" ? (
-                                <>
-                                  <Button size="sm" variant="gradient" onClick={() => handleMarkPaid(row)}>
-                                    Xác nhận
-                                  </Button>
-                                  <Button size="sm" variant="outline" onClick={() => handleRejectReceipt(row)}>
-                                    Từ chối
-                                  </Button>
-                                </>
+                                <span className="text-xs text-muted-foreground italic">Giáo viên duyệt</span>
                               ) : (
                                 <Button size="sm" variant="gradient" onClick={() => handleMarkPaid(row)}>
                                   Xác nhận đã thu

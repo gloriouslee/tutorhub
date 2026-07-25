@@ -17,7 +17,7 @@ import {
   updateGrade as supabaseUpdateGrade,
   type SubmissionRecord,
 } from "@/lib/supabase/submissions";
-import { kvGet, kvUpdate } from "@/lib/storage";
+import { kvGet, kvUpdate, addNotification } from "@/lib/storage";
 
 // ── Data types ────────────────────────────────────────────────────────────────
 // Use SubmissionRecord from Supabase lib; extend with student_name for display
@@ -184,6 +184,16 @@ function TeacherSubmissionsPageInner() {
     setTeacherFile(null);
 
     await supabaseUpdateGrade(subId, score, feedback, teacherFileUrl, teacherFileName);
+
+    // Báo cho học sinh: bài tập đã được chấm
+    if (existing) {
+      const hw = myHomework.find(h => h.id === existing.homework_id);
+      await addNotification({
+        title: "Bài tập đã được chấm",
+        content: `"${hw?.title ?? "Bài tập"}" đã được chấm: ${score}/10${feedback ? " — có nhận xét của giáo viên." : "."}`,
+        target_role: "student", target_class_id: hw?.class_id, category: "graded",
+      });
+    }
   }
 
   const hwForSub = (sub: Submission) => myHomework.find(h => h.id === sub.homework_id);

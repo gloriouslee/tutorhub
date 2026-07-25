@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { Button } from "@/components/ui/button";
-import { gradeExamResult, type StoredExamResult, type ExamQuestion } from "@/lib/storage";
+import { gradeExamResult, addNotification, type StoredExamResult, type ExamQuestion } from "@/lib/storage";
 import { formatDuration } from "./classDetail.types";
 import { maxQuestionScore, calcMaxScore, autoQuestionScore, countCorrectStatements, type TrueFalseScale } from "@/lib/exam-scoring";
 import { renderMathInHtml } from "@/lib/mathRender";
@@ -149,6 +149,11 @@ export default function ExamGradingView({
       );
       setResults(nextResults);
       onResultsChange?.(nextResults);
+      await addNotification({
+        title: "Bài thi đã được chấm",
+        content: `Bài "${examTitle}" đã được chấm điểm${className ? ` (lớp ${className})` : ""}. Xem điểm của bạn trong phần kết quả.`,
+        target_role: "student", target_class_id: classId, category: "graded", sent_by: className,
+      });
       setSavedFlash(true);
       setTimeout(() => setSavedFlash(false), 2000);
     } finally {

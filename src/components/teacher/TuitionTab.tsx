@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import {
   getClassTuition, saveClassTuition, recordTuitionPayment, deleteTuitionPayment,
-  getInvoices, issueTuitionInvoice, confirmInvoicePaid, getAllTeacherAttendance,
+  getInvoices, issueTuitionInvoice, confirmInvoicePaid, getAllTeacherAttendance, addNotification,
   type ClassTuitionConfig, type StudentTuitionData, type TuitionPaymentRecord,
   type TuitionInvoice, type TuitionDiscount, type TeacherAttendanceRecord,
   type PackagePrices,
@@ -291,6 +291,11 @@ function StudentCard({ student, config, period, classId, className, invoice, att
           method: "transfer", note: "Xác nhận từ biên lai học sinh",
         });
       }
+      await addNotification({
+        title: "Đã thu học phí",
+        content: `Giáo viên đã xác nhận thu ${formatCurrency(invoice.amount)} học phí từ ${name}.`,
+        target_role: "admin", category: "system",
+      });
     }
     setBusy(false);
     onUpdate();

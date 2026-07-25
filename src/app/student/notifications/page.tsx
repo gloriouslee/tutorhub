@@ -90,7 +90,8 @@ const CATEGORY_META: Record<NotifCategory, {
 };
 
 export default function StudentNotificationsPage() {
-  const { studentName } = useStudentContext();
+  const { studentName, myClasses } = useStudentContext();
+  const myClassIds = myClasses.map(c => c.id);
   const router = useRouter();
   const [scheduleNotifs, setScheduleNotifs] = useState<ScheduleNotification[]>([]);
   const [notifs, setNotifs] = useState<Notification[]>([]);
@@ -103,9 +104,14 @@ export default function StudentNotificationsPage() {
     setReadIds(getReadIds());
     setDeletedIds(getDeletedIds());
     getNotifications().then(all =>
-      setNotifs(all.filter(n => n.target_role === "student" || n.target_role === "all"))
+      setNotifs(all.filter(n =>
+        n.target_role === "all" ||
+        // Thông báo cho học sinh: broadcast (không gắn lớp) hoặc thuộc lớp của mình
+        (n.target_role === "student" && (!n.target_class_id || myClassIds.includes(n.target_class_id)))
+      ))
     );
-  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [myClassIds.join(",")]);
 
   const mockNotifs = notifs.filter(n => !deletedIds.has(n.id));
   const scheduleFiltered = scheduleNotifs.filter(n => !deletedIds.has(n.id));
