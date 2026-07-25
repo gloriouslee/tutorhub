@@ -4,12 +4,13 @@ import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { Button } from "@/components/ui/button";
 import { gradeExamResult, type StoredExamResult, type ExamQuestion } from "@/lib/storage";
+import { formatDuration } from "./classDetail.types";
 import { maxQuestionScore, calcMaxScore, autoQuestionScore, countCorrectStatements, type TrueFalseScale } from "@/lib/exam-scoring";
 import { renderMathInHtml } from "@/lib/mathRender";
 import "katex/dist/katex.min.css";
 import {
   X, ChevronLeft, ChevronRight, Check, Loader2, Save,
-  ClipboardCheck, Clock, PenSquare,
+  ClipboardCheck, Clock, PenSquare, Search, BarChart3, ChevronDown,
 } from "lucide-react";
 
 const OPTS = ["A", "B", "C", "D"];
@@ -79,6 +80,29 @@ export default function ExamGradingView({
 }) {
   const [results, setResults] = useState<StoredExamResult[]>(initialResults);
   const [selectedId, setSelectedId] = useState<string | null>(initialResults[0]?.student_id ?? null);
+  const [search, setSearch] = useState("");
+  const shownResults = results.filter(r =>
+    !search.trim() || (r.student_name || r.student_id).toLowerCase().includes(search.trim().toLowerCase()));
+
+  // Thống kê từng câu trên toàn lớp: ai làm đúng / ai làm sai (tự luận không tự chấm)
+  const questionStats = useMemo(() => {
+    const map: Record<string, { correct: string[]; wrong: string[]; answered: number; essay: boolean }> = {};
+    for (const q of questions) {
+      const st = { correct: [] as string[], wrong: [] as string[], answered: 0, essay: q.type === "essay" };
+      for (const r of results) {
+        const ans = (r.answers as Record<string, StudentAnswer>)[q.id] ?? {};
+        const name = r.student_name || r.student_id;
+        if (q.type === "essay") {
+          if (ans.essay_text?.trim() || (ans.essay_images?.length ?? 0) > 0) st.answered++;
+          continue;
+        }
+        if (isCorrect(q, ans)) st.correct.push(name);
+        else st.wrong.push(name);
+      }
+      map[q.id] = st;
+    }
+    return map;
+  }, [questions, results]);
 
   // Bản nháp chấm điểm của học sinh đang chọn
   const [draftScores, setDraftScores] = useState<Record<string, number>>(
@@ -158,12 +182,26 @@ export default function ExamGradingView({
       <div className="flex flex-1 min-h-0">
         {/* ── Sidebar: danh sách học sinh đã nộp ── */}
         <div className="w-[280px] shrink-0 border-r border-border overflow-y-auto p-3 space-y-1.5">
+          {results.length > 0 && (
+            <div className="relative mb-1">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+              <input
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Tìm tên học sinh…"
+                className="w-full h-9 pl-8 pr-3 rounded-xl border border-border bg-background text-sm outline-none focus:ring-2 focus:ring-primary/40"
+              />
+            </div>
+          )}
           {results.length === 0 && (
             <p className="text-xs text-muted-foreground text-center py-10 px-2">
               Chưa có học sinh nào nộp bài.
             </p>
           )}
-          {results.map(r => {
+          {results.length > 0 && shownResults.length === 0 && (
+            <p className="text-xs text-muted-foreground text-center py-6 px-2">Không tìm thấy học sinh.</p>
+          )}
+          {shownResults.map(r => {
             const pending = needsGrading(r, questions);
             const active = r.student_id === selectedId;
             return (
@@ -211,6 +249,8 @@ export default function ExamGradingView({
                   <h3 className="text-base font-semibold text-foreground truncate">{selected.student_name || selected.student_id}</h3>
                   <p className="text-xs text-muted-foreground">
                     Nộp lúc {fmtTime(selected.submitted_at)}
+                    {selected.duration_seconds != null && ` · Làm trong ${formatDuration(selected.duration_seconds)}`}
+                    {selected.attempt != null && ` · Lần làm thứ ${selected.attempt}`}
                     {selected.graded_at && ` · Đã chấm lúc ${fmtTime(selected.graded_at)}`}
                   </p>
                 </div>
@@ -280,6 +320,49 @@ export default function ExamGradingView({
                         />
                       </div>
                     </div>
+
+                    {/* Thống kê cả lớp cho câu này */}
+                    {(() => {
+                      const st = questionStats[q.id];
+                      if (!st) return null;
+                      if (st.essay) {
+                        return (
+                          <p className="pl-8 text-[11px] text-muted-foreground flex items-center gap-1.5">
+                            <BarChart3 className="h-3 w-3" /> Tự luận · {st.answered}/{results.length} đã trả lời
+                          </p>
+                        );
+                      }
+                      return (
+                        <details className="pl-8">
+                          <summary className="cursor-pointer text-[11px] font-medium text-muted-foreground hover:text-foreground flex items-center gap-2 select-none">
+                            <BarChart3 className="h-3 w-3 shrink-0" />
+                            <span>Thống kê lớp:</span>
+                            <span className="text-emerald-600 dark:text-emerald-400 font-semibold">✓ {st.correct.length} đúng</span>
+                            <span className="text-red-500 dark:text-red-400 font-semibold">✗ {st.wrong.length} sai</span>
+                            <span className="text-muted-foreground">/ {results.length} bài</span>
+                            <ChevronDown className="h-3 w-3 shrink-0" />
+                          </summary>
+                          <div className="mt-1.5 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            <div className="rounded-lg bg-emerald-50 dark:bg-emerald-900/15 border border-emerald-100 dark:border-emerald-900/30 p-2">
+                              <p className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-400 mb-1">Làm đúng ({st.correct.length})</p>
+                              <div className="flex flex-wrap gap-1">
+                                {st.correct.length
+                                  ? st.correct.map((n, i) => <span key={i} className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300">{n}</span>)
+                                  : <span className="text-[10px] text-muted-foreground italic">—</span>}
+                              </div>
+                            </div>
+                            <div className="rounded-lg bg-red-50 dark:bg-red-900/15 border border-red-100 dark:border-red-900/30 p-2">
+                              <p className="text-[10px] font-semibold text-red-600 dark:text-red-400 mb-1">Làm sai / chưa làm ({st.wrong.length})</p>
+                              <div className="flex flex-wrap gap-1">
+                                {st.wrong.length
+                                  ? st.wrong.map((n, i) => <span key={i} className="text-[10px] px-1.5 py-0.5 rounded bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300">{n}</span>)
+                                  : <span className="text-[10px] text-muted-foreground italic">—</span>}
+                              </div>
+                            </div>
+                          </div>
+                        </details>
+                      );
+                    })()}
 
                     {/* Multiple choice */}
                     {q.type === "multiple_choice" && (

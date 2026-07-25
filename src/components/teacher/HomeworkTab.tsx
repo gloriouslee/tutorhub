@@ -1,11 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Plus, Edit3, Trash2, NotebookPen, Users, ChevronDown, ChevronUp, Map, Download, PenSquare, ArrowRight } from "lucide-react";
-import { formatDate, dueStatus, type Homework, type Submission } from "./classDetail.types";
+import { Plus, Edit3, Trash2, NotebookPen, Users, ChevronDown, ChevronUp, Map, Download, PenSquare, ArrowRight, Clock, Timer, RotateCcw } from "lucide-react";
+import { formatDate, formatDuration, dueStatus, type Homework, type Submission } from "./classDetail.types";
+
+const fmtDateTime = (iso?: string) =>
+  iso ? new Date(iso).toLocaleString("vi-VN", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "";
 
 interface Student {
   id: string;
@@ -31,6 +33,7 @@ export default function HomeworkTab({
   onNewHomework,
   onEditHomework,
   onDeleteHomework,
+  onGradeExam,
 }: {
   classId: string;
   homeworks: Homework[];
@@ -39,6 +42,7 @@ export default function HomeworkTab({
   onNewHomework: () => void;
   onEditHomework: (hw: Homework) => void;
   onDeleteHomework: (id: string) => void;
+  onGradeExam?: (lessonId: string) => void;
 }) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
@@ -123,7 +127,16 @@ export default function HomeworkTab({
                       </a>
                     )}
                     <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
-                      <span>{submittedCount} {isExam ? "đã làm" : "nộp bài"}</span>
+                      <button
+                        type="button"
+                        onClick={e => { e.stopPropagation(); setExpandedId(isExpanded ? null : hw.id); }}
+                        className="inline-flex items-center gap-1 font-semibold text-primary hover:underline cursor-pointer"
+                        title={isExam ? "Xem học viên đã làm" : "Xem danh sách nộp bài"}
+                      >
+                        <Users className="h-3.5 w-3.5" />
+                        {submittedCount} {isExam ? "đã làm" : "nộp bài"}
+                        {isExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                      </button>
                       {!isExam && gradedCount > 0 && <span className="text-emerald-600">{gradedCount} đã chấm</span>}
                       {hw.assigned_to && hw.assigned_to.length > 0
                         ? <span className="text-violet-600 font-medium">Chỉ định {hw.assigned_to.length} học viên</span>
@@ -133,21 +146,15 @@ export default function HomeworkTab({
                     </div>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
-                    {students.length > 0 && (
-                      <span className="text-xs text-muted-foreground flex items-center gap-1">
-                        <Users className="h-3.5 w-3.5" />
-                        {isExpanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-                      </span>
-                    )}
                     {isExam ? (
-                      <Link
-                        href={`/teacher/classes/${classId}?tab=curriculum`}
-                        onClick={e => e.stopPropagation()}
+                      <button
+                        type="button"
+                        onClick={e => { e.stopPropagation(); onGradeExam?.(hw.id); }}
                         className="flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-lg border border-border text-muted-foreground hover:text-primary hover:border-primary/40 transition-colors shrink-0"
                         title="Mở & chấm bài trên Lộ trình"
                       >
                         Xem & chấm <ArrowRight className="h-3 w-3" />
-                      </Link>
+                      </button>
                     ) : hw.source === "curriculum" ? (
                       <span className="flex items-center gap-1 text-[10px] font-semibold px-2 py-1 rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 shrink-0">
                         <Map className="h-3 w-3" /> Lộ trình
@@ -191,9 +198,18 @@ export default function HomeworkTab({
                         if (isExam) {
                           const res = examResults[student.id];
                           return (
-                            <div key={student.id} className="flex items-center justify-between py-2 px-3 rounded-lg bg-muted/30">
-                              <span className="text-sm font-medium text-foreground">{student.full_name}</span>
-                              <div className="flex items-center gap-2">
+                            <div key={student.id} className="flex items-center justify-between gap-2 py-2 px-3 rounded-lg bg-muted/30">
+                              <div className="min-w-0">
+                                <span className="text-sm font-medium text-foreground">{student.full_name}</span>
+                                {res && (
+                                  <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground mt-0.5">
+                                    {res.submitted_at && <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{fmtDateTime(res.submitted_at)}</span>}
+                                    {res.duration_seconds != null && <span className="flex items-center gap-1"><Timer className="h-3 w-3" />Làm {formatDuration(res.duration_seconds)}</span>}
+                                    {res.attempt != null && <span className="flex items-center gap-1"><RotateCcw className="h-3 w-3" />Lần {res.attempt}</span>}
+                                  </div>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2 shrink-0">
                                 {res ? (
                                   <>
                                     <span className="text-base">✅</span>

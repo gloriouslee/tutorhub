@@ -467,7 +467,7 @@ function InlineEdit({ value, onSave, placeholder }: { value: string; onSave: (v:
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
-export default function CurriculumTab({ classId, schedule, students = [] }: { classId: string; schedule: ClassSchedule[]; students?: StudentLite[] }) {
+export default function CurriculumTab({ classId, schedule, students = [], gradeLessonId, onGradingOpened }: { classId: string; schedule: ClassSchedule[]; students?: StudentLite[]; gradeLessonId?: string | null; onGradingOpened?: () => void }) {
   const router = useRouter();
   const slots = generateSlots(schedule);
   const [chapters,     setChapters]     = useState<CurriculumChapter[]>([]);
@@ -555,6 +555,36 @@ export default function CurriculumTab({ classId, schedule, students = [] }: { cl
     })();
     return () => { cancelled = true; };
   }, [chapters, classId]);
+
+  // Mở / đóng trình chấm — đồng bộ URL (?grade=) để reload vẫn ở trang chấm.
+  function openGrading(lessonId: string, lessonTitle: string) {
+    setGradingView({ lessonId, lessonTitle });
+    setExamParams({ grade: lessonId });
+  }
+  function closeGrading() {
+    setGradingView(null);
+    setExamParams({ grade: null });
+  }
+
+  // Mở thẳng trình chấm cho một bài — từ nút "Xem & chấm" (prop gradeLessonId) HOẶC
+  // khôi phục từ URL sau reload (?grade=). Chỉ mở khi kết quả đã nạp xong để
+  // ExamGradingView nhận đủ initialResults.
+  const [urlGradeId, setUrlGradeId] = useState<string | null>(null);
+  useEffect(() => {
+    setUrlGradeId(new URLSearchParams(window.location.search).get("grade"));
+  }, []);
+  const gradingOpenedRef = useRef(false);
+  useEffect(() => {
+    const targetId = gradeLessonId ?? urlGradeId;
+    if (!targetId || gradingOpenedRef.current) return;
+    const lesson = chapters.flatMap(ch => ch.sessions.flatMap(s => s.lessons)).find(l => l.id === targetId && l.type === "exam");
+    if (lesson && targetId in examResultsMap) {
+      gradingOpenedRef.current = true;
+      openGrading(lesson.id, lesson.title);
+      onGradingOpened?.();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gradeLessonId, urlGradeId, chapters, examResultsMap]);
 
   // Merge-safe persist: apply the SAME pure mutation to local state AND to the
   // fresh document read right before writing (mutateCurriculum → kvUpdate),
@@ -859,7 +889,7 @@ export default function CurriculumTab({ classId, schedule, students = [] }: { cl
                                         )}
                                         {examResults.length > 0 && (
                                           <button
-                                            onClick={() => setGradingView({ lessonId: lesson.id, lessonTitle: lesson.title })}
+                                            onClick={() => openGrading(lesson.id, lesson.title)}
                                             className="text-[10px] text-primary hover:underline flex items-center gap-0.5"
                                           >
                                             <Users className="h-2.5 w-2.5" />{examResults.length} bài nộp
@@ -992,7 +1022,7 @@ export default function CurriculumTab({ classId, schedule, students = [] }: { cl
             questions={examLesson?.exam_content?.questions ?? []}
             scale={examLesson?.exam_content?.true_false_scale}
             initialResults={examResultsMap[gradingView.lessonId] ?? []}
-            onClose={() => setGradingView(null)}
+            onClose={closeGrading}
             onResultsChange={results => setExamResultsMap(prev => ({ ...prev, [gradingView.lessonId]: results }))}
           />
         );

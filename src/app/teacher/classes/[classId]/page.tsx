@@ -94,6 +94,15 @@ export default function TeacherClassDetailPage() {
     sp.set("tab", key);
     router.replace(`?${sp.toString()}`, { scroll: false });
   };
+  // "Xem & chấm" ở tab Bài tập → chuyển sang tab Lộ trình và mở trình chấm đúng bài
+  const [gradeLessonId, setGradeLessonId] = useState<string | null>(null);
+  const gradeExamInCurriculum = (lessonId: string) => {
+    setGradeLessonId(lessonId);
+    setActiveTabState("curriculum");
+    const sp = new URLSearchParams(window.location.search);
+    sp.set("tab", "curriculum");
+    router.replace(`?${sp.toString()}`, { scroll: false });
+  };
   const [uploadModal, setUploadModal] = useState<"lecture" | "material" | "note" | null>(null);
   const [commentModalStudent, setCommentModalStudent] = useState<any | null>(null);
   const [comments, setComments] = useState<Record<string, { text: string; date: string; rating: number }[]>>({});
@@ -257,10 +266,16 @@ export default function TeacherClassDetailPage() {
       // Kết quả bài thi (kind "exam") → đếm số bài nộp + điểm từng học sinh
       const examHws: Homework[] = await Promise.all(examLessons.map(async ex => {
         const results = await getAllExamResults(classId, ex.id).catch(() => []);
-        const exam_results: Record<string, { score: number; total: number }> = {};
+        const exam_results: Record<string, { score: number; total: number; submitted_at?: string; duration_seconds?: number; attempt?: number }> = {};
         for (const r of results) {
           const manual = Object.values(r.manual_scores ?? {}).reduce((a, b) => a + b, 0);
-          exam_results[r.student_id] = { score: Math.round((r.score + manual) * 100) / 100, total: r.total };
+          exam_results[r.student_id] = {
+            score: Math.round((r.score + manual) * 100) / 100,
+            total: r.total,
+            submitted_at: r.submitted_at,
+            duration_seconds: r.duration_seconds,
+            attempt: r.attempt,
+          };
         }
         return {
           id: ex.id, class_id: classId, title: ex.title, description: ex.description,
@@ -576,7 +591,13 @@ export default function TeacherClassDetailPage() {
 
           {/* ── Curriculum ── */}
           {activeTab === "curriculum" && (
-            <CurriculumTab classId={classId} schedule={scheduleForDisplay} students={classStudents} />
+            <CurriculumTab
+              classId={classId}
+              schedule={scheduleForDisplay}
+              students={classStudents}
+              gradeLessonId={gradeLessonId}
+              onGradingOpened={() => setGradeLessonId(null)}
+            />
           )}
 
           {/* ── Sessions ── */}
@@ -610,6 +631,7 @@ export default function TeacherClassDetailPage() {
               onNewHomework={() => setHomeworkModal({ open: true })}
               onEditHomework={hw => setHomeworkModal({ open: true, editing: hw })}
               onDeleteHomework={handleDeleteHomework}
+              onGradeExam={gradeExamInCurriculum}
             />
           )}
 

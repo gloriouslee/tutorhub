@@ -612,6 +612,9 @@ export interface StoredExamResult {
   total:        number;
   submitted_at: string;
   answers:      Record<string, unknown>;
+  // Thời lượng làm bài (giây) và lần làm thứ mấy — best-effort, do client báo.
+  duration_seconds?: number;
+  attempt?: number;
   // Chấm thủ công (tự luận): điểm giáo viên cho theo từng câu (question id → điểm)
   manual_scores?: Record<string, number>;
   teacher_feedback?: string;
@@ -650,7 +653,7 @@ export async function saveExamResult(
   lessonId: string,
   studentId: string,
   studentName: string,
-  result: { score: number; total: number; submitted_at: string; answers: Record<string, unknown> }
+  result: { score: number; total: number; submitted_at: string; answers: Record<string, unknown>; duration_seconds?: number; attempt?: number }
 ): Promise<void> {
   const stored: StoredExamResult = { student_id: studentId, student_name: studentName, ...result };
   await kvSet(examResultKey(classId, lessonId, studentId), stored);

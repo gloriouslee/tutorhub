@@ -20,7 +20,7 @@ export async function POST(
   }
   const { classId, lessonId } = await params;
 
-  let body: { studentId?: string; studentName?: string; answers?: Record<string, StudentAnswer> };
+  let body: { studentId?: string; studentName?: string; answers?: Record<string, StudentAnswer>; duration_seconds?: number; attempt?: number };
   try {
     body = await req.json();
   } catch {
@@ -84,6 +84,8 @@ export async function POST(
       total,
       submitted_at: new Date().toISOString(),
       answers: answers as Record<string, unknown>,
+      duration_seconds: typeof body.duration_seconds === "number" ? body.duration_seconds : undefined,
+      attempt: typeof body.attempt === "number" ? body.attempt : undefined,
     };
 
     await kvSetServer(admin, "kv_exam_results", resultId, result);

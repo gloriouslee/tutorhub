@@ -109,8 +109,16 @@ export interface Homework {
   file_url?: string;
   /** Trạng thái bài (kind "exam") */
   exam_status?: "draft" | "open" | "closed";
-  /** Kết quả bài thi theo học sinh (kind "exam"): student_id → điểm đã đạt / tối đa */
-  exam_results?: Record<string, { score: number; total: number }>;
+  /** Kết quả bài thi theo học sinh (kind "exam"): student_id → điểm + thời gian + số lần làm */
+  exam_results?: Record<string, { score: number; total: number; submitted_at?: string; duration_seconds?: number; attempt?: number }>;
+}
+
+/** Định dạng thời lượng làm bài (giây → "M phút Ss"). */
+export function formatDuration(sec?: number): string {
+  if (sec == null || !isFinite(sec)) return "—";
+  const m = Math.floor(sec / 60);
+  const s = Math.round(sec % 60);
+  return m > 0 ? `${m} phút ${s}s` : `${s}s`;
 }
 
 export interface Submission {

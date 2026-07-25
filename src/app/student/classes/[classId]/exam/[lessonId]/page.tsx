@@ -33,6 +33,8 @@ type ExamResult = {
   score: number;
   total: number;
   submitted_at: string;
+  duration_seconds?: number;
+  attempt?: number;
   // Chấm thủ công của giáo viên (tự luận)
   manual_scores?: Record<string, number>;
   teacher_feedback?: string;
@@ -808,6 +810,9 @@ export default function ExamPage() {
   const [accessDenied, setAccessDenied] = useState<boolean | null>(null);
   // true = đề thi lấy từ API server (đã lọc đáp án) → nộp bài cũng qua API
   const serverModeRef = useRef(false);
+  // Thời điểm bắt đầu làm (tính thời lượng) + số lần đã làm trước đó (tính lần làm)
+  const startedAtRef = useRef<number>(0);
+  const prevAttemptRef = useRef(0);
 
   useEffect(() => {
     // Chờ context sẵn sàng — tránh load nhầm kết quả của s1 mặc định
@@ -873,6 +878,7 @@ export default function ExamPage() {
         setLockReason("");
         if (data.submitted && data.result) {
           setResult(data.result as ExamResult);
+          prevAttemptRef.current = (data.result as ExamResult).attempt ?? 1;
           setSubmitted(true);
         } else {
           setResult(null);
@@ -921,6 +927,7 @@ export default function ExamPage() {
           if (cancelled) return;
           if (prev) {
             setResult(prev as unknown as ExamResult);
+            prevAttemptRef.current = (prev as unknown as ExamResult).attempt ?? 1;
             setSubmitted(true);
           } else {
             // Không có kết quả cho học sinh này — reset state cũ (nếu có)
@@ -937,6 +944,13 @@ export default function ExamPage() {
   const timeLimit = lesson?.exam_content?.time_limit
     ? lesson.exam_content.time_limit * 60
     : null;
+
+  // Bắt đầu tính giờ khi bài mở & chưa nộp (mốc để tính thời lượng làm bài)
+  useEffect(() => {
+    if (accessDenied === false && !examLocked && !submitted && questions.length > 0 && startedAtRef.current === 0) {
+      startedAtRef.current = Date.now();
+    }
+  }, [accessDenied, examLocked, submitted, questions.length]);
 
   // Ref pattern: luôn gọi bản submit mới nhất (tránh stale closure với answers rỗng)
   const submitRef = useRef(submit);
@@ -956,13 +970,19 @@ export default function ExamPage() {
 
   async function submit() {
     const sid = studentId || "anon";
+    // Thời lượng làm bài + lần làm thứ mấy (best-effort, gửi kèm khi nộp)
+    const duration_seconds = startedAtRef.current
+      ? Math.max(0, Math.round((Date.now() - startedAtRef.current) / 1000))
+      : undefined;
+    const attempt = prevAttemptRef.current + 1;
+    prevAttemptRef.current = attempt;
     // ── Đường chính: server chấm điểm (client không có đáp án) ──
     if (serverModeRef.current) {
       try {
         const res = await fetch(`/api/exam/${classId}/${lessonId}/submit`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ studentId: sid, studentName, answers }),
+          body: JSON.stringify({ studentId: sid, studentName, answers, duration_seconds, attempt }),
         });
         if (res.ok || res.status === 409) {
           let data = res.ok ? await res.json() : null;
@@ -989,8 +1009,8 @@ export default function ExamPage() {
     const score = calcScore(questions, answers, lesson?.exam_content?.true_false_scale);
     const total = calcMaxScore(questions);
     const submitted_at = new Date().toISOString();
-    const res: ExamResult = { answers, score, total, submitted_at };
-    await saveExamResult(classId, lessonId, sid, studentName, { score, total, submitted_at, answers: answers as Record<string, unknown> });
+    const res: ExamResult = { answers, score, total, submitted_at, duration_seconds, attempt };
+    await saveExamResult(classId, lessonId, sid, studentName, { score, total, submitted_at, answers: answers as Record<string, unknown>, duration_seconds, attempt });
     markExamComplete(sid, lessonId);
     setResult(res);
     setSubmitted(true);
@@ -1008,6 +1028,8 @@ export default function ExamPage() {
     setResult(null);
     setSubmitted(false);
     setCurrent(0);
+    // Lần làm mới: đặt lại mốc thời gian (số lần làm giữ nguyên để cộng dồn)
+    startedAtRef.current = Date.now();
   }
 
   // ── States ──
