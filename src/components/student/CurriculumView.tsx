@@ -7,7 +7,7 @@ import { getCurriculum, isLessonVisibleToStudent, type CurriculumLesson } from "
 import {
   ChevronDown, ChevronRight, PlayCircle, FileText,
   ClipboardList, Video, CheckCircle2, ExternalLink,
-  Download, BookOpen, Circle, CalendarDays, PenSquare, StickyNote,
+  Download, BookOpen, Circle, CalendarDays, PenSquare, StickyNote, X,
 } from "lucide-react";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -118,9 +118,10 @@ export default function CurriculumView({ classId, studentId, watched, onWatch, s
   const activeYtId = activeLesson ? getYouTubeId(activeLesson.video_url ?? "") : null;
 
   return (
-    <div className="flex border border-border rounded-xl overflow-hidden bg-card" style={{ height: 600 }}>
-      {/* Left: video + notes (frozen — does not scroll with the sidebar) */}
-      <div className="flex-1 flex flex-col min-w-0 min-h-0 border-r border-border">
+    <>
+    <div className="flex flex-col lg:flex-row border border-border rounded-xl overflow-hidden bg-card lg:h-[600px]">
+      {/* Left: video + notes (desktop only — on mobile it opens as a full-screen overlay) */}
+      <div className="hidden lg:flex flex-1 flex-col min-w-0 min-h-0 border-r border-border">
         {activeLesson && activeYtId ? (
           <div className="relative w-full aspect-video bg-black">
             <iframe
@@ -172,8 +173,8 @@ export default function CurriculumView({ classId, studentId, watched, onWatch, s
         </div>
       </div>
 
-      {/* Right: Lộ trình học — scrolls independently, left side stays put */}
-      <div className="w-80 shrink-0 flex flex-col bg-muted/20 min-h-0">
+      {/* Right: Lộ trình học — full width on mobile, fixed rail on desktop */}
+      <div className="w-full lg:w-80 shrink-0 flex flex-col bg-muted/20 min-h-0">
         <div className="px-4 py-3 border-b border-border/50 bg-card/50 flex items-center gap-2 shrink-0">
           <BookOpen className="h-4 w-4 text-primary" />
           <span className="text-sm font-semibold text-foreground">Lộ trình học</span>
@@ -191,7 +192,7 @@ export default function CurriculumView({ classId, studentId, watched, onWatch, s
           </div>
         )}
 
-        <div className="flex-1 overflow-y-auto divide-y divide-border/40">
+        <div className="lg:flex-1 lg:overflow-y-auto divide-y divide-border/40">
           {chapters.map((chapter, ci) => {
             const chExpanded = expanded.has(chapter.id);
             const chLessons  = chapter.sessions.flatMap(s => s.lessons.filter(isVisible));
@@ -293,5 +294,46 @@ export default function CurriculumView({ classId, studentId, watched, onWatch, s
         </div>
       </div>
     </div>
+
+    {/* Mobile: full-screen video overlay (opens only when a video lesson is tapped) */}
+    {activeLesson && activeYtId && (
+      <div className="lg:hidden fixed inset-0 z-50 bg-black/90 flex flex-col" onClick={() => setActiveLesson(null)}>
+        <div className="flex items-center justify-between gap-3 px-4 py-3 bg-card" onClick={e => e.stopPropagation()}>
+          <span className="text-sm font-semibold text-foreground truncate">{activeLesson.title}</span>
+          <div className="flex items-center gap-1 shrink-0">
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-8 px-2 text-xs gap-1 text-muted-foreground"
+              onClick={() => window.open(activeLesson.video_url, "_blank", "noopener,noreferrer")}
+            >
+              <ExternalLink className="h-3.5 w-3.5" /> Tab mới
+            </Button>
+            <button
+              className="h-8 w-8 flex items-center justify-center rounded-lg text-muted-foreground hover:bg-muted"
+              onClick={() => setActiveLesson(null)}
+              aria-label="Đóng"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+        </div>
+        <div className="relative w-full aspect-video bg-black" onClick={e => e.stopPropagation()}>
+          <iframe
+            src={`https://www.youtube.com/embed/${activeYtId}?autoplay=1&rel=0`}
+            className="absolute inset-0 w-full h-full"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+            allowFullScreen
+            title={activeLesson.title}
+          />
+        </div>
+        {activeLesson.description && (
+          <div className="px-4 py-3 bg-card overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <p className="text-sm text-muted-foreground leading-relaxed">{activeLesson.description}</p>
+          </div>
+        )}
+      </div>
+    )}
+    </>
   );
 }
