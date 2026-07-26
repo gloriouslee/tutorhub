@@ -5,28 +5,47 @@ import PortalLayout from "@/components/layout/PortalLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { SectionHeader } from "@/components/shared";
 import { getTeacherSettings, saveTeacherSettings, type TeacherSettings } from "@/lib/storage";
+import { MOCK_TEACHERS } from "@/lib/mock-data";
 import { uploadClassFile } from "@/lib/upload";
-import { QrCode, UploadCloud, Link2, Check, Loader2, Building2, X } from "lucide-react";
+import {
+  QrCode, UploadCloud, Link2, Check, Loader2, Building2, X,
+  User, Camera, Mail, Phone, GraduationCap, FileText,
+} from "lucide-react";
 
 const TEACHER_ID = "t1";
-const TEACHER_NAME = "Thầy Hùng Toán";
 
 export default function TeacherSettingsPage() {
+  const teacher = MOCK_TEACHERS.find(t => t.id === TEACHER_ID);
   const [settings, setSettings] = useState<TeacherSettings>({});
+  const [loaded, setLoaded] = useState(false);
   const [mode, setMode] = useState<"upload" | "link">("upload");
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
+  const [avatarUploading, setAvatarUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const avatarRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     getTeacherSettings(TEACHER_ID).then(s => {
-      setSettings(s);
+      // Seed hồ sơ từ mock nếu chưa có
+      setSettings({
+        full_name: s.full_name ?? teacher?.full_name ?? "",
+        specialization: s.specialization ?? teacher?.specialization ?? "",
+        bio: s.bio ?? teacher?.bio ?? "",
+        avatar_url: s.avatar_url ?? teacher?.avatar_url ?? undefined,
+        email: s.email ?? "",
+        phone: s.phone ?? "",
+        ...s,
+      });
       if (s.qr_image_url) setMode(/^https?:\/\//.test(s.qr_image_url) && !s.qr_image_url.includes("/storage/") ? "link" : "upload");
+      setLoaded(true);
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function set<K extends keyof TeacherSettings>(key: K, val: TeacherSettings[K]) {
@@ -48,6 +67,21 @@ export default function TeacherSettingsPage() {
     }
   }
 
+  async function handleAvatar(file: File) {
+    setAvatarUploading(true);
+    // Hiển thị ngay bằng blob tạm, upload phía sau
+    set("avatar_url", URL.createObjectURL(file));
+    try {
+      const up = await uploadClassFile(file, TEACHER_ID, "materials");
+      set("avatar_url", up.url);
+    } catch {
+      /* offline — giữ blob tạm cho phiên hiện tại */
+    } finally {
+      setAvatarUploading(false);
+      if (avatarRef.current) avatarRef.current.value = "";
+    }
+  }
+
   async function handleSave() {
     setSaving(true);
     try {
@@ -59,14 +93,98 @@ export default function TeacherSettingsPage() {
     }
   }
 
+  const displayName = settings.full_name || teacher?.full_name || "Giáo viên";
+  const initials = displayName.split(" ").map(n => n[0]).join("").slice(-2).toUpperCase();
+
   return (
-    <PortalLayout role="teacher" userName={TEACHER_NAME} pageTitle="Cài đặt">
+    <PortalLayout role="teacher" userName={displayName} pageTitle="Cài đặt">
       <div className="max-w-2xl mx-auto space-y-6">
         <SectionHeader
-          title="Cài đặt thanh toán"
-          subtitle="Cấu hình mã QR & thông tin tài khoản để học viên chuyển khoản học phí"
+          title="Cài đặt & Hồ sơ"
+          subtitle="Chỉnh sửa thông tin cá nhân và cấu hình thanh toán của bạn"
         />
 
+        {/* ── Hồ sơ giáo viên ─────────────────────────────── */}
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <User className="h-4 w-4 text-primary" /> Hồ sơ giáo viên
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            {/* Avatar + tên */}
+            <div className="flex items-center gap-4">
+              <div
+                className="relative cursor-pointer group shrink-0"
+                onClick={() => avatarRef.current?.click()}
+              >
+                <Avatar className="h-20 w-20 border-2 border-border shadow-sm">
+                  {settings.avatar_url
+                    // eslint-disable-next-line @next/next/no-img-element
+                    ? <img src={settings.avatar_url} alt={displayName} className="h-full w-full object-cover rounded-full" />
+                    : <AvatarFallback className="text-xl bg-primary/10 text-primary font-bold">{initials}</AvatarFallback>}
+                </Avatar>
+                <div className="absolute inset-0 bg-black/40 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                  {avatarUploading
+                    ? <Loader2 className="h-5 w-5 text-white animate-spin" />
+                    : <Camera className="h-5 w-5 text-white" />}
+                </div>
+              </div>
+              <input ref={avatarRef} type="file" accept="image/*" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) handleAvatar(f); }} />
+              <div className="min-w-0">
+                <p className="font-semibold text-foreground truncate">{displayName}</p>
+                <p className="text-sm text-muted-foreground truncate">{settings.specialization || "Chưa cập nhật chuyên môn"}</p>
+                <button
+                  onClick={() => avatarRef.current?.click()}
+                  className="text-xs text-primary hover:underline mt-1"
+                >
+                  Đổi ảnh đại diện
+                </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5 mb-1.5">
+                  <User className="h-3.5 w-3.5" /> Họ và tên
+                </label>
+                <Input value={settings.full_name ?? ""} onChange={e => set("full_name", e.target.value)} placeholder="VD: Thầy Hùng Toán" />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5 mb-1.5">
+                  <GraduationCap className="h-3.5 w-3.5" /> Chuyên môn
+                </label>
+                <Input value={settings.specialization ?? ""} onChange={e => set("specialization", e.target.value)} placeholder="VD: Toán Đại Số & Luyện Thi" />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5 mb-1.5">
+                  <Mail className="h-3.5 w-3.5" /> Email
+                </label>
+                <Input type="email" value={settings.email ?? ""} onChange={e => set("email", e.target.value)} placeholder="VD: gv@tutorhub.vn" />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5 mb-1.5">
+                  <Phone className="h-3.5 w-3.5" /> Số điện thoại
+                </label>
+                <Input type="tel" value={settings.phone ?? ""} onChange={e => set("phone", e.target.value)} placeholder="VD: 0912 345 678" />
+              </div>
+              <div className="sm:col-span-2">
+                <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5 mb-1.5">
+                  <FileText className="h-3.5 w-3.5" /> Giới thiệu
+                </label>
+                <textarea
+                  value={settings.bio ?? ""}
+                  onChange={e => set("bio", e.target.value)}
+                  placeholder="Vài dòng giới thiệu về kinh nghiệm giảng dạy…"
+                  rows={3}
+                  className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm resize-none outline-none focus:ring-2 focus:ring-primary text-foreground placeholder:text-muted-foreground"
+                />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* ── Cài đặt thanh toán ──────────────────────────── */}
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center gap-2">
@@ -186,13 +304,13 @@ export default function TeacherSettingsPage() {
           </CardContent>
         </Card>
 
-        <div className="flex items-center justify-end gap-3">
+        <div className="flex items-center justify-end gap-3 sticky bottom-4">
           {saved && (
             <span className="text-sm text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
               <Check className="h-4 w-4" /> Đã lưu
             </span>
           )}
-          <Button variant="gradient" onClick={handleSave} disabled={saving}>
+          <Button variant="gradient" onClick={handleSave} disabled={saving || !loaded}>
             {saving ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <Check className="h-4 w-4 mr-1.5" />}
             Lưu cài đặt
           </Button>

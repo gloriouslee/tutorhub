@@ -855,6 +855,14 @@ export async function confirmInvoicePaid(invoiceId: string): Promise<TuitionInvo
 // ── Teacher settings (QR thanh toán, thông tin ngân hàng) ────────────────────
 
 export interface TeacherSettings {
+  // Hồ sơ giáo viên
+  full_name?: string;
+  specialization?: string;  // chuyên môn / môn dạy
+  email?: string;
+  phone?: string;
+  bio?: string;             // giới thiệu ngắn
+  avatar_url?: string;      // ảnh đại diện
+  // Cài đặt thanh toán
   qr_image_url?: string;    // ảnh QR đã upload HOẶC link ảnh QR/VietQR
   bank_name?: string;
   account_holder?: string;
