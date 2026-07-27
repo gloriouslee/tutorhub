@@ -72,6 +72,8 @@
 --     kv_teacher_materials, kv_class_materials, kv_homework_attachments,
 --     kv_class_overrides, kv_student_comments, kv_course_reviews,
 --     kv_schedule_notifications, kv_parent_messages.
+--     (This file simply does not create them. To DROP them from an existing
+--      database, run the destructive supabase/drop_retired_kv.sql separately.)
 --   - enrollment_requests.account_password (dropped by the security migration).
 -- ============================================================================
 
