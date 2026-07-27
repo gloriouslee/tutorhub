@@ -301,24 +301,30 @@ export default function ParentPaymentsPage() {
               </div>
 
               {/* QR + bank info */}
-              <div className="flex flex-col sm:flex-row gap-4 w-full items-center sm:items-start">
-                <div className="p-3 bg-white rounded-2xl shadow-sm border border-border shrink-0">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={teacherQR.qr_image_url
-                      ? teacherQR.qr_image_url
-                      : `https://img.vietqr.io/image/970423-12604051999-compact.png?amount=${modalInvoice.amount}&addInfo=${encodeURIComponent(transferNote)}&accountName=LE%20HUY%20HOANG`}
-                    alt="VietQR"
-                    className="w-40 h-40 object-contain"
-                  />
+              {!teacherQR.qr_image_url && !teacherQR.account_number ? (
+                <div className="w-full flex gap-3 text-sm text-amber-700 bg-amber-50 p-4 rounded-xl border border-amber-200/50 dark:bg-amber-950/20 dark:border-amber-900/50 dark:text-amber-400">
+                  <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                  <p className="leading-relaxed">Giáo viên chưa cấu hình thông tin thanh toán. Vui lòng liên hệ giáo viên/trung tâm để nhận thông tin chuyển khoản trước khi thanh toán.</p>
                 </div>
+              ) : (
+              <div className="flex flex-col sm:flex-row gap-4 w-full items-center sm:items-start">
+                {teacherQR.qr_image_url && (
+                  <div className="p-3 bg-white rounded-2xl shadow-sm border border-border shrink-0">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={teacherQR.qr_image_url}
+                      alt="VietQR"
+                      className="w-40 h-40 object-contain"
+                    />
+                  </div>
+                )}
                 <div className="flex-1 w-full bg-muted/30 p-3 rounded-xl border border-border/50 space-y-2">
                   <p className="text-[11px] text-muted-foreground uppercase font-bold tracking-wider">Thông tin người nhận</p>
                   {[
-                    { label: "Ngân hàng",     value: teacherQR.bank_name || "TPBank" },
-                    { label: "Số tài khoản",  value: teacherQR.account_number || "12604051999" },
-                    { label: "Chủ tài khoản", value: teacherQR.account_holder || "LE HUY HOANG" },
-                  ].map(row => (
+                    { label: "Ngân hàng",     value: teacherQR.bank_name },
+                    { label: "Số tài khoản",  value: teacherQR.account_number },
+                    { label: "Chủ tài khoản", value: teacherQR.account_holder },
+                  ].filter(row => row.value).map(row => (
                     <div key={row.label} className="flex justify-between items-center border-b border-border/50 pb-1.5 last:border-0 last:pb-0">
                       <span className="text-xs text-muted-foreground">{row.label}:</span>
                       <span className="text-sm font-semibold">{row.value}</span>
@@ -332,6 +338,7 @@ export default function ParentPaymentsPage() {
                   </div>
                 </div>
               </div>
+              )}
 
               {/* Upload receipt */}
               <div className="space-y-2 border-t border-border/50 pt-4">
