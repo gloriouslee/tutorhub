@@ -358,40 +358,64 @@ export async function resetAllStorage(): Promise<void> {
 }
 
 export async function getStudentComments(studentId: string): Promise<{ text: string; date: string; rating: number }[]> {
-  const data = await kvGet<{ text: string; date: string; rating: number }[] | null>(`tutorhub_comments_${studentId}`, null);
-  if (data) return data;
-  // Default fallback mock data
-  if (studentId === "s1") {
-    return [
-      { date: "2026-06-25", text: "Tiếp thu bài nhanh, làm đầy đủ bài tập về nhà.", rating: 5 },
-      { date: "2026-06-22", text: "Hơi mất tập trung ở nửa đầu buổi học.", rating: 4 }
-    ];
+  const { data, error } = await supabase
+    .from("student_comments")
+    .select("comment_text, comment_date, rating")
+    .eq("student_id", studentId)
+    .order("comment_date", { ascending: false });
+  if (error) {
+    console.error("getStudentComments:", error);
+    return [];
   }
-  if (studentId === "s2") {
-    return [
-      { date: "2026-06-25", text: "Có tiến bộ trong phần giải bài tập hình học.", rating: 5 }
-    ];
-  }
-  return [];
+  return (data ?? []).map(r => ({ text: r.comment_text, date: r.comment_date, rating: r.rating }));
 }
 
 export async function saveStudentComment(studentId: string, commentsList: { text: string; date: string; rating: number }[]): Promise<void> {
-  await kvSet(`tutorhub_comments_${studentId}`, commentsList);
+  // Replace-all semantics: callers pass the full updated list for the student.
+  const del = await supabase.from("student_comments").delete().eq("student_id", studentId);
+  if (del.error) {
+    console.error("saveStudentComment(delete):", del.error);
+    throw del.error;
+  }
+  if (commentsList.length === 0) return;
+  const rows = commentsList.map(c => ({
+    id: `cmt_${crypto.randomUUID()}`,
+    student_id: studentId,
+    comment_text: c.text,
+    comment_date: c.date,
+    rating: c.rating,
+  }));
+  const { error } = await supabase.from("student_comments").insert(rows);
+  if (error) {
+    console.error("saveStudentComment(insert):", error);
+    throw error;
+  }
 }
 
 // ── Teacher-class assignment overrides (localStorage) ────────────────────────
 // Allows admin to reassign classes to different teachers without touching mock data.
 
-const TEACHER_OVERRIDE_KEY = "tutorhub_class_teacher_overrides";
-
 export async function getClassTeacherOverrides(): Promise<Record<string, string>> {
-  return kvGet<Record<string, string>>(TEACHER_OVERRIDE_KEY, {});
+  const { data, error } = await supabase
+    .from("class_teacher_overrides")
+    .select("class_id, teacher_id");
+  if (error) {
+    console.error("getClassTeacherOverrides:", error);
+    return {};
+  }
+  const map: Record<string, string> = {};
+  for (const r of data ?? []) map[r.class_id] = r.teacher_id;
+  return map;
 }
 
 export async function setClassTeacherOverride(classId: string, teacherId: string): Promise<void> {
-  const existing = await getClassTeacherOverrides();
-  existing[classId] = teacherId;
-  await kvSet(TEACHER_OVERRIDE_KEY, existing);
+  const { error } = await supabase
+    .from("class_teacher_overrides")
+    .upsert({ class_id: classId, teacher_id: teacherId, updated_at: new Date().toISOString() }, { onConflict: "class_id" });
+  if (error) {
+    console.error("setClassTeacherOverride:", error);
+    throw error;
+  }
 }
 
 // ── Schedule overrides (localStorage) ───────────────────────────────────────
@@ -416,18 +440,31 @@ export interface ScheduleNotification {
 }
 
 export async function getScheduleNotifications(): Promise<ScheduleNotification[]> {
-  return kvGet<ScheduleNotification[]>("tutorhub_schedule_notifications", []);
+  // RLS returns only notifications for classes the caller teaches or is enrolled
+  // in. Read-state is per-user via schedule_notification_reads.
+  const [notifRes, readRes] = await Promise.all([
+    supabase.from("schedule_notifications").select("*").order("created_at", { ascending: false }),
+    supabase.from("schedule_notification_reads").select("notification_id"),
+  ]);
+  if (notifRes.error) {
+    console.error("getScheduleNotifications:", notifRes.error);
+    return [];
+  }
+  const readSet = new Set((readRes.data ?? []).map(r => r.notification_id));
+  return (notifRes.data ?? []).map(n => ({ ...n, is_read: readSet.has(n.id) })) as ScheduleNotification[];
 }
 
 export async function pushScheduleNotification(notif: Omit<ScheduleNotification, "id" | "created_at" | "is_read">): Promise<void> {
-  const existing = await getScheduleNotifications();
-  const next: ScheduleNotification = {
-    ...notif,
+  const { error } = await supabase.from("schedule_notifications").insert({
     id: crypto.randomUUID(),
-    created_at: new Date().toISOString(),
-    is_read: false,
-  };
-  await kvSet("tutorhub_schedule_notifications", [next, ...existing]);
+    class_id: notif.class_id,
+    class_name: notif.class_name,
+    message: notif.message,
+  });
+  if (error) {
+    console.error("pushScheduleNotification:", error);
+    throw error;
+  }
 }
 
 // ── Material purchase transactions (localStorage) ────────────────────────────
@@ -508,8 +545,14 @@ export async function getGrantedPackages(studentId?: string): Promise<string[]> 
 }
 
 export async function markScheduleNotificationsRead(): Promise<void> {
-  const existing = (await getScheduleNotifications()).map(n => ({ ...n, is_read: true }));
-  await kvSet("tutorhub_schedule_notifications", existing);
+  // Mark all notifications visible to the caller as read (per-user rows).
+  const { data: notifs } = await supabase.from("schedule_notifications").select("id");
+  const rows = (notifs ?? []).map(n => ({ notification_id: n.id }));
+  if (rows.length === 0) return;
+  const { error } = await supabase
+    .from("schedule_notification_reads")
+    .upsert(rows, { onConflict: "notification_id,user_id", ignoreDuplicates: true });
+  if (error) console.error("markScheduleNotificationsRead:", error);
 }
 
 // ── Curriculum (localStorage) ────────────────────────────────────────────────
@@ -1032,33 +1075,45 @@ export interface StoredClassMaterial {
   kind?: "material" | "lecture" | "note"; // undefined = material (backward compat)
 }
 
-const MATERIALS_KEY = "tutorhub_class_materials";
-
-async function getStoredMaterials(): Promise<StoredClassMaterial[]> {
-  return kvGet<StoredClassMaterial[]>(MATERIALS_KEY, []);
-}
-
 export async function getClassMaterials(classId: string): Promise<StoredClassMaterial[]> {
-  return (await getStoredMaterials()).filter(m => m.class_id === classId);
+  const { data, error } = await supabase
+    .from("class_materials")
+    .select("*")
+    .eq("class_id", classId)
+    .order("created_at", { ascending: false });
+  if (error) {
+    console.error("getClassMaterials:", error);
+    return [];
+  }
+  return (data ?? []) as StoredClassMaterial[];
 }
 
 export async function saveClassMaterial(mat: Omit<StoredClassMaterial, "id" | "download_count">): Promise<StoredClassMaterial> {
-  // id ngẫu nhiên (randomUUID) thay vì Date.now() để tránh trùng khi thêm 2 mục
-  // trong cùng mili-giây (bulk / 2 tab) → deleteClassMaterial xóa nhầm cả hai.
   const record: StoredClassMaterial = { ...mat, id: `mat_${crypto.randomUUID()}`, download_count: 0 };
-  await kvUpdate<StoredClassMaterial[]>(MATERIALS_KEY, [], all => [...all, record]);
+  const { error } = await supabase.from("class_materials").insert(record);
+  if (error) {
+    console.error("saveClassMaterial:", error);
+    throw error;
+  }
   return record;
 }
 
 export async function deleteClassMaterial(materialId: string): Promise<void> {
-  await kvUpdate<StoredClassMaterial[]>(MATERIALS_KEY, [], all => all.filter(m => m.id !== materialId));
+  const { error } = await supabase.from("class_materials").delete().eq("id", materialId);
+  if (error) {
+    console.error("deleteClassMaterial:", error);
+    throw error;
+  }
 }
 
 export async function incrementMaterialDownload(materialId: string): Promise<void> {
-  // Bộ đếm — đọc-sửa-ghi nguyên tử để 2 lượt tải đồng thời không ghi đè nhau.
-  await kvUpdate<StoredClassMaterial[]>(MATERIALS_KEY, [], all =>
-    all.map(m => m.id === materialId ? { ...m, download_count: m.download_count + 1 } : m)
-  );
+  const { data } = await supabase
+    .from("class_materials")
+    .select("download_count")
+    .eq("id", materialId)
+    .maybeSingle();
+  const current = (data?.download_count ?? 0) as number;
+  await supabase.from("class_materials").update({ download_count: current + 1 }).eq("id", materialId);
 }
 
 // ── Homework file attachments (localStorage) ──────────────────────────────────
@@ -1071,18 +1126,26 @@ export interface HomeworkAttachment {
   file_type: string;
 }
 
-const HW_ATTACHMENTS_KEY = "tutorhub_homework_attachments";
-
-async function getAllHomeworkAttachments(): Promise<HomeworkAttachment[]> {
-  return kvGet<HomeworkAttachment[]>(HW_ATTACHMENTS_KEY, []);
-}
-
 export async function getHomeworkAttachments(homeworkId: string): Promise<HomeworkAttachment[]> {
-  return (await getAllHomeworkAttachments()).filter(a => a.homework_id === homeworkId);
+  const { data, error } = await supabase
+    .from("homework_attachments")
+    .select("*")
+    .eq("homework_id", homeworkId);
+  if (error) {
+    console.error("getHomeworkAttachments:", error);
+    return [];
+  }
+  return (data ?? []) as HomeworkAttachment[];
 }
 
 export async function saveHomeworkAttachment(att: HomeworkAttachment): Promise<void> {
-  await kvSet(HW_ATTACHMENTS_KEY, [...(await getAllHomeworkAttachments()), att]);
+  const { error } = await supabase
+    .from("homework_attachments")
+    .insert({ id: `att_${crypto.randomUUID()}`, ...att });
+  if (error) {
+    console.error("saveHomeworkAttachment:", error);
+    throw error;
+  }
 }
 
 // ── Teacher tuition management per class (localStorage) ──────────────────────
