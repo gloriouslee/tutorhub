@@ -1,5 +1,11 @@
 -- TutorHub Database Schema
--- Run in your Supabase SQL Editor
+--
+-- ⚠️ LEGACY / DO NOT USE FOR PRODUCTION. This early UUID-based schema is
+-- superseded by the migrations under supabase/ and supabase/migrations/.
+-- In particular the `notifications` table here (with `target_id`) does NOT
+-- match the application, which uses migration_v2_production.sql's shape
+-- (`category`, `target_class_id`, `sent_by`, TEXT id). Build production only
+-- from the migration files per docs/PRODUCTION_DEPLOYMENT_RUNBOOK.md.
 
 -- Enable UUID extension
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
