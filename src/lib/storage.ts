@@ -285,7 +285,106 @@ export interface TeacherAttendanceRecord {
   saved_at: string;
 }
 export async function getAllTeacherAttendance(): Promise<TeacherAttendanceRecord[]> {
-  return kvGet<TeacherAttendanceRecord[]>("tutorhub_teacher_attendance", []);
+  const { data, error } = await supabase.from("class_attendance").select("data");
+  if (error) {
+    console.error("getAllTeacherAttendance:", error);
+    return [];
+  }
+  return (data ?? []).map(r => r.data as TeacherAttendanceRecord);
+}
+
+// Upsert attendance rows (per class/student/date). Replaces the old
+// full-blob kvSet — callers pass the records they changed.
+export async function saveClassAttendance(records: TeacherAttendanceRecord[]): Promise<void> {
+  if (records.length === 0) return;
+  const rows = records.map(r => ({
+    class_id: r.class_id,
+    student_id: r.student_id,
+    attendance_date: r.date,
+    data: r,
+  }));
+  const { error } = await supabase
+    .from("class_attendance")
+    .upsert(rows, { onConflict: "class_id,student_id,attendance_date" });
+  if (error) {
+    console.error("saveClassAttendance:", error);
+    throw error;
+  }
+}
+
+// ── Per-row wrappers for the migrated page datasets ──────────────────────────
+// Each stores the full domain object in a jsonb `data` column plus scope columns
+// used by RLS. Reads return the payload typed by the caller's generic.
+
+export async function getTeacherHomework<T = Record<string, unknown>>(): Promise<T[]> {
+  const { data, error } = await supabase.from("teacher_homework").select("data");
+  if (error) { console.error("getTeacherHomework:", error); return []; }
+  return (data ?? []).map(r => r.data as T);
+}
+export async function upsertTeacherHomework<T extends { id: string; class_id: string }>(hw: T): Promise<void> {
+  const { error } = await supabase
+    .from("teacher_homework")
+    .upsert({ id: hw.id, class_id: hw.class_id, data: hw }, { onConflict: "id" });
+  if (error) { console.error("upsertTeacherHomework:", error); throw error; }
+}
+export async function removeTeacherHomework(id: string): Promise<void> {
+  const { error } = await supabase.from("teacher_homework").delete().eq("id", id);
+  if (error) { console.error("removeTeacherHomework:", error); throw error; }
+}
+
+export async function getTeacherExtraClasses<T = Record<string, unknown>>(): Promise<T[]> {
+  const { data, error } = await supabase.from("teacher_extra_classes").select("data");
+  if (error) { console.error("getTeacherExtraClasses:", error); return []; }
+  return (data ?? []).map(r => r.data as T);
+}
+export async function upsertTeacherExtraClass<T extends { id: string; tutor_id: string; student_ids?: string[] }>(cls: T): Promise<void> {
+  const { error } = await supabase
+    .from("teacher_extra_classes")
+    .upsert({ id: cls.id, tutor_id: cls.tutor_id, student_ids: cls.student_ids ?? [], data: cls }, { onConflict: "id" });
+  if (error) { console.error("upsertTeacherExtraClass:", error); throw error; }
+}
+export async function removeTeacherExtraClass(id: string): Promise<void> {
+  const { error } = await supabase.from("teacher_extra_classes").delete().eq("id", id);
+  if (error) { console.error("removeTeacherExtraClass:", error); throw error; }
+}
+
+export async function getHwSubmissions<T = Record<string, unknown>>(): Promise<T[]> {
+  const { data, error } = await supabase.from("hw_submissions").select("data");
+  if (error) { console.error("getHwSubmissions:", error); return []; }
+  return (data ?? []).map(r => r.data as T);
+}
+export async function upsertHwSubmission<T extends { id: string; homework_id: string; student_id: string; class_id?: string }>(sub: T): Promise<void> {
+  const { error } = await supabase
+    .from("hw_submissions")
+    .upsert(
+      { id: sub.id, homework_id: sub.homework_id, student_id: sub.student_id, class_id: sub.class_id ?? null, data: sub },
+      { onConflict: "id" }
+    );
+  if (error) { console.error("upsertHwSubmission:", error); throw error; }
+}
+
+export async function getTeacherMaterials<T = Record<string, unknown>>(): Promise<T[]> {
+  const { data, error } = await supabase.from("teacher_materials").select("data");
+  if (error) { console.error("getTeacherMaterials:", error); return []; }
+  return (data ?? []).map(r => r.data as T);
+}
+// Replace this teacher's catalog with the provided list.
+export async function saveTeacherMaterials<T extends { id: string; classId?: string; published?: boolean }>(
+  list: T[],
+  teacherId: string,
+): Promise<void> {
+  const del = await supabase.from("teacher_materials").delete().eq("teacher_id", teacherId);
+  if (del.error) { console.error("saveTeacherMaterials(delete):", del.error); throw del.error; }
+  if (list.length === 0) return;
+  const rows = list.map(c => ({
+    id: c.id,
+    teacher_id: teacherId,
+    class_id: c.classId ?? null,
+    published: !!c.published,
+    data: c,
+  }));
+  const { error } = await supabase.from("teacher_materials").insert(rows);
+  if (error) { console.error("saveTeacherMaterials(insert):", error); throw error; }
 }
 
 export async function getNotifications(): Promise<Notification[]> {

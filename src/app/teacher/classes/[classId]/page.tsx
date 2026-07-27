@@ -19,8 +19,10 @@ import {
   getAllExamResults,
   getStudentPackages, saveStudentPackages, type StudentPackage,
   getClassMaterials, type StoredClassMaterial,
-  kvGet, kvSet, kvUpdate,
+  kvGet, kvUpdate,
   getClasses, removeStudentFromClass,
+  getTeacherHomework, upsertTeacherHomework, removeTeacherHomework,
+  getTeacherExtraClasses, getAllTeacherAttendance, getHwSubmissions,
 } from "@/lib/storage";
 import { toLocalDateKey } from "@/lib/utils";
 import { ClassSchedule } from "@/types";
@@ -182,7 +184,7 @@ export default function TeacherClassDetailPage() {
   const [extraClass, setExtraClass] = useState<(typeof MOCK_CLASSES)[number] | null>(null);
   const [extraClassLoaded, setExtraClassLoaded] = useState(false);
   useEffect(() => {
-    kvGet<any[]>("tutorhub_teacher_classes", [])
+    getTeacherExtraClasses<any>()
       .then(list => {
         const found = list.find(c => c.id === classId);
         if (found) {
@@ -308,7 +310,7 @@ export default function TeacherClassDetailPage() {
     if (!cls) return;
     (async () => {
       try {
-        const all = await kvGet<Homework[]>("tutorhub_teacher_homework", []);
+        const all = await getTeacherHomework<Homework>();
         const forClass = all.filter(h => h.class_id === classId && h.source !== "curriculum");
         const base: Homework[] = forClass.length === 0
           ? (MOCK_HOMEWORK as any[])
@@ -334,8 +336,8 @@ export default function TeacherClassDetailPage() {
       }
 
       try {
-        const rawSub = await kvGet<Submission[] | null>("tutorhub_submissions", null);
-        setSubmissions(rawSub ?? (MOCK_SUBMISSIONS as any[]));
+        const rawSub = await getHwSubmissions<Submission>();
+        setSubmissions(rawSub.length ? rawSub : (MOCK_SUBMISSIONS as any[]));
       } catch {
         setSubmissions(MOCK_SUBMISSIONS as any[]);
       }
@@ -344,8 +346,8 @@ export default function TeacherClassDetailPage() {
 
   // Load attendance from localStorage
   useEffect(() => {
-    kvGet<SavedAttendanceRecord[]>("tutorhub_teacher_attendance", [])
-      .then(setSavedAttendanceRecords)
+    getAllTeacherAttendance()
+      .then(recs => setSavedAttendanceRecords(recs as SavedAttendanceRecord[]))
       .catch(() => setSavedAttendanceRecords([]));
   }, []);
 
@@ -388,12 +390,20 @@ export default function TeacherClassDetailPage() {
 
   async function persistHomeworks(updated: Homework[]) {
     try {
-      const all = await kvGet<Homework[]>("tutorhub_teacher_homework", []);
-      const others = all.filter(h => h.class_id !== classId);
-      // Không ghi lại các bài tập nguồn từ lộ trình (source:"curriculum") — chúng
-      // sống trong tutorhub_curriculum_*, ghi vào đây sẽ tạo bản sao "đông cứng".
-      const manualOnly = updated.filter(h => h.source !== "curriculum");
-      await kvSet("tutorhub_teacher_homework", [...others, ...manualOnly]);
+      // Lưu theo từng row: chỉ ghi/xóa bài tập của LỚP này, nguồn thủ công.
+      // Không đụng bài tập nguồn từ lộ trình (source:"curriculum") — chúng sống
+      // trong tutorhub_curriculum_*, ghi vào đây sẽ tạo bản sao "đông cứng".
+      const prevManual = homeworks.filter(h => h.class_id === classId && h.source !== "curriculum");
+      const nextManual = updated.filter(h => h.class_id === classId && h.source !== "curriculum");
+      const nextIds = new Set(nextManual.map(h => h.id));
+      // Bài bị bỏ khỏi danh sách so với lần trước → xóa từng row.
+      for (const h of prevManual) {
+        if (!nextIds.has(h.id)) await removeTeacherHomework(h.id);
+      }
+      // Bài thêm mới / cập nhật → upsert từng row.
+      for (const h of nextManual) {
+        await upsertTeacherHomework(h);
+      }
     } catch {}
     setHomeworks(updated);
   }

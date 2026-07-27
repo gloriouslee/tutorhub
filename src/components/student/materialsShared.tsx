@@ -4,7 +4,7 @@ import type React from "react";
 import { Badge } from "@/components/ui/badge";
 import { formatCurrency } from "@/lib/utils";
 import type { StudentPackage } from "@/lib/storage";
-import { kvGet } from "@/lib/storage";
+import { getTeacherMaterials } from "@/lib/storage";
 import {
   PlayCircle, FileText, Pencil,
   Star, Zap, Crown, Tag, Wifi, School,
@@ -251,9 +251,9 @@ export interface TeacherCourse {
 export async function loadTeacherCourses(): Promise<TeacherCourse[]> {
   try {
     const raw = typeof window !== "undefined"
-      ? await kvGet<TeacherCourse[] | null>("tutorhub_teacher_materials", null)
+      ? await getTeacherMaterials<TeacherCourse>()
       : null;
-    if (raw) return raw;
+    if (raw && raw.length > 0) return raw;
   } catch {}
   return [
     { id: "tc1", classId: "c1", packages: ["online", "advanced", "offline"] },

@@ -18,15 +18,13 @@ import {
   updateGrade as supabaseUpdateGrade,
   type SubmissionRecord,
 } from "@/lib/supabase/submissions";
-import { kvGet, kvUpdate, addNotification } from "@/lib/storage";
+import { getTeacherHomework, getHwSubmissions, upsertHwSubmission, addNotification } from "@/lib/storage";
 
 // ── Data types ────────────────────────────────────────────────────────────────
 // Use SubmissionRecord from Supabase lib; extend with student_name for display
 type Submission = SubmissionRecord & { student_name: string };
 
-// ── localStorage helpers ──────────────────────────────────────────────────────
-const SUBMISSION_KEY = "tutorhub_submissions";
-
+// ── Seed data ─────────────────────────────────────────────────────────────────
 const DEFAULT_SUBMISSIONS: Submission[] = [
   { id: "sub1", homework_id: "h1", student_id: "s1", student_name: "Nguyễn Anh Tuấn", status: "graded",    submitted_at: "2026-07-08T14:30:00Z", file_name: "bai_dao_ham_nguyen_anh_tuan.pdf",  score: 9.2, feedback: "Em làm bài rất tốt! Lời giải rõ ràng, lập luận chặt chẽ. Chú ý thêm ở bài 2.14 tính toán sai dấu ở dòng cuối.", graded_at: "2026-07-09T10:00:00Z" },
   { id: "sub2", homework_id: "h1", student_id: "s2", student_name: "Trần Mai Phương",  status: "submitted", submitted_at: "2026-07-09T20:15:00Z", file_name: "tran_mai_phuong_chuong2.pdf" },
@@ -38,20 +36,17 @@ const DEFAULT_SUBMISSIONS: Submission[] = [
 
 async function loadSubmissions(): Promise<Submission[]> {
   try {
-    const raw = await kvGet<Submission[] | null>(SUBMISSION_KEY, null);
-    return raw ?? DEFAULT_SUBMISSIONS;
+    const raw = await getHwSubmissions<Submission>();
+    return raw.length > 0 ? raw : DEFAULT_SUBMISSIONS;
   } catch { return DEFAULT_SUBMISSIONS; }
 }
 
-// Atomic-ish update: patch only the graded submission in the freshest stored list.
-async function updateSubmission(subId: string, patch: Partial<Submission>): Promise<Submission[]> {
-  return kvUpdate<Submission[]>(SUBMISSION_KEY, DEFAULT_SUBMISSIONS, fresh =>
-    fresh.map(s => (s.id === subId ? { ...s, ...patch } : s))
-  );
+// Upsert the graded submission as its own per-row record.
+async function updateSubmission(sub: Submission, classId?: string): Promise<void> {
+  await upsertHwSubmission({ ...sub, class_id: (sub as { class_id?: string }).class_id ?? classId });
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-const HW_KEY = "tutorhub_teacher_homework";
 
 interface HomeworkItem {
   id: string;
@@ -64,7 +59,7 @@ interface HomeworkItem {
 // Merge mock homework with teacher-created homework from localStorage
 async function loadMyHomework(mockMyHomework: HomeworkItem[]): Promise<HomeworkItem[]> {
   let stored: HomeworkItem[] = [];
-  try { stored = await kvGet<HomeworkItem[]>(HW_KEY, []); } catch {}
+  try { stored = await getTeacherHomework<HomeworkItem>(); } catch {}
   const storedIds = new Set(stored.map(h => h.id));
   return [...stored, ...mockMyHomework.filter(h => !storedIds.has(h.id))];
 }
@@ -184,7 +179,10 @@ function TeacherSubmissionsPageInner() {
 
     const patch = { score, feedback: feedback || undefined, status: "graded" as const, graded_at: new Date().toISOString(), teacher_file_url: teacherFileUrl, teacher_file_name: teacherFileName };
     setSubmissions(prev => prev.map(s => (s.id === subId ? { ...s, ...patch } : s)));
-    try { await updateSubmission(subId, patch); } catch {}
+    const hw = existing ? myHomework.find(h => h.id === existing.homework_id) : undefined;
+    if (existing) {
+      try { await updateSubmission({ ...existing, ...patch }, hw?.class_id); } catch {}
+    }
     setGrading(null);
     setTeacherFile(null);
 
@@ -192,7 +190,6 @@ function TeacherSubmissionsPageInner() {
 
     // Báo cho học sinh: bài tập đã được chấm
     if (existing) {
-      const hw = myHomework.find(h => h.id === existing.homework_id);
       await addNotification({
         title: "Bài tập đã được chấm",
         content: `"${hw?.title ?? "Bài tập"}" đã được chấm: ${score}/10${feedback ? " — có nhận xét của giáo viên." : "."}`,

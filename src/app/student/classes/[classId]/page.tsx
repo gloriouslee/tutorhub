@@ -13,7 +13,7 @@ import {
   MOCK_LECTURES, MOCK_CLASS_NOTES, MOCK_EXAM_SCORES, MOCK_HOMEWORK, MOCK_ATTENDANCE,
 } from "@/lib/mock-data";
 import { getSubmissionsByStudent, type SubmissionRecord } from "@/lib/supabase/submissions";
-import { kvGet, getClasses, getClassScheduleOverride, getOnlineLink, getStudentPackages, getCurriculum, getClassMaterials, getExamResult, incrementMaterialDownload, isLessonVisibleToStudent, isAssignedToStudent, type StudentPackage, type CurriculumSession, type StoredClassMaterial } from "@/lib/storage";
+import { kvGet, getTeacherHomework, getHwSubmissions, getAllTeacherAttendance, getClasses, getClassScheduleOverride, getOnlineLink, getStudentPackages, getCurriculum, getClassMaterials, getExamResult, incrementMaterialDownload, isLessonVisibleToStudent, isAssignedToStudent, type StudentPackage, type CurriculumSession, type StoredClassMaterial } from "@/lib/storage";
 import CurriculumView from "@/components/student/CurriculumView";
 import {
   BookOpen, Clock, Video, MapPin, Users, ArrowLeft, FileText, Download,
@@ -73,7 +73,7 @@ function generateSessionDates(
 }
 
 function loadSavedAttendance(): Promise<SavedAttendanceRecord[]> {
-  return kvGet<SavedAttendanceRecord[]>("tutorhub_teacher_attendance", []);
+  return getAllTeacherAttendance() as unknown as Promise<SavedAttendanceRecord[]>;
 }
 
 type TabKey = "overview" | "curriculum" | "sessions" | "attendance" | "homework" | "materials" | "lectures" | "notes";
@@ -158,7 +158,7 @@ function saveWatched(studentId: string, s: Set<string>) {
 
 // ── KV: submissions fallback ─────────────────────────────────────────────────
 function loadLocalSubs(): Promise<SubmissionRecord[]> {
-  return kvGet<SubmissionRecord[]>("tutorhub_submissions", []);
+  return getHwSubmissions<SubmissionRecord>();
 }
 
 type ClassInfo = (typeof MOCK_CLASSES)[number];
@@ -261,7 +261,7 @@ export default function StudentClassDetailPage() {
       setCls(found);
     })();
     getClassScheduleOverride(classId).then(ov => setScheduleOverride(ov as ClassInfo["schedule"] | null));
-    kvGet<HomeworkItem[]>("tutorhub_teacher_homework", [])
+    getTeacherHomework<HomeworkItem>()
       .then(all => setTeacherHomework(all.filter(h => h.class_id === classId && isAssignedToStudent(h.assigned_to, studentId))));
   }, [classId]);
 

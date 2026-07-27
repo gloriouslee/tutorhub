@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { MOCK_ATTENDANCE } from "@/lib/mock-data";
-import { kvUpdate, type CurriculumSession as CurriculumSessionData } from "@/lib/storage";
+import { saveClassAttendance, type CurriculumSession as CurriculumSessionData } from "@/lib/storage";
 import {
   Clock, FileText, Save, CheckCircle2, CalendarDays, CheckSquare,
   UserCheck, UserX, Map,
@@ -107,15 +107,13 @@ function InlineAttendancePanel({
       status,
       saved_at: new Date().toISOString(),
     }));
-    let updated: SavedAttendanceRecord[] = [
+    const updated: SavedAttendanceRecord[] = [
       ...savedRecords.filter(r => !(r.class_id === classId && r.date === date)),
       ...newRecs,
     ];
+    // Per-row upsert: chỉ ghi các dòng điểm danh vừa thay đổi.
     try {
-      updated = await kvUpdate<SavedAttendanceRecord[]>("tutorhub_teacher_attendance", [], fresh => [
-        ...fresh.filter(r => !(r.class_id === classId && r.date === date)),
-        ...newRecs,
-      ]);
+      await saveClassAttendance(newRecs);
     } catch {}
     onSaved(updated);
     setSaved(true);

@@ -12,7 +12,7 @@ import { MOCK_CLASSES, MOCK_STUDENTS, MOCK_HOMEWORK, MOCK_ATTENDANCE } from "@/l
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import { toLocalDateKey } from "@/lib/utils";
-import { kvGet } from "@/lib/storage";
+import { getTeacherHomework, getTeacherExtraClasses } from "@/lib/storage";
 import { useTeacherContext } from "@/hooks/useTeacherContext";
 
 // Classes created locally by the teacher (no detail page in MOCK_CLASSES)
@@ -42,14 +42,14 @@ function getTodaySessions(classes: typeof MOCK_CLASSES) {
 // Load extra classes from localStorage
 async function loadExtraClasses() {
   try {
-    return await kvGet<any[]>("tutorhub_teacher_classes", []);
+    return await getTeacherExtraClasses<any>();
   } catch { return []; }
 }
 
 // Load homework from localStorage (seeded from mock if empty)
 async function loadHomework(classIds: string[]) {
   try {
-    const all = await kvGet<any[]>("tutorhub_teacher_homework", []);
+    const all = await getTeacherHomework<any>();
     const forClasses = all.filter((h: any) => classIds.includes(h.class_id));
     if (forClasses.length > 0) return forClasses;
   } catch {}

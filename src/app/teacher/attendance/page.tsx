@@ -8,7 +8,7 @@ import { AttendanceBadge, LearningModeBadge, SectionHeader } from "@/components/
 import { MOCK_STUDENTS, MOCK_ATTENDANCE } from "@/lib/mock-data";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { formatDate, toLocalDateKey } from "@/lib/utils";
-import { kvGet, kvSet } from "@/lib/storage";
+import { getAllTeacherAttendance, saveClassAttendance, getTeacherExtraClasses } from "@/lib/storage";
 import { useTeacherContext } from "@/hooks/useTeacherContext";
 import {
   CheckSquare, Users, UserCheck, UserX, Clock,
@@ -16,8 +16,6 @@ import {
 } from "lucide-react";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-const LS_KEY       = "tutorhub_teacher_attendance";
-
 type Status = "present" | "absent" | "late" | "excused";
 
 // ── Persistence ───────────────────────────────────────────────────────────────
@@ -30,10 +28,10 @@ interface SavedRecord {
 }
 
 async function loadSaved(): Promise<SavedRecord[]> {
-  try { return await kvGet<SavedRecord[]>(LS_KEY, []); } catch { return []; }
+  try { return await getAllTeacherAttendance(); } catch { return []; }
 }
-async function persistSaved(list: SavedRecord[]) {
-  await kvSet(LS_KEY, list);
+async function persistSaved(records: SavedRecord[]) {
+  await saveClassAttendance(records);
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -56,7 +54,7 @@ interface ExtraClass {
 }
 
 async function loadExtraClasses(): Promise<ExtraClass[]> {
-  try { return await kvGet<ExtraClass[]>("tutorhub_teacher_classes", []); } catch { return []; }
+  try { return await getTeacherExtraClasses<ExtraClass>(); } catch { return []; }
 }
 
 export default function TeacherAttendancePage() {
@@ -147,16 +145,16 @@ export default function TeacherAttendancePage() {
 
   async function handleSave() {
     if (!selectedClass) return;
-    const existing = (await loadSaved()).filter(
+    const existing = savedRecords.filter(
       r => !(r.class_id === selectedClass.id && r.date === date)
     );
     const newEntries: SavedRecord[] = Object.entries(marks).map(([student_id, status]) => ({
       class_id: selectedClass.id, student_id, date, status,
       saved_at: new Date().toISOString(),
     }));
-    const updated = [...newEntries, ...existing];
-    await persistSaved(updated);
-    setSavedRecords(updated);
+    // Per-row upsert: chỉ ghi các dòng vừa thay đổi (không rewrite cả bảng).
+    await persistSaved(newEntries);
+    setSavedRecords([...newEntries, ...existing]);
     setSaveFlash(true);
     setTimeout(() => setSaveFlash(false), 2000);
   }

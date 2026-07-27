@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { LearningModeBadge, SectionHeader } from "@/components/shared";
-import { getOnlineLink, kvGet, kvSet } from "@/lib/storage";
+import { getOnlineLink, getTeacherExtraClasses, upsertTeacherExtraClass } from "@/lib/storage";
 import { useTeacherContext } from "@/hooks/useTeacherContext";
 import {
   BookOpen, Clock, Video, MapPin, Users, Settings, Search,
@@ -15,8 +15,6 @@ import {
 } from "lucide-react";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-const LS_KEY       = "tutorhub_teacher_classes";
-
 const DAY_VI: Record<string, string> = {
   Monday: "Thứ Hai", Tuesday: "Thứ Ba", Wednesday: "Thứ Tư",
   Thursday: "Thứ Năm", Friday: "Thứ Sáu", Saturday: "Thứ Bảy", Sunday: "Chủ Nhật",
@@ -49,10 +47,7 @@ interface ExtraClass {
 }
 
 async function loadExtraClasses(): Promise<ExtraClass[]> {
-  try { return await kvGet<ExtraClass[]>(LS_KEY, []); } catch { return []; }
-}
-async function saveExtraClasses(list: ExtraClass[]) {
-  await kvSet(LS_KEY, list);
+  try { return await getTeacherExtraClasses<ExtraClass>(); } catch { return []; }
 }
 
 // ── Form state ────────────────────────────────────────────────────────────────
@@ -139,8 +134,7 @@ function CreateClassModal({
       tutor_id:      teacherId,
       created_at:    new Date().toISOString(),
     };
-    const list = await loadExtraClasses();
-    await saveExtraClasses([cls, ...list]);
+    await upsertTeacherExtraClass(cls);
     onCreated(cls);
     onClose();
   }

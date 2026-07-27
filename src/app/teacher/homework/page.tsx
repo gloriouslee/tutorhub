@@ -11,13 +11,10 @@ import { Input } from "@/components/ui/input";
 import { SectionHeader } from "@/components/shared";
 import { MOCK_HOMEWORK } from "@/lib/mock-data";
 import { useTeacherContext } from "@/hooks/useTeacherContext";
-import { kvGet, kvUpdate, getCurriculum, getAllExamResults } from "@/lib/storage";
+import { getCurriculum, getAllExamResults, getTeacherHomework, upsertTeacherHomework, removeTeacherHomework, getTeacherExtraClasses, getHwSubmissions } from "@/lib/storage";
 import { FileText, Plus, Calendar, CheckCircle2, Clock, X, Trash2, Edit2, ArrowRight, BookOpen, NotebookPen, PenSquare, Download } from "lucide-react";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-const HW_KEY       = "tutorhub_teacher_homework";
-const SUB_KEY      = "tutorhub_submissions";
-const CLS_KEY      = "tutorhub_teacher_classes";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface Homework {
@@ -51,13 +48,13 @@ interface ExtraClass {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 async function loadExtraClasses(): Promise<ExtraClass[]> {
-  try { return await kvGet<ExtraClass[]>(CLS_KEY, []); } catch { return []; }
+  try { return await getTeacherExtraClasses<ExtraClass>(); } catch { return []; }
 }
 
 async function loadHw(seedIds: string[]): Promise<Homework[]> {
   try {
-    const raw = await kvGet<Homework[] | null>(HW_KEY, null);
-    if (raw) return raw;
+    const raw = await getTeacherHomework<Homework>();
+    if (raw.length) return raw;
     // First visit: seed from mock data filtered to teacher's classes
     return MOCK_HOMEWORK
       .filter(h => seedIds.includes(h.class_id))
@@ -65,20 +62,20 @@ async function loadHw(seedIds: string[]): Promise<Homework[]> {
   } catch { return []; }
 }
 
-// Atomic read-modify-write: only touch the affected item, keep the rest fresh.
+// Persist a single homework row (insert or update), then reflect the change locally.
 async function upsertHw(item: Homework, fallback: Homework[]): Promise<Homework[]> {
-  return kvUpdate<Homework[]>(HW_KEY, fallback, fresh => {
-    const exists = fresh.some(h => h.id === item.id);
-    return exists ? fresh.map(h => (h.id === item.id ? item : h)) : [item, ...fresh];
-  });
+  await upsertTeacherHomework(item);
+  const exists = fallback.some(h => h.id === item.id);
+  return exists ? fallback.map(h => (h.id === item.id ? item : h)) : [item, ...fallback];
 }
 
 async function removeHw(id: string, fallback: Homework[]): Promise<Homework[]> {
-  return kvUpdate<Homework[]>(HW_KEY, fallback, fresh => fresh.filter(h => h.id !== id));
+  await removeTeacherHomework(id);
+  return fallback.filter(h => h.id !== id);
 }
 
 async function loadSubs(): Promise<Submission[]> {
-  try { return await kvGet<Submission[]>(SUB_KEY, []); } catch { return []; }
+  try { return await getHwSubmissions<Submission>(); } catch { return []; }
 }
 
 // Bài tập từ lộ trình (nộp file + làm câu hỏi) cho các lớp của giáo viên.

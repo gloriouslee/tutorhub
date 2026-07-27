@@ -19,20 +19,18 @@ import {
   getSubmissionsByStudent,
   type SubmissionRecord,
 } from "@/lib/supabase/submissions";
-import { kvGet, kvSet, getCurriculum, getExamResult, isLessonVisibleToStudent, isAssignedToStudent } from "@/lib/storage";
+import { getTeacherHomework, getHwSubmissions, upsertHwSubmission, getCurriculum, getExamResult, isLessonVisibleToStudent, isAssignedToStudent } from "@/lib/storage";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const ACCEPTED = ".pdf,.doc,.docx,.jpg,.jpeg,.png";
 const MAX_MB   = 10;
-const LS_KEY   = "tutorhub_submissions";
 
 // ── localStorage fallback ─────────────────────────────────────────────────────
 async function loadLocalSubs(): Promise<SubmissionRecord[]> {
-  try { return await kvGet<SubmissionRecord[]>(LS_KEY, []); } catch { return []; }
+  try { return await getHwSubmissions<SubmissionRecord>(); } catch { return []; }
 }
-async function saveLocalSub(sub: SubmissionRecord) {
-  const arr = await loadLocalSubs();
-  await kvSet(LS_KEY, [...arr.filter(s => s.id !== sub.id), sub]);
+async function saveLocalSub(sub: SubmissionRecord, classId?: string) {
+  await upsertHwSubmission({ ...sub, class_id: classId });
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -83,7 +81,7 @@ export default function StudentHomeworkPage() {
     if (!classKey) return;
 
     // Load manually-created homework
-    kvGet<HomeworkItem[]>("tutorhub_teacher_homework", [])
+    getTeacherHomework<HomeworkItem>()
       .then(all => setTeacherHw(prev => {
         const manual = all.filter(h => myClassIds.includes(h.class_id) && isAssignedToStudent(h.assigned_to, STUDENT_ID));
         const existingIds = new Set(prev.map(h => h.id));
@@ -256,7 +254,7 @@ export default function StudentHomeworkPage() {
 
     const saved = await insertSubmission(subData);
     const finalSub: SubmissionRecord = saved ?? { ...subData, id: `local-${Date.now()}` };
-    if (!saved) await saveLocalSub(finalSub);
+    if (!saved) await saveLocalSub(finalSub, selectedHw.class_id);
 
     setSubmissions(prev => [
       ...prev.filter(s => !(s.homework_id === selectedHw.id && s.student_id === STUDENT_ID)),

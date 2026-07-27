@@ -17,7 +17,7 @@ import {
   getStudentComments, saveStudentComment,
   getStudentPackages, type StudentPackage,
   getExamScoresByStudent, saveExamScore, deleteExamScore, type StoredExamScore,
-  kvGet,
+  getAllTeacherAttendance, getHwSubmissions,
 } from "@/lib/storage";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { useTeacherContext } from "@/hooks/useTeacherContext";
@@ -195,8 +195,8 @@ function StudentDetailPanel({
   const classNameMap = Object.fromEntries(studentClasses.map(c => [c.id, c.class_name]));
 
   useEffect(() => {
-    kvGet<Submission[] | null>("tutorhub_submissions", null)
-      .then(subs => { if (subs) setLsSubmissions(subs); })
+    getHwSubmissions<Submission>()
+      .then(subs => { if (subs.length) setLsSubmissions(subs); })
       .catch(() => {});
     try {
       const val = localStorage.getItem(`tutorhub_gpa_target_${student.id}`);
@@ -834,8 +834,8 @@ export default function TeacherStudentsPage() {
       setPackagesMap(map);
     }
     loadPackages();
-    kvGet<SavedAttendanceRecord[] | null>("tutorhub_teacher_attendance", null)
-      .then(recs => { if (recs) setSavedAttendance(recs); })
+    getAllTeacherAttendance()
+      .then(recs => { if (recs.length) setSavedAttendance(recs as unknown as SavedAttendanceRecord[]); })
       .catch(() => {});
   }, [myClasses]);
 

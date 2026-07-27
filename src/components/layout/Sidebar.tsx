@@ -14,8 +14,8 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { UserRole } from "@/types";
 import { MOCK_HOMEWORK } from "@/lib/mock-data";
 import {
-  kvGet, getNotifications, getScheduleNotifications,
-  getEnrollments,
+  getTeacherHomework, getHwSubmissions, getNotifications,
+  getScheduleNotifications, getEnrollments,
 } from "@/lib/storage";
 import { getSubmissionsByStudent } from "@/lib/supabase/submissions";
 import { useStudentContext } from "@/hooks/useStudentContext";
@@ -125,7 +125,7 @@ async function computeBadges(
   if (role === "student") {
     // Bài tập "Chưa nộp" — cùng nguồn với trang bài tập: homework giáo viên tạo
     // (kv) + mock nền theo lớp thật của học sinh, trừ bài đã nộp (Supabase → kv).
-    const teacherHw = (await kvGet<{ id: string; class_id: string }[]>("tutorhub_teacher_homework", []))
+    const teacherHw = (await getTeacherHomework<{ id: string; class_id: string }>())
       .filter(h => myClassIds.includes(h.class_id));
     const kvHwIds = new Set(teacherHw.map(h => h.id));
     const myHw = [
@@ -134,7 +134,7 @@ async function computeBadges(
     ];
     let subs = await getSubmissionsByStudent(sid).catch(() => []);
     if (subs.length === 0) {
-      const local = await kvGet<{ homework_id: string; student_id: string }[]>("tutorhub_submissions", []);
+      const local = await getHwSubmissions<{ homework_id: string; student_id: string }>();
       subs = local.filter(s => s.student_id === sid) as typeof subs;
     }
     const submittedIds = new Set(subs.map(s => s.homework_id));
