@@ -17,12 +17,11 @@ type CatalogItem = { id?: unknown; title?: unknown; price?: unknown };
 async function resolveProduct(pkgId: string) {
   if (FIXED_PRODUCTS[pkgId]) return FIXED_PRODUCTS[pkgId];
   const { data } = await createAdminClient()
-    .from("kv_teacher_materials")
-    .select("value")
-    .eq("id", "global")
+    .from("teacher_materials")
+    .select("data")
+    .eq("id", pkgId)
     .maybeSingle();
-  const items = Array.isArray(data?.value) ? (data.value as CatalogItem[]) : [];
-  const item = items.find((candidate) => candidate.id === pkgId);
+  const item = (data?.data ?? null) as CatalogItem | null;
   if (
     item &&
     typeof item.title === "string" &&
