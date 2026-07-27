@@ -7,7 +7,8 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Search, Send, Paperclip, Phone, Info, Check, CheckCheck } from "lucide-react";
-import { kvGet, kvSet } from "@/lib/storage";
+import { getParentMessages, saveParentMessages } from "@/lib/storage";
+import { useParentContext } from "@/hooks/useParentContext";
 
 // Mock Data
 const CONTACTS = [
@@ -58,9 +59,8 @@ const CONTACTS = [
   }
 ];
 
-const LS_MESSAGES = "tutorhub_parent_messages";
-
 export default function ParentMessagesPage() {
+  const { parentId } = useParentContext();
   const [contacts, setContacts] = useState(CONTACTS);
   const [activeContactId, setActiveContactId] = useState(CONTACTS[0].id);
   const [inputText, setInputText] = useState("");
@@ -69,22 +69,23 @@ export default function ParentMessagesPage() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Load persisted conversations on mount
+  // Load this parent's persisted conversations on mount
   useEffect(() => {
+    if (!parentId) return;
     (async () => {
       try {
-        const parsed = await kvGet<typeof CONTACTS | null>(LS_MESSAGES, null);
+        const parsed = await getParentMessages<typeof CONTACTS>(parentId);
         if (Array.isArray(parsed) && parsed.length > 0) setContacts(parsed);
       } catch { /* ignore */ }
       setHydrated(true);
     })();
-  }, []);
+  }, [parentId]);
 
   // Persist conversations whenever they change
   useEffect(() => {
-    if (!hydrated) return;
-    kvSet(LS_MESSAGES, contacts).catch(() => { /* ignore */ });
-  }, [contacts, hydrated]);
+    if (!hydrated || !parentId) return;
+    saveParentMessages(parentId, contacts).catch(() => { /* ignore */ });
+  }, [contacts, hydrated, parentId]);
 
   const activeContact = contacts.find(c => c.id === activeContactId) || contacts[0];
 

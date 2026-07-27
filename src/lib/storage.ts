@@ -393,6 +393,25 @@ export async function saveTeacherMaterials<T extends { id: string; classId?: str
   if (error) { console.error("saveTeacherMaterials(insert):", error); throw error; }
 }
 
+// Per-parent messages (one jsonb row per parent).
+export async function getParentMessages<T = unknown>(parentId: string): Promise<T | null> {
+  if (!parentId) return null;
+  const { data, error } = await supabase
+    .from("parent_messages")
+    .select("data")
+    .eq("parent_id", parentId)
+    .maybeSingle();
+  if (error) { console.error("getParentMessages:", error); return null; }
+  return (data?.data ?? null) as T | null;
+}
+export async function saveParentMessages(parentId: string, contacts: unknown): Promise<void> {
+  if (!parentId) return;
+  const { error } = await supabase
+    .from("parent_messages")
+    .upsert({ parent_id: parentId, data: contacts, updated_at: new Date().toISOString() }, { onConflict: "parent_id" });
+  if (error) console.error("saveParentMessages:", error);
+}
+
 export async function getNotifications(): Promise<Notification[]> {
   // Chụp cache cục bộ TRƯỚC khi getEntity ghi đè bằng dữ liệu DB.
   const localBefore = readLocal<Notification>(ENTITY_KEYS.notifications) ?? [];
