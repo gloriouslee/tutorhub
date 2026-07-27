@@ -8,7 +8,6 @@ import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { SectionHeader } from "@/components/shared";
-import { MOCK_STUDENTS, MOCK_CLASSES, MOCK_TEACHERS } from "@/lib/mock-data";
 import { getStudentAccounts, changeStudentPassword, type StudentAccount } from "@/lib/storage";
 import { useStudentContext } from "@/hooks/useStudentContext";
 import { createClient } from "@/lib/supabase/client";
@@ -17,8 +16,6 @@ import {
   GraduationCap, Calendar, CheckCircle2, Save, RotateCcw,
   AlertCircle, Eye, EyeOff,
 } from "lucide-react";
-
-const profileKey = (studentId: string) => `tutorhub_student_profile_${studentId}`;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 interface ProfileData {
@@ -33,7 +30,11 @@ interface ProfileData {
   from_enrollment: boolean;
 }
 
-function buildProfile(account: StudentAccount | null): ProfileData {
+function buildProfile(
+  account: StudentAccount | null,
+  studentId: string,
+  studentName: string,
+): ProfileData {
   if (account) {
     return {
       full_name:       account.full_name,
@@ -47,25 +48,16 @@ function buildProfile(account: StudentAccount | null): ProfileData {
       from_enrollment: true,
     };
   }
-  const s = MOCK_STUDENTS.find(s => s.id === "s1")!;
   return {
-    full_name:       s.full_name,
-    email:           s.email,
-    dob:             s.dob,
-    school:          s.school,
-    grade:           s.grade,
-    parent_phone:    "0912 345 678",
-    student_id:      s.id,
+    full_name:       studentName,
+    email:           "",
+    dob:             "",
+    school:          "",
+    grade:           "",
+    parent_phone:    "",
+    student_id:      studentId,
     from_enrollment: false,
   };
-}
-
-function loadSavedProfile(base: ProfileData, studentId: string): ProfileData {
-  try {
-    const raw = localStorage.getItem(profileKey(studentId));
-    if (!raw) return base;
-    return { ...base, ...JSON.parse(raw) };
-  } catch { return base; }
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
@@ -92,22 +84,20 @@ export default function StudentProfilePage() {
 
   useEffect(() => {
     (async () => {
-      // Find account matching the enrolled student cookie (demo s1 gets mock profile)
       const accounts = await getStudentAccounts();
       const acc = accounts.find(a => a.student_id === studentId) ?? null;
       setAccount(acc);
-      const base = buildProfile(acc);
-      setForm(loadSavedProfile(base, studentId));
+      setForm(buildProfile(acc, studentId, studentName));
       try {
         setAvatarUrl(localStorage.getItem(`tutorhub_avatar_${studentId}`));
       } catch { /* ignore */ }
       setLoaded(true);
     })();
-  }, [studentId]);
+  }, [studentId, studentName]);
 
   if (!loaded || !form) return null;
 
-  const base = buildProfile(account);
+  const base = buildProfile(account, studentId, studentName);
 
 
   const initials = form.full_name
@@ -124,26 +114,30 @@ export default function StudentProfilePage() {
     setSaved(false);
   }
 
-  function handleSave(e: React.FormEvent) {
+  async function handleSave(e: React.FormEvent) {
     e.preventDefault();
     if (!form) return;
-    try {
-      localStorage.setItem(profileKey(studentId), JSON.stringify({
+    const response = await fetch("/api/account/profile", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
         full_name: form.full_name,
-        email:     form.email,
-        dob:       form.dob,
-        school:    form.school,
-        grade:     form.grade,
-        parent_phone: form.parent_phone,
-      }));
-    } catch { /* ignore */ }
+        dob: form.dob,
+        school: form.school,
+        grade: form.grade,
+      }),
+    });
+    if (!response.ok) {
+      setSaved(false);
+      return;
+    }
     setDirty(false);
     setSaved(true);
     setTimeout(() => setSaved(false), 3000);
   }
 
   function handleReset() {
-    setForm(loadSavedProfile(base, studentId));
+    setForm(base);
     setDirty(false);
     setSaved(false);
   }
@@ -151,10 +145,29 @@ export default function StudentProfilePage() {
   async function handlePasswordChange(e: React.FormEvent) {
     e.preventDefault();
     if (!curPwd) { setPwdMsg({ ok: false, text: "Vui lòng nhập mật khẩu hiện tại." }); return; }
-    if (newPwd.length < 6) { setPwdMsg({ ok: false, text: "Mật khẩu mới phải có ít nhất 6 ký tự." }); return; }
+    if (
+      newPwd.length < 12 ||
+      !/[a-z]/.test(newPwd) ||
+      !/[A-Z]/.test(newPwd) ||
+      !/[0-9]/.test(newPwd) ||
+      !/[^A-Za-z0-9]/.test(newPwd)
+    ) {
+      setPwdMsg({ ok: false, text: "Mật khẩu cần ít nhất 12 ký tự, gồm chữ hoa, chữ thường, số và ký hiệu." });
+      return;
+    }
     if (newPwd !== confPwd) { setPwdMsg({ ok: false, text: "Mật khẩu xác nhận không khớp." }); return; }
-    if (!studentId.startsWith("enr_")) {
-      setPwdMsg({ ok: false, text: "Tài khoản demo không thể đổi mật khẩu." });
+    const supabase = createClient();
+    const { data: userData } = await supabase.auth.getUser();
+    if (!userData.user?.email) {
+      setPwdMsg({ ok: false, text: "Phiên đăng nhập không hợp lệ." });
+      return;
+    }
+    const { error: verifyError } = await supabase.auth.signInWithPassword({
+      email: userData.user.email,
+      password: curPwd,
+    });
+    if (verifyError) {
+      setPwdMsg({ ok: false, text: "Mật khẩu hiện tại không đúng." });
       return;
     }
     const result = await changeStudentPassword(studentId, curPwd, newPwd);
@@ -179,14 +192,18 @@ export default function StudentProfilePage() {
     try {
       const supabase = createClient();
       const ext = file.name.split(".").pop() ?? "png";
-      const path = `${studentId}/${Date.now()}.${ext}`;
+      const { data: userData } = await supabase.auth.getUser();
+      if (!userData.user) return;
+      const path = `${userData.user.id}/${Date.now()}.${ext}`;
       const { data, error } = await supabase.storage
         .from("avatars")
         .upload(path, file, { upsert: true, contentType: file.type });
       if (error || !data) return;
-      const { data: { publicUrl } } = supabase.storage.from("avatars").getPublicUrl(data.path);
-      setAvatarUrl(publicUrl);
-      localStorage.setItem(`tutorhub_avatar_${studentId}`, publicUrl);
+      const { data: signed } = await supabase.storage
+        .from("avatars")
+        .createSignedUrl(data.path, 60 * 60);
+      if (!signed?.signedUrl) return;
+      setAvatarUrl(signed.signedUrl);
     } catch { /* offline — giữ blob tạm cho phiên hiện tại */ }
   }
 
@@ -278,7 +295,6 @@ export default function StudentProfilePage() {
                 </CardHeader>
                 <CardContent className="p-4 space-y-2">
                   {enrolledClasses.map(cls => {
-                    const teacher = MOCK_TEACHERS.find(t => t.id === cls.tutor_id);
                     return (
                       <div key={cls.id} className="flex items-center gap-3 p-3 bg-muted/30 rounded-xl border border-border/50">
                         <div className="h-3 w-3 rounded-full shrink-0" style={{ background: cls.color }} />
@@ -286,7 +302,7 @@ export default function StudentProfilePage() {
                           <p className="text-sm font-semibold truncate">{cls.class_name}</p>
                           <p className="text-[11px] text-muted-foreground">
                             {cls.subject}
-                            {teacher && ` · ${teacher.full_name}`}
+                            {cls.tutor_id && ` · ${cls.tutor_id}`}
                           </p>
                         </div>
                       </div>

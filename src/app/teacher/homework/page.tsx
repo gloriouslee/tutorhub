@@ -286,7 +286,7 @@ export default function TeacherHomeworkPage() {
           <div className="py-16 text-center text-muted-foreground border-2 border-dashed border-border/50 rounded-2xl">
             <FileText className="h-10 w-10 mx-auto mb-3 opacity-20" />
             <p className="font-medium text-sm">Chưa có bài tập nào.</p>
-            <p className="text-xs mt-1">Nhấn "Giao bài mới" để bắt đầu.</p>
+                    <p className="text-xs mt-1">Nhấn &quot;Giao bài mới&quot; để bắt đầu.</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">

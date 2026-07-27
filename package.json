@@ -5,8 +5,14 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/security/production-hardening.test.ts",
+    "test:integration": "tsx --test tests/security/live-rls.integration.test.ts",
+    "deploy:check": "tsx scripts/assert-deploy-ready.ts",
     "start": "next start",
     "lint": "eslint",
+    "db:backup": "tsx scripts/backup-supabase.ts",
+    "admin:bootstrap": "tsx scripts/bootstrap-admin.ts",
     "db:seed": "tsx scripts/seed-dev.ts",
     "db:reset": "echo \"Manually run supabase/schema.sql + supabase/migration_app_tables.sql + supabase/migration_missing_columns.sql in the Supabase SQL Editor first, then run: npm run db:seed\""
   },

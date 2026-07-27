@@ -1,24 +1,41 @@
 import { createClient } from "./supabase/server";
-import { cookies } from "next/headers";
 
 export async function getCurrentUserName(): Promise<string> {
-  const cookieStore = await cookies();
-  const enrolledName = cookieStore.get("enrolled_student_name")?.value;
-  if (enrolledName) return decodeURIComponent(enrolledName);
-  const demoRole = cookieStore.get("demo_role")?.value;
-  if (demoRole === "student") return "Nguyễn Anh Tuấn";
-  if (demoRole === "parent")  return "Trần Văn Minh";
-  if (demoRole === "teacher") return "Thầy Hùng Toán";
-  if (demoRole === "admin")   return "Admin User";
-  if (demoRole) return "Demo User";
-
   try {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return "User";
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", user.id)
+      .maybeSingle();
+    if (profile?.role === "student") {
+      const { data } = await supabase
+        .from("students")
+        .select("full_name")
+        .eq("user_id", user.id)
+        .maybeSingle();
+      if (data?.full_name) return data.full_name;
+    }
+    if (profile?.role === "teacher") {
+      const { data } = await supabase
+        .from("teachers")
+        .select("full_name")
+        .eq("user_id", user.id)
+        .maybeSingle();
+      if (data?.full_name) return data.full_name;
+    }
+    if (profile?.role === "parent") {
+      const { data } = await supabase
+        .from("parents")
+        .select("full_name")
+        .eq("user_id", user.id)
+        .maybeSingle();
+      if (data?.full_name) return data.full_name;
+    }
     return (
       user.user_metadata?.full_name ||
-      user.user_metadata?.name ||
       user.email?.split("@")[0] ||
       "User"
     );

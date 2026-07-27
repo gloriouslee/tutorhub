@@ -523,7 +523,7 @@ function StudentDetailPanel({
           )}
 
           {examScores.length === 0 ? (
-            <div className="py-12 text-center text-sm text-muted-foreground">Chưa có dữ liệu điểm. Nhấn "Thêm điểm kiểm tra" để nhập.</div>
+                <div className="py-12 text-center text-sm text-muted-foreground">Chưa có dữ liệu điểm. Nhấn &quot;Thêm điểm kiểm tra&quot; để nhập.</div>
           ) : (
             <>
               {/* Bar chart */}
@@ -702,7 +702,7 @@ function StudentDetailPanel({
                                 </p>
                               )}
                               {sub.feedback && (
-                                <p className="text-[11px] text-muted-foreground italic line-clamp-2">"{sub.feedback}"</p>
+                                  <p className="text-[11px] text-muted-foreground italic line-clamp-2">&quot;{sub.feedback}&quot;</p>
                               )}
                             </div>
                           )}

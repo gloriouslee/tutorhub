@@ -100,7 +100,16 @@ export default function AdminTeachersPage() {
     let authUserId: string | null = null;
     if (createAccount) {
       if (!formData.email) { setAccountError("Cần email để tạo tài khoản đăng nhập."); return; }
-      if (accountPassword.length < 6) { setAccountError("Mật khẩu tối thiểu 6 ký tự."); return; }
+      if (
+        accountPassword.length < 12 ||
+        !/[a-z]/.test(accountPassword) ||
+        !/[A-Z]/.test(accountPassword) ||
+        !/[0-9]/.test(accountPassword) ||
+        !/[^A-Za-z0-9]/.test(accountPassword)
+      ) {
+        setAccountError("Mật khẩu cần ít nhất 12 ký tự, gồm chữ hoa, chữ thường, số và ký hiệu.");
+        return;
+      }
       setSubmitting(true);
       try {
         const res = await fetch("/api/admin/create-account", {
@@ -339,7 +348,7 @@ export default function AdminTeachersPage() {
                         type="text"
                         value={accountPassword}
                         onChange={e => setAccountPassword(e.target.value)}
-                        placeholder="Tối thiểu 6 ký tự"
+                        placeholder="Tối thiểu 12 ký tự, đủ 4 nhóm"
                       />
                       <p className="text-[11px] text-muted-foreground">
                         Đăng nhập bằng email liên hệ ở trên + mật khẩu này.

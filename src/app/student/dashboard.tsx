@@ -20,6 +20,7 @@ import Link from "next/link";
 import { formatDate } from "@/lib/utils";
 import { useStudentContext } from "@/hooks/useStudentContext";
 import { AreaChart, Area, Tooltip, ResponsiveContainer } from "recharts";
+import type { Class } from "@/types";
 
 interface HomeworkItem {
   id: string;
@@ -37,7 +38,7 @@ const DOW_VI: Record<string, string> = {
   Thursday: "Thứ Năm", Friday: "Thứ Sáu", Saturday: "Thứ Bảy", Sunday: "Chủ Nhật",
 };
 
-function buildWeekSessions(classes: typeof MOCK_CLASSES) {
+function buildWeekSessions(classes: Class[]) {
   const now      = new Date();
   const todayIdx = now.getDay();
   const curHour  = now.getHours() + now.getMinutes() / 60;

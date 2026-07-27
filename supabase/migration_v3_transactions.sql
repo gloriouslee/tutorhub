@@ -21,5 +21,4 @@ CREATE INDEX IF NOT EXISTS idx_tx_student ON public.purchase_transactions (stude
 
 ALTER TABLE public.purchase_transactions ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "phase1_open_all" ON public.purchase_transactions;
-CREATE POLICY "phase1_open_all" ON public.purchase_transactions
-  FOR ALL USING (true) WITH CHECK (true);
+-- API-only/default-deny. Do not grant anon table access.

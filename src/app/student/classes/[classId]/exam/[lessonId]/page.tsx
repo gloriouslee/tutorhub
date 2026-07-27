@@ -2,8 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { getCurriculum, getClasses, saveExamResult, getExamResult, kvUpdate, kvDelete, isAssignedToStudent, type CurriculumLesson, type ExamQuestion } from "@/lib/storage";
-import { MOCK_CLASSES } from "@/lib/mock-data";
+import { type CurriculumLesson, type ExamQuestion } from "@/lib/storage";
 import { Button } from "@/components/ui/button";
 import "katex/dist/katex.min.css";
 import { renderMathInHtml } from "@/lib/mathRender";
@@ -14,7 +13,7 @@ import {
 } from "lucide-react";
 import { useStudentContext } from "@/hooks/useStudentContext";
 import { uploadClassFile } from "@/lib/upload";
-import { autoQuestionScore, maxQuestionScore, calcAutoScore, calcMaxScore, countCorrectStatements, type TrueFalseScale } from "@/lib/exam-scoring";
+import { autoQuestionScore, maxQuestionScore, countCorrectStatements, type TrueFalseScale } from "@/lib/exam-scoring";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -782,10 +781,6 @@ function ResultView({ questions, result, onRetry, examTitle, showSolution, allow
 // ── Score calculation ─────────────────────────────────────────────────────────
 
 // Fallback offline — dùng chung thang điểm với server (exam-scoring.ts)
-function calcScore(questions: ExamQuestion[], answers: Record<string, StudentAnswer>, scale?: TrueFalseScale): number {
-  return calcAutoScore(questions, answers, scale);
-}
-
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function ExamPage() {
@@ -794,7 +789,7 @@ export default function ExamPage() {
   const lessonId = params.lessonId as string;
   const router   = useRouter();
 
-  const { studentId, studentName, assignedClassId, ready } = useStudentContext();
+  const { studentId, ready } = useStudentContext();
 
   const [lesson,      setLesson]      = useState<CurriculumLesson | null>(null);
   const [questions,   setQuestions]   = useState<ExamQuestion[]>([]);
@@ -808,59 +803,44 @@ export default function ExamPage() {
   const [lockReason,  setLockReason]  = useState("");
   // null = đang kiểm tra quyền truy cập
   const [accessDenied, setAccessDenied] = useState<boolean | null>(null);
-  // true = đề thi lấy từ API server (đã lọc đáp án) → nộp bài cũng qua API
-  const serverModeRef = useRef(false);
   // Thời điểm bắt đầu làm (tính thời lượng) + số lần đã làm trước đó (tính lần làm)
   const startedAtRef = useRef<number>(0);
   const prevAttemptRef = useRef(0);
 
   useEffect(() => {
-    // Chờ context sẵn sàng — tránh load nhầm kết quả của s1 mặc định
     if (!ready) return;
     let cancelled = false;
     (async () => {
-    // Roster check — nhất quán với trang chi tiết lớp:
-    // học sinh phải nằm trong student_ids của lớp HOẶC assignedClassId === classId
-    let allowed = assignedClassId === classId;
-    if (!allowed) {
-      let clsFound: { student_ids?: string[] } | undefined;
       try {
-        const all = await getClasses();
-        clsFound = all.find(c => c.id === classId);
-      } catch { /* offline */ }
-      if (!clsFound) clsFound = MOCK_CLASSES.find(c => c.id === classId);
-      allowed = (clsFound?.student_ids ?? []).includes(studentId);
-    }
-    if (cancelled) return;
-    setAccessDenied(!allowed);
-    if (!allowed) return;
-
-    // ── Đường chính: lấy đề từ API server (đáp án đã bị lọc) ──
-    // 501 (chưa cấu hình service key) / lỗi mạng → fallback luồng client cũ.
-    const sid = studentId || "anon";
-    let useFallback = true;
-    try {
-      const res = await fetch(
-        `/api/exam/${classId}/${lessonId}?studentId=${encodeURIComponent(sid)}`
-      );
-      if (res.status === 403) {
+        if (!studentId) {
+          setAccessDenied(true);
+          return;
+        }
+        const res = await fetch(`/api/exam/${classId}/${lessonId}`, {
+          cache: "no-store",
+        });
         const data = await res.json();
         if (cancelled) return;
-        serverModeRef.current = true;
-        useFallback = false;
-        setLesson({ id: lessonId, type: "exam", title: "Bài thi", is_published: true });
-        setExamLocked(true);
-        setLockReason(
-          data.reason === "unpublished" ? "Bài thi chưa được công bố."
-          : data.reason === "closed" ? "Bài thi đã kết thúc."
-          : data.opens_at && new Date(data.opens_at) > new Date()
-            ? `Bài thi sẽ mở lúc ${new Date(data.opens_at).toLocaleString("vi-VN")}.`
-            : "Bài thi chưa được mở.");
-      } else if (res.ok) {
-        const data = await res.json();
-        if (cancelled) return;
-        serverModeRef.current = true;
-        useFallback = false;
+        if (!res.ok) {
+          if (data.error === "not_assigned" || res.status === 401) {
+            setAccessDenied(true);
+            return;
+          }
+          setAccessDenied(false);
+          setLesson({ id: lessonId, type: "exam", title: "Bài thi", is_published: true });
+          setExamLocked(true);
+          setLockReason(
+            data.reason === "unpublished"
+              ? "Bài thi chưa được công bố."
+              : data.reason === "closed"
+                ? "Bài thi đã kết thúc."
+                : data.opens_at && new Date(data.opens_at) > new Date()
+                  ? `Bài thi sẽ mở lúc ${new Date(data.opens_at).toLocaleString("vi-VN")}.`
+                  : "Không thể tải đề thi an toàn. Vui lòng thử lại sau.",
+          );
+          return;
+        }
+        setAccessDenied(false);
         setLesson({
           id: lessonId,
           type: "exam",
@@ -884,62 +864,16 @@ export default function ExamPage() {
           setResult(null);
           setSubmitted(false);
         }
-      }
-      // 404/500... → fallback client bên dưới
-    } catch { /* offline / route không chạy → fallback client */ }
-    if (!useFallback || cancelled) return;
-    serverModeRef.current = false;
-
-    const chapters = await getCurriculum(classId);
-    for (const ch of chapters)
-      for (const sess of ch.sessions) {
-        const found = sess.lessons.find(l => l.id === lessonId);
-        if (found) {
-          if (cancelled) return;
-          setLesson(found);
-          setQuestions(found.exam_content?.questions ?? []);
-
-          // Check access control — cùng quy tắc với CurriculumView:
-          // mở nếu status === "open" HOẶC (draft nhưng đã tới giờ mở)
-          const status = found.exam_status ?? "draft";
-          const opensAt = found.exam_opens_at;
-          const now = new Date();
-          const isOpen = status === "open" || (status === "draft" && !!opensAt && new Date(opensAt) <= now);
-          // Chưa công bố (is_published === false) — thiếu trường coi như đã công bố (legacy)
-          if (!isAssignedToStudent(found.assigned_to, studentId)) {
-            // Bài thi giao riêng cho học viên khác — chặn cả khi mở bằng URL trực tiếp
-            setExamLocked(true); setLockReason("Bài thi này không được giao cho bạn.");
-          } else if (found.is_published === false) {
-            setExamLocked(true); setLockReason("Bài thi chưa được công bố.");
-          } else if (status === "closed") {
-            setExamLocked(true); setLockReason("Bài thi đã kết thúc.");
-          } else if (!isOpen) {
-            setExamLocked(true);
-            setLockReason(opensAt && new Date(opensAt) > now
-              ? `Bài thi sẽ mở lúc ${new Date(opensAt).toLocaleString("vi-VN")}.`
-              : "Bài thi chưa được mở.");
-          } else {
-            setExamLocked(false); setLockReason("");
-          }
-
-          // Load previous result (scoped to this student)
-          const prev = await getExamResult(classId, lessonId, studentId || "anon");
-          if (cancelled) return;
-          if (prev) {
-            setResult(prev as unknown as ExamResult);
-            prevAttemptRef.current = (prev as unknown as ExamResult).attempt ?? 1;
-            setSubmitted(true);
-          } else {
-            // Không có kết quả cho học sinh này — reset state cũ (nếu có)
-            setResult(null);
-            setSubmitted(false);
-          }
-          return;
-        }
+      } catch {
+        if (cancelled) return;
+        setAccessDenied(false);
+        setLesson({ id: lessonId, type: "exam", title: "Bài thi", is_published: true });
+        setExamLocked(true);
+        setLockReason("Không thể kết nối máy chủ bài thi. Vui lòng thử lại sau.");
       }
     })();
     return () => { cancelled = true; };
-  }, [classId, lessonId, studentId, assignedClassId, ready]);
+  }, [classId, lessonId, studentId, ready]);
 
   const timeLimit = lesson?.exam_content?.time_limit
     ? lesson.exam_content.time_limit * 60
@@ -976,54 +910,39 @@ export default function ExamPage() {
       : undefined;
     const attempt = prevAttemptRef.current + 1;
     prevAttemptRef.current = attempt;
-    // ── Đường chính: server chấm điểm (client không có đáp án) ──
-    if (serverModeRef.current) {
-      try {
-        const res = await fetch(`/api/exam/${classId}/${lessonId}/submit`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ studentId: sid, studentName, answers, duration_seconds, attempt }),
-        });
-        if (res.ok || res.status === 409) {
-          let data = res.ok ? await res.json() : null;
-          if (!data) {
-            // 409 — đã có kết quả trên server: tải lại để hiển thị
-            const again = await fetch(`/api/exam/${classId}/${lessonId}?studentId=${encodeURIComponent(sid)}`);
-            if (again.ok) data = await again.json();
-          }
-          if (data?.result) {
-            if (Array.isArray(data.questions) && data.questions.length > 0) {
-              setQuestions(data.questions as ExamQuestion[]);
-            }
-            markExamComplete(sid, lessonId);
-            setResult(data.result as ExamResult);
-            setSubmitted(true);
-            setShowConfirm(false);
-            return;
-          }
-        }
-        // Lỗi khác (501/500...) → fallback client bên dưới
-      } catch { /* offline → fallback client */ }
+    const response = await fetch(`/api/exam/${classId}/${lessonId}/submit`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ answers, duration_seconds, attempt }),
+    });
+    let data = response.ok ? await response.json() : null;
+    if (response.status === 409) {
+      const existing = await fetch(`/api/exam/${classId}/${lessonId}`, {
+        cache: "no-store",
+      });
+      if (existing.ok) data = await existing.json();
     }
-
-    const score = calcScore(questions, answers, lesson?.exam_content?.true_false_scale);
-    const total = calcMaxScore(questions);
-    const submitted_at = new Date().toISOString();
-    const res: ExamResult = { answers, score, total, submitted_at, duration_seconds, attempt };
-    await saveExamResult(classId, lessonId, sid, studentName, { score, total, submitted_at, answers: answers as Record<string, unknown>, duration_seconds, attempt });
+    if (!data?.result) {
+      setLockReason("Không thể nộp bài an toàn. Bài chưa được ghi nhận; vui lòng thử lại.");
+      return;
+    }
+    if (Array.isArray(data.questions) && data.questions.length > 0) {
+      setQuestions(data.questions as ExamQuestion[]);
+    }
     markExamComplete(sid, lessonId);
-    setResult(res);
+    setResult(data.result as ExamResult);
     setSubmitted(true);
     setShowConfirm(false);
   }
 
   async function retry() {
-    // Remove only this student's result (cả DB lẫn cache local)
-    const sid = studentId || "anon";
-    await kvDelete(`tutorhub_exam_result_${classId}_${lessonId}_${sid}`);
-    // Gỡ khỏi sổ đăng ký bài nộp để giáo viên không thấy kết quả ma
-    await kvUpdate<string[]>(`tutorhub_exam_submissions_${classId}_${lessonId}`, [],
-      ids => ids.filter(id => id !== sid));
+    const response = await fetch(`/api/exam/${classId}/${lessonId}/retry`, {
+      method: "DELETE",
+    });
+    if (!response.ok) {
+      setLockReason("Không thể mở lượt làm lại. Vui lòng liên hệ giáo viên.");
+      return;
+    }
     setAnswers({});
     setResult(null);
     setSubmitted(false);

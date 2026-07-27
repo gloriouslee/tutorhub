@@ -28,7 +28,6 @@ export async function uploadClassFile(
   subfolder: "materials" | "homework" = "materials"
 ): Promise<UploadedFile> {
   const supabase = createClient();
-  const ext = file.name.split(".").pop() ?? "";
   const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
   const path = `${classId}/${subfolder}/${Date.now()}_${safeName}`;
 
@@ -38,10 +37,8 @@ export async function uploadClassFile(
 
   if (error) throw new Error(error.message);
 
-  const { data } = supabase.storage.from("class-materials").getPublicUrl(path);
-
   return {
-    url: data.publicUrl,
+    url: `/api/files?bucket=class-materials&path=${encodeURIComponent(path)}`,
     path,
     name: file.name,
     size: formatSize(file.size),

@@ -237,7 +237,12 @@ export default function StudentHomeworkPage() {
     if (!file || !selectedHw) return;
     setUploadState("uploading");
 
-    const uploaded = await uploadSubmissionFile(selectedHw.id, STUDENT_ID, file);
+    const uploaded = await uploadSubmissionFile(
+      selectedHw.class_id,
+      selectedHw.id,
+      STUDENT_ID,
+      file,
+    );
     const subData: Omit<SubmissionRecord, "id"> = {
       homework_id:  selectedHw.id,
       student_id:   STUDENT_ID,
@@ -437,7 +442,7 @@ export default function StudentHomeworkPage() {
                                 )}
                               </div>
                               {sub.feedback
-                                ? <p className="text-foreground/80 italic">"{sub.feedback}"</p>
+                            ? <p className="text-foreground/80 italic">&quot;{sub.feedback}&quot;</p>
                                 : <p className="text-muted-foreground italic">Giáo viên chưa để lại nhận xét.</p>
                               }
                               {sub.score != null && (
@@ -729,7 +734,7 @@ export default function StudentHomeworkPage() {
                         {sub.feedback && (
                           <div className="bg-white dark:bg-card p-3 rounded-lg border border-border text-sm space-y-1.5">
                             <p className="font-bold text-xs text-muted-foreground uppercase tracking-wide">Nhận xét của giáo viên</p>
-                            <p className="italic text-foreground/80">"{sub.feedback}"</p>
+                            <p className="italic text-foreground/80">&quot;{sub.feedback}&quot;</p>
                             {sub.score != null && (
                               <p className="font-bold text-primary">Điểm: {sub.score}/10</p>
                             )}

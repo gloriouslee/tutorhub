@@ -1512,7 +1512,7 @@ export default function StudentClassDetailPage() {
                             {sub?.feedback && (
                               <div className="mt-3 p-3 bg-emerald-50/60 dark:bg-emerald-950/20 rounded-xl border border-emerald-100 dark:border-emerald-900/40 text-sm">
                                 <p className="font-semibold text-emerald-700 dark:text-emerald-400 text-xs mb-1">Nhận xét:</p>
-                                <p className="italic text-foreground/80">"{sub.feedback}"</p>
+                                  <p className="italic text-foreground/80">&quot;{sub.feedback}&quot;</p>
                               </div>
                             )}
 

@@ -210,12 +210,6 @@ export default function Sidebar({ role, userName, isOpen = true, onClose }: Side
   }, [role, pathname, studentId, ready, parentReady, myClassKey, childrenKey]);
 
   const handleLogout = async () => {
-    // Clear all session cookies
-    const cookiesToClear = ["demo_role", "enrolled_student_id", "enrolled_student_name", "enrolled_student_class"];
-    cookiesToClear.forEach(name => {
-      document.cookie = `${name}=; path=/; max-age=0`;
-    });
-    // Also sign out of Supabase if there's a real session
     try {
       const { createClient } = await import("@/lib/supabase/client");
       await createClient().auth.signOut();

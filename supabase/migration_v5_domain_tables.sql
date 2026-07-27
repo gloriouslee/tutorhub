@@ -45,8 +45,7 @@ BEGIN
        )', t);
     EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', t);
     EXECUTE format('DROP POLICY IF EXISTS "phase1_open_all" ON public.%I', t);
-    EXECUTE format(
-      'CREATE POLICY "phase1_open_all" ON public.%I FOR ALL USING (true) WITH CHECK (true)', t);
+    -- Default deny until explicit production policies are applied.
   END LOOP;
 END $$;
 

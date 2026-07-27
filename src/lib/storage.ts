@@ -165,20 +165,6 @@ export async function kvDelete(key: string): Promise<void> {
   } catch { /* offline */ }
 }
 
-// Helper: attempt a Supabase query; on any error OR empty result fall back to mock data silently.
-async function queryOrFallback<T>(
-  query: () => Promise<{ data: T[] | null; error: unknown }>,
-  fallback: T[]
-): Promise<T[]> {
-  try {
-    const { data, error } = await query();
-    if (error || !data || data.length === 0) return fallback;
-    return data;
-  } catch {
-    return fallback;
-  }
-}
-
 // Đánh dấu các bảng mà lần đọc gần nhất THỰC SỰ đến từ DB (không phải
 // cache/mock). saveEntity chỉ được phép prune (xóa row vắng mặt) khi cờ này
 // bật — ngăn thảm họa "load lỗi → state là mock → save ghi đè cả bảng thật".
@@ -214,25 +200,15 @@ async function saveEntity<T extends { id: string }>(
   table: string,
   items: T[]
 ): Promise<void> {
-  writeLocal(key, items);
-  try {
-    if (items.length > 0) {
-      const { error } = await supabase.from(table).upsert(items as any);
-      if (error) { console.error(`Error saving ${table}:`, error); return; }
-    }
-    if (!verifiedTables.has(table)) {
-      console.warn(`Skip pruning ${table}: dữ liệu phiên này chưa xác thực từ DB.`);
-      return;
-    }
-    const keepIds = items.map((i) => i.id);
-    const del = supabase.from(table).delete();
-    const { error: delError } = keepIds.length > 0
-      ? await del.not("id", "in", `(${keepIds.map((id) => JSON.stringify(id)).join(",")})`)
-      : await del.neq("id", "");
-    if (delError) console.error(`Error pruning ${table}:`, delError);
-  } catch (e) {
-    console.error(`Supabase unreachable while saving ${table}; cached locally.`, e);
+  const response = await fetch(`/api/data/entities/${encodeURIComponent(table)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ items }),
+  });
+  if (!response.ok) {
+    throw new Error(`Không thể lưu ${table}; dữ liệu cục bộ chưa được thay đổi.`);
   }
+  writeLocal(key, items);
 }
 
 export async function getStudents(): Promise<Student[]> {
@@ -473,15 +449,6 @@ export interface PurchaseTransaction {
 }
 
 const TX_KEY = "tutorhub_transactions";
-const ACCESS_KEY = "tutorhub_pkg_access";
-
-function readTxLocal(): PurchaseTransaction[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = localStorage.getItem(TX_KEY);
-    return raw ? (JSON.parse(raw) as PurchaseTransaction[]) : [];
-  } catch { return []; }
-}
 
 function writeTxLocal(txs: PurchaseTransaction[]): void {
   if (typeof window === "undefined") return;
@@ -491,58 +458,53 @@ function writeTxLocal(txs: PurchaseTransaction[]): void {
 // Supabase-first: học viên tạo giao dịch trên máy của họ, admin duyệt trên
 // máy khác — cả hai thấy cùng dữ liệu. localStorage chỉ là cache offline.
 export async function getTransactions(): Promise<PurchaseTransaction[]> {
-  try {
-    const { data, error } = await supabase
-      .from("purchase_transactions")
-      .select("*")
-      .order("created_at", { ascending: false });
-    if (!error && data) {
-      writeTxLocal(data as PurchaseTransaction[]);
-      return data as PurchaseTransaction[];
-    }
-  } catch { /* offline — dùng cache */ }
-  return readTxLocal();
+  const response = await fetch("/api/payments/transactions", {
+    cache: "no-store",
+    credentials: "same-origin",
+  });
+  if (!response.ok) throw new Error("Không thể tải giao dịch.");
+  const data = (await response.json()) as PurchaseTransaction[];
+  writeTxLocal(data);
+  return data;
 }
 
 export async function createTransaction(
   tx: Omit<PurchaseTransaction, "id" | "created_at" | "status">
 ): Promise<PurchaseTransaction> {
-  const full: PurchaseTransaction = { ...tx, id: crypto.randomUUID(), created_at: new Date().toISOString(), status: "pending" };
-  try {
-    const { error } = await supabase.from("purchase_transactions").insert(full);
-    if (error) console.error("Error creating transaction:", error);
-  } catch { /* offline */ }
-  writeTxLocal([full, ...readTxLocal()]);
-  return full;
+  const response = await fetch("/api/payments/transactions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pkg_id: tx.pkg_id, transfer_note: tx.transfer_note }),
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(result.error || "Không thể tạo giao dịch.");
+  return result as PurchaseTransaction;
 }
 
 export async function updateTransactionStatus(txId: string, status: "approved" | "rejected"): Promise<void> {
-  const patch = { status, reviewed_at: new Date().toISOString() };
-  try {
-    const { error } = await supabase.from("purchase_transactions").update(patch).eq("id", txId);
-    if (error) console.error("Error updating transaction:", error);
-  } catch { /* offline */ }
-  const txs = readTxLocal().map(t => (t.id === txId ? { ...t, ...patch } : t));
-  writeTxLocal(txs);
-  // Quyền truy cập suy ra từ giao dịch approved (getGrantedPackages) —
-  // học viên tự thấy tài liệu mở khóa ở lần tải trang kế tiếp.
+  const response = await fetch("/api/payments/transactions", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ transaction_id: txId, status }),
+  });
+  if (!response.ok) throw new Error("Không thể cập nhật giao dịch.");
 }
 
 // Gói được mở khóa = có giao dịch approved của học viên đó (Supabase),
 // hợp nhất với danh sách cấp thủ công cũ trong localStorage (legacy).
 export async function getGrantedPackages(studentId?: string): Promise<string[]> {
-  let granted: string[] = [];
-  try {
-    let query = supabase.from("purchase_transactions").select("pkg_id").eq("status", "approved");
-    if (studentId) query = query.eq("student_id", studentId);
-    const { data, error } = await query;
-    if (!error && data) granted = data.map((r: { pkg_id: string }) => r.pkg_id);
-  } catch { /* offline */ }
-  try {
-    const raw = localStorage.getItem(ACCESS_KEY);
-    if (raw) granted = [...new Set([...granted, ...(JSON.parse(raw) as string[])])];
-  } catch { /* ignore */ }
-  return granted;
+  const transactions = await getTransactions();
+  return [
+    ...new Set(
+      transactions
+        .filter(
+          (transaction) =>
+            transaction.status === "approved" &&
+            (!studentId || transaction.student_id === studentId),
+        )
+        .map((transaction) => transaction.pkg_id),
+    ),
+  ];
 }
 
 export async function markScheduleNotificationsRead(): Promise<void> {
@@ -766,23 +728,15 @@ export interface TuitionInvoice {
   period?: string;         // "YYYY-MM"
 }
 
-const INVOICE_KEY = "tutorhub_invoices";
-
-const DEFAULT_INVOICES: TuitionInvoice[] = [
-  { id: "INV-2026-06-01", child_id: "s1", title: "Học phí Toán cao cấp - Tháng 6",  amount: 1500000, due_date: "2026-06-15", status: "pending" },
-  { id: "INV-2026-06-02", child_id: "s1", title: "Tài liệu Vật lý đại cương",         amount: 350000,  due_date: "2026-06-20", status: "pending" },
-  { id: "INV-2026-06-03", child_id: "s4", title: "Học phí Hóa học cơ bản - Tháng 6", amount: 1200000, due_date: "2026-06-15", status: "pending" },
-  { id: "INV-2026-05-01", child_id: "s1", title: "Học phí Toán cao cấp - Tháng 5",  amount: 1500000, due_date: "2026-05-15", status: "paid", paid_at: "2026-05-12" },
-  { id: "INV-2026-05-02", child_id: "s4", title: "Học phí Hóa học cơ bản - Tháng 5", amount: 1200000, due_date: "2026-05-15", status: "paid", paid_at: "2026-05-13" },
-];
-
 export async function getInvoices(): Promise<TuitionInvoice[]> {
-  return kvGet<TuitionInvoice[]>(INVOICE_KEY, DEFAULT_INVOICES);
+  const response = await fetch("/api/payments/invoices", { cache: "no-store" });
+  if (!response.ok) return [];
+  return response.json() as Promise<TuitionInvoice[]>;
 }
 
 /** Hoá đơn thật, KHÔNG fallback demo — dùng cho báo cáo/thống kê. */
 export async function getInvoicesRaw(): Promise<TuitionInvoice[]> {
-  return kvGet<TuitionInvoice[]>(INVOICE_KEY, []);
+  return getInvoices();
 }
 
 export async function updateInvoiceStatus(
@@ -791,21 +745,14 @@ export async function updateInvoiceStatus(
   submittedBy: "student" | "parent",
   childId?: string // bắt buộc khi invoiceId === "ALL" để không đụng hóa đơn của học sinh khác
 ): Promise<void> {
-  await kvUpdate<TuitionInvoice[]>(INVOICE_KEY, DEFAULT_INVOICES, invoices =>
-    invoices.map(inv => {
-      const match = invoiceId === "ALL"
-        ? inv.status === "pending" && (!childId || inv.child_id === childId)
-        : inv.id === invoiceId;
-      if (!match) return inv;
-      return {
-        ...inv,
-        status,
-        submitted_by: submittedBy,
-        // Ghi ngày thu khi chuyển sang đã thanh toán (dùng cho biểu đồ doanh thu admin)
-        paid_at: status === "paid" ? (inv.paid_at ?? new Date().toISOString().slice(0, 10)) : inv.paid_at,
-      };
-    })
-  );
+  void submittedBy;
+  const action = status === "paid" ? "mark_paid" : "submit_receipt";
+  const response = await fetch("/api/payments/invoices", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ invoice_id: invoiceId, child_id: childId, action }),
+  });
+  if (!response.ok) throw new Error("Không thể cập nhật hóa đơn.");
 }
 
 /** Giáo viên phát hành hóa đơn học phí cho một học sinh trong lớp (idempotent theo id). */
@@ -830,26 +777,31 @@ export async function issueTuitionInvoice(params: {
     class_id: classId,
     period,
   };
-  let result = invoice;
-  await kvUpdate<TuitionInvoice[]>(INVOICE_KEY, DEFAULT_INVOICES, invoices => {
-    const existing = invoices.find(inv => inv.id === id);
-    if (existing) { result = existing; return invoices; }
-    return [...invoices, invoice];
+  const response = await fetch("/api/payments/invoices", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      class_id: classId,
+      class_name: className,
+      child_id: studentId,
+      amount,
+      period,
+      due_date: dueDate,
+    }),
   });
-  return result;
+  if (!response.ok) throw new Error("Không thể phát hành hóa đơn.");
+  return response.json() as Promise<TuitionInvoice>;
 }
 
 /** Giáo viên xác nhận đã thu tiền cho một hóa đơn. */
 export async function confirmInvoicePaid(invoiceId: string): Promise<TuitionInvoice | null> {
-  let result: TuitionInvoice | null = null;
-  await kvUpdate<TuitionInvoice[]>(INVOICE_KEY, DEFAULT_INVOICES, invoices =>
-    invoices.map(inv => {
-      if (inv.id !== invoiceId) return inv;
-      result = inv.status === "paid" ? inv : { ...inv, status: "paid" as const, paid_at: new Date().toISOString() };
-      return result;
-    })
-  );
-  return result;
+  const response = await fetch("/api/payments/invoices", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ invoice_id: invoiceId, action: "mark_paid" }),
+  });
+  if (!response.ok) return null;
+  return { id: invoiceId, status: "paid" } as TuitionInvoice;
 }
 
 // ── Teacher settings (QR thanh toán, thông tin ngân hàng) ────────────────────
@@ -899,7 +851,6 @@ export interface EnrollmentRequest {
   status: EnrollmentStatus;
   assigned_class_id?: string;
   account_username?: string;
-  account_password?: string;
   reject_reason?: string;
   supabase_user_id?: string;
   created_at: string;
@@ -919,275 +870,91 @@ export interface StudentAccount {
   created_at: string;
 }
 
-const ENROLL_KEY  = "tutorhub_enrollments";
-const ACCOUNT_KEY = "tutorhub_student_accounts";
-
-// Đọc/ghi enrollment: Supabase là nguồn chính, localStorage là cache offline.
-async function readEnrollmentsLocal(): Promise<EnrollmentRequest[]> {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = localStorage.getItem(ENROLL_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch { return []; }
-}
-
-function writeEnrollmentsLocal(list: EnrollmentRequest[]): void {
-  if (typeof window === "undefined") return;
-  try { localStorage.setItem(ENROLL_KEY, JSON.stringify(list)); } catch { /* ignore */ }
-}
-
 export async function getEnrollments(): Promise<EnrollmentRequest[]> {
-  try {
-    const { data, error } = await supabase
-      .from("enrollment_requests")
-      .select("*")
-      .order("created_at", { ascending: false });
-    if (!error && data) {
-      writeEnrollmentsLocal(data as EnrollmentRequest[]);
-      return data as EnrollmentRequest[];
-    }
-  } catch { /* offline — dùng cache */ }
-  return readEnrollmentsLocal();
+  const response = await fetch("/api/enrollments", {
+    cache: "no-store",
+    credentials: "same-origin",
+  });
+  if (!response.ok) throw new Error("Không thể tải danh sách ghi danh.");
+  return response.json() as Promise<EnrollmentRequest[]>;
 }
 
 export async function createEnrollment(
   data: Omit<EnrollmentRequest, "id" | "status" | "created_at">
 ): Promise<EnrollmentRequest> {
-  const request: EnrollmentRequest = {
-    ...data,
-    id: crypto.randomUUID(),
-    status: "pending",
-    created_at: new Date().toISOString(),
-  };
-  try {
-    const { error } = await supabase.from("enrollment_requests").insert(request);
-    if (error) {
-      // Có thể do cột 'package' chưa tồn tại trong DB — thử lại không kèm package
-      // (bản ghi vẫn được lưu; chạy migration để lưu cả gói học lên DB).
-      const { package: _pkg, ...withoutPkg } = request;
-      const retry = await supabase.from("enrollment_requests").insert(withoutPkg);
-      if (retry.error) console.error("Error creating enrollment:", retry.error);
-    }
-  } catch { /* offline */ }
-  writeEnrollmentsLocal([request, ...(await readEnrollmentsLocal())]);
-  return request;
+  const response = await fetch("/api/enrollments", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(
+      result.error === "rate_limit_exceeded"
+        ? "Bạn đã gửi quá nhiều đơn. Vui lòng thử lại sau."
+        : "Không thể gửi đơn ghi danh.",
+    );
+  }
+  return { ...data, ...result } as EnrollmentRequest;
 }
 
 export async function approveEnrollment(
   id: string,
   opts: { assigned_class_id: string; account_username: string; account_password: string }
 ): Promise<void> {
-  const all = await getEnrollments();
-  const enr = all.find(e => e.id === id);
-  if (!enr) throw new Error("Không tìm thấy đơn ghi danh.");
-
-  const patch = {
-    status: "approved" as EnrollmentStatus,
-    ...opts,
-    reviewed_at: new Date().toISOString(),
-  };
-
-  // Tạo tài khoản Supabase Auth thật (server route dùng service role key) TRƯỚC KHI
-  // đánh dấu "approved". Nếu tạo tài khoản lỗi (VD email đã tồn tại) mà đã set
-  // approved trước thì đơn kẹt ở trạng thái dở dang (approved nhưng không có học
-  // viên/lớp). Key chưa cấu hình (501) hoặc offline vẫn cho duyệt (login fallback).
-  let supabaseUserId: string | undefined;
-  let res: Response | null = null;
-  try {
-    res = await fetch("/api/admin/create-student-account", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        email: opts.account_username,
-        password: opts.account_password,
-        full_name: enr.full_name,
-        enrollment_id: id,
-        assigned_class_id: opts.assigned_class_id,
-      }),
-    });
-  } catch { /* offline — fallback login qua enrollment_requests vẫn hoạt động */ }
-  if (res) {
-    if (res.ok) {
-      const { user_id } = await res.json();
-      supabaseUserId = user_id;
-    } else if (res.status !== 501) {
-      // Báo lỗi lên ApproveModal — CHƯA thay đổi trạng thái nên đơn vẫn "pending"
-      const msg = await res.text().catch(() => "");
-      throw new Error(msg || "Không tạo được tài khoản đăng nhập cho học viên.");
-    }
-  }
-
-  // Tài khoản OK (hoặc 501/offline) → giờ mới đánh dấu approved
-  try {
-    const { error } = await supabase
-      .from("enrollment_requests")
-      .update(supabaseUserId ? { ...patch, supabase_user_id: supabaseUserId } : patch)
-      .eq("id", id);
-    if (error) console.error("Error approving enrollment:", error);
-  } catch { /* offline */ }
-  writeEnrollmentsLocal(all.map(e => (e.id === id ? { ...e, ...patch } : e)));
-
-  const account: StudentAccount = {
-    student_id:        `enr_${id}`,
-    full_name:         enr.full_name,
-    email:             enr.email,
-    dob:               enr.dob,
-    school:            enr.school,
-    grade:             enr.grade,
-    assigned_class_id: opts.assigned_class_id,
-    parent_phone:      enr.parent_phone,
-    username:          opts.account_username,
-    created_at:        new Date().toISOString(),
-  };
-  const accounts = await getStudentAccounts();
-  await kvSet(ACCOUNT_KEY, [
-    ...accounts.filter(a => a.student_id !== account.student_id),
-    account,
-  ]);
-
-  // Tạo bản ghi học viên thật trong bảng `students` + thêm vào sĩ số lớp.
-  // Upsert trực tiếp (không qua saveStudents) để không prune dữ liệu khác.
-  const studentId = `enr_${id}`;
-  try {
-    await supabase.from("students").upsert({
-      id:            studentId,
-      full_name:     enr.full_name,
-      email:         enr.email,
-      dob:           enr.dob,
-      school:        enr.school,
-      grade:         enr.grade,
-      learning_type: "hybrid",
-      created_at:    new Date().toISOString(),
-    });
-    const { data: cls } = await supabase
-      .from("classes")
-      .select("id, student_ids")
-      .eq("id", opts.assigned_class_id)
-      .maybeSingle();
-    if (cls) {
-      const ids: string[] = (cls.student_ids as string[] | null) ?? [];
-      if (!ids.includes(studentId)) {
-        await supabase
-          .from("classes")
-          .update({ student_ids: [...ids, studentId] })
-          .eq("id", opts.assigned_class_id);
-      }
-    }
-    // Lớp không có trong DB (mock-only) → bỏ qua im lặng
-  } catch (e) {
-    console.error("Không đồng bộ được học viên vào bảng students/classes:", e);
-  }
-
-  // Gán gói học viên đã đăng ký cho lớp được phân (dùng cho học phí theo gói)
-  if (enr.package) {
-    try {
-      const packages = await getStudentPackages(opts.assigned_class_id);
-      await saveStudentPackages(opts.assigned_class_id, { ...packages, [studentId]: enr.package });
-    } catch { /* offline */ }
+  const response = await fetch(`/api/enrollments/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "approve", ...opts }),
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(result.error || "Không thể duyệt đơn ghi danh.");
   }
 }
 
 export async function deleteEnrollment(id: string): Promise<void> {
-  const enr = (await readEnrollmentsLocal()).find(e => e.id === id);
-  try {
-    const { error } = await supabase.from("enrollment_requests").delete().eq("id", id);
-    if (error) console.error("Error deleting enrollment:", error);
-  } catch { /* offline */ }
-  writeEnrollmentsLocal((await readEnrollmentsLocal()).filter(e => e.id !== id));
-  // Also remove student account if approved
-  const studentId = `enr_${id}`;
-  const accounts = await getStudentAccounts();
-  await kvSet(ACCOUNT_KEY, accounts.filter(a => a.student_id !== studentId));
-
-  // Dọn dẹp bản ghi students + sĩ số lớp
-  try {
-    await supabase.from("students").delete().eq("id", studentId);
-    const classId = enr?.assigned_class_id;
-    if (classId) {
-      const { data: cls } = await supabase
-        .from("classes")
-        .select("id, student_ids")
-        .eq("id", classId)
-        .maybeSingle();
-      const ids = (cls?.student_ids as string[] | null) ?? [];
-      if (ids.includes(studentId)) {
-        await supabase
-          .from("classes")
-          .update({ student_ids: ids.filter(x => x !== studentId) })
-          .eq("id", classId);
-      }
-    }
-  } catch { /* offline */ }
-
-  // Xóa tài khoản Supabase Auth (enr?.supabase_user_id) cần service role key
-  // phía server — chưa làm ở client. TODO phase 3.
+  const response = await fetch(`/api/enrollments/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+  if (!response.ok) throw new Error("Không thể xóa đơn ghi danh.");
 }
 
 export async function rejectEnrollment(id: string, reason?: string): Promise<void> {
-  const patch = {
-    status: "rejected" as EnrollmentStatus,
-    reject_reason: reason,
-    reviewed_at: new Date().toISOString(),
-  };
-  try {
-    const { error } = await supabase.from("enrollment_requests").update(patch).eq("id", id);
-    if (error) console.error("Error rejecting enrollment:", error);
-  } catch { /* offline */ }
-  writeEnrollmentsLocal((await readEnrollmentsLocal()).map(e => (e.id === id ? { ...e, ...patch } : e)));
+  const response = await fetch(`/api/enrollments/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "reject", reject_reason: reason }),
+  });
+  if (!response.ok) throw new Error("Không thể từ chối đơn ghi danh.");
 }
 
 export async function getStudentAccounts(): Promise<StudentAccount[]> {
-  return kvGet<StudentAccount[]>(ACCOUNT_KEY, []);
+  const response = await fetch("/api/account/profile", {
+    cache: "no-store",
+    credentials: "same-origin",
+  });
+  if (!response.ok) return [];
+  return [await response.json() as StudentAccount];
 }
 
 export async function changeStudentPassword(
-  studentId: string,
-  currentPassword: string,
+  _studentId: string,
+  _currentPassword: string,
   newPassword: string
 ): Promise<"ok" | "wrong_password" | "not_found"> {
-  if (!studentId.startsWith("enr_")) return "not_found";
-  const enrollmentId = studentId.slice(4);
-  // Xác thực + cập nhật server-side, đồng bộ cả Supabase Auth
   try {
     const res = await fetch("/api/account/change-password", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        enrollment_id: enrollmentId,
-        current_password: currentPassword,
-        new_password: newPassword,
-      }),
+      body: JSON.stringify({ new_password: newPassword }),
     });
-    if (res.ok) {
-      // Cập nhật cache local cho khớp
-      const all = await readEnrollmentsLocal();
-      writeEnrollmentsLocal(
-        all.map(e => (e.id === enrollmentId ? { ...e, account_password: newPassword } : e))
-      );
-      return "ok";
-    }
+    if (res.ok) return "ok";
     const { error } = await res.json();
-    if (error === "wrong_password") return "wrong_password";
-    if (error === "not_found") return "not_found";
-    // API chưa cấu hình (501) → fallback cập nhật trực tiếp bảng (không sync auth)
-    if (res.status !== 501) return "not_found";
-  } catch { /* offline — fallback bên dưới */ }
-
-  const all = await getEnrollments();
-  const enr = all.find(e => e.id === enrollmentId);
-  if (!enr || enr.status !== "approved") return "not_found";
-  if (enr.account_password !== currentPassword) return "wrong_password";
-  try {
-    const { error } = await supabase
-      .from("enrollment_requests")
-      .update({ account_password: newPassword })
-      .eq("id", enrollmentId);
-    if (error) console.error("Error changing password:", error);
-  } catch { /* offline */ }
-  writeEnrollmentsLocal(
-    all.map(e => (e.id === enrollmentId ? { ...e, account_password: newPassword } : e))
-  );
-  return "ok";
+    return error === "authentication_required" ? "not_found" : "wrong_password";
+  } catch {
+    return "not_found";
+  }
 }
 
 export async function getCurrentStudentAccount(studentId: string): Promise<StudentAccount | null> {
@@ -1209,29 +976,41 @@ export interface StoredExamScore {
   exam_date:  string;
 }
 
-const SCORES_KEY = "tutorhub_exam_scores";
-
-async function getStoredExamScores(): Promise<StoredExamScore[]> {
-  return kvGet<StoredExamScore[]>(SCORES_KEY, []);
-}
-
 /** Tất cả điểm thi đã lưu (nhập tay) — dùng cho báo cáo/thống kê. */
 export async function getAllExamScores(): Promise<StoredExamScore[]> {
-  return getStoredExamScores();
+  const response = await fetch("/api/exam-scores?all=true", { cache: "no-store" });
+  if (!response.ok) return [];
+  return response.json() as Promise<StoredExamScore[]>;
 }
 
 export async function saveExamScore(score: Omit<StoredExamScore, "id">): Promise<StoredExamScore> {
-  const record: StoredExamScore = { ...score, id: crypto.randomUUID() };
-  await kvSet(SCORES_KEY, [...(await getStoredExamScores()), record]);
-  return record;
+  const response = await fetch("/api/exam-scores", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      ...score,
+      student_ref: score.student_id,
+    }),
+  });
+  if (!response.ok) throw new Error("Không thể lưu điểm thi.");
+  const record = await response.json();
+  return { ...record, student_id: record.student_ref } as StoredExamScore;
 }
 
 export async function deleteExamScore(id: string): Promise<void> {
-  await kvSet(SCORES_KEY, (await getStoredExamScores()).filter(s => s.id !== id));
+  const response = await fetch(`/api/exam-scores/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+  if (!response.ok) throw new Error("Không thể xóa điểm thi.");
 }
 
 export async function getExamScoresByStudent(studentId: string): Promise<StoredExamScore[]> {
-  return (await getStoredExamScores()).filter(s => s.student_id === studentId);
+  const response = await fetch(
+    `/api/exam-scores?student_ref=${encodeURIComponent(studentId)}`,
+    { cache: "no-store" },
+  );
+  if (!response.ok) return [];
+  return response.json() as Promise<StoredExamScore[]>;
 }
 
 // ── Class materials (localStorage) ────────────────────────────────────────────
@@ -1390,14 +1169,16 @@ export async function recordTuitionPayment(
   const totalForPeriod = config.students[studentId].payments
     .filter(p => p.period === payment.period)
     .reduce((s, p) => s + p.amount, 0);
-  await kvUpdate<TuitionInvoice[]>(INVOICE_KEY, DEFAULT_INVOICES, invoices =>
-    invoices.map(inv =>
-      inv.class_id === classId && inv.child_id === studentId && inv.period === payment.period &&
-      inv.status !== "paid" && totalForPeriod >= inv.amount
-        ? { ...inv, status: "paid" as const, paid_at: new Date().toISOString() }
-        : inv
-    )
+  const invoice = (await getInvoices()).find(
+    (item) =>
+      item.class_id === classId &&
+      item.child_id === studentId &&
+      item.period === payment.period &&
+      item.status !== "paid",
   );
+  if (invoice && totalForPeriod >= invoice.amount) {
+    await confirmInvoicePaid(invoice.id);
+  }
 }
 
 /** Xóa học viên khỏi sĩ số lớp trong DB (bảng classes.student_ids). */
@@ -1469,55 +1250,4 @@ export async function getCourseRating(courseId: string): Promise<{ rating: numbe
   if (reviews.length === 0) return { rating: 0, reviewCount: 0 };
   const avg = reviews.reduce((s, r) => s + r.rating, 0) / reviews.length;
   return { rating: Math.round(avg * 10) / 10, reviewCount: reviews.length };
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// User Management (admin)
-// ─────────────────────────────────────────────────────────────────────────────
-
-export type UserRole = "student" | "teacher" | "admin";
-
-export interface ManagedUser {
-  id: string;
-  type: UserRole;
-  full_name: string;
-  username: string;
-  email?: string;
-  password?: string;
-  disabled: boolean;
-  created_at: string;
-  // role-specific extras
-  grade?: string;
-  school?: string;
-  specialization?: string;
-}
-
-const MANAGED_USERS_KEY = "tutorhub_managed_users";
-
-export async function getManagedUsers(): Promise<ManagedUser[]> {
-  return kvGet<ManagedUser[]>(MANAGED_USERS_KEY, []);
-}
-
-export async function saveManagedUser(user: ManagedUser): Promise<void> {
-  const all = await getManagedUsers();
-  const idx = all.findIndex(u => u.id === user.id);
-  if (idx >= 0) all[idx] = user; else all.push(user);
-  await kvSet(MANAGED_USERS_KEY, all);
-}
-
-export async function deleteManagedUser(id: string): Promise<void> {
-  const all = (await getManagedUsers()).filter(u => u.id !== id);
-  await kvSet(MANAGED_USERS_KEY, all);
-}
-
-export async function resetManagedUserPassword(id: string, newPassword: string): Promise<void> {
-  const all = await getManagedUsers();
-  const user = all.find(u => u.id === id);
-  if (user) { user.password = newPassword; await kvSet(MANAGED_USERS_KEY, all); }
-}
-
-export async function toggleManagedUserDisabled(id: string): Promise<void> {
-  const all = await getManagedUsers();
-  const user = all.find(u => u.id === id);
-  if (user) { user.disabled = !user.disabled; await kvSet(MANAGED_USERS_KEY, all); }
 }

@@ -1,0 +1,4 @@
+Production deployment is intentionally paused.
+
+Do not remove this gate until every item in docs/PRODUCTION_DEPLOYMENT_RUNBOOK.md
+section "Go-live approval" has been completed and recorded.
