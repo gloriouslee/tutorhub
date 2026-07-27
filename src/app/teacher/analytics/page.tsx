@@ -6,11 +6,10 @@ import { SectionHeader } from "@/components/shared";
 import AnalyticsDashboard from "@/components/analytics/AnalyticsDashboard";
 import { loadAnalyticsData, type AnalyticsData } from "@/lib/analytics";
 import { Loader2 } from "lucide-react";
-
-const TEACHER_ID = "t1";
-const TEACHER_NAME = "Thầy Hùng Toán";
+import { useTeacherContext } from "@/hooks/useTeacherContext";
 
 export default function TeacherAnalyticsPage() {
+  const { teacherId, teacherName } = useTeacherContext();
   const [data, setData] = useState<AnalyticsData | null>(null);
 
   useEffect(() => { loadAnalyticsData().then(setData); }, []);
@@ -18,11 +17,11 @@ export default function TeacherAnalyticsPage() {
   // Chỉ các lớp do giáo viên này phụ trách (đã tính cả override phân công)
   const myClassIds = useMemo(() => {
     if (!data) return undefined;
-    return new Set(data.classes.filter(c => data.teacherOf[c.id] === TEACHER_ID).map(c => c.id));
-  }, [data]);
+    return new Set(data.classes.filter(c => data.teacherOf[c.id] === teacherId).map(c => c.id));
+  }, [data, teacherId]);
 
   return (
-    <PortalLayout role="teacher" userName={TEACHER_NAME} pageTitle="Xu hướng & Thống kê">
+    <PortalLayout role="teacher" userName={teacherName || "Giáo viên"} pageTitle="Xu hướng & Thống kê">
       <div className="space-y-6">
         <SectionHeader
           title="Xu hướng của tôi"

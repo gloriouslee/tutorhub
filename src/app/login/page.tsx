@@ -7,14 +7,6 @@ import { GraduationCap, Mail, Lock, Eye, EyeOff, ArrowRight, CheckCircle2, Spark
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { createClient } from "@/lib/supabase/client";
-import { getEnrollments } from "@/lib/storage";
-
-const DEMO_USERS = [
-  { role: "student", email: "student@tutorhub.com", label: "Học viên", color: "from-indigo-500 to-purple-600", icon: "🎓" },
-  { role: "parent", email: "parent@tutorhub.com", label: "Phụ huynh", color: "from-teal-500 to-emerald-600", icon: "👨‍👩‍👧" },
-  { role: "teacher", email: "teacher@tutorhub.com", label: "Giáo viên", color: "from-amber-500 to-orange-600", icon: "👨‍🏫" },
-  { role: "admin", email: "admin@tutorhub.com", label: "Quản trị viên", color: "from-rose-500 to-pink-600", icon: "⚙️" },
-];
 
 const HIGHLIGHTS = [
   "Lộ trình học cá nhân hoá theo từng học viên",
@@ -31,69 +23,73 @@ export default function LoginPage() {
   const [showPass, setShowPass] = useState(false);
   const [loginLoading, setLoginLoading] = useState(false);
   const [loginError, setLoginError] = useState("");
-
-  const handleDemo = (demoEmail: string, role: string) => {
-    setEmail(demoEmail);
-    setPassword("demo1234");
-    setLoginError("");
-    setLoginLoading(true);
-    document.cookie = `demo_role=${role}; path=/; max-age=86400`;
-    setTimeout(() => {
-      setLoginLoading(false);
-      router.push(`/${role}`);
-    }, 800);
-  };
+  const [loginNotice, setLoginNotice] = useState("");
 
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError("");
+    setLoginNotice("");
     setLoginLoading(true);
 
-    // 1. Demo accounts
-    const demoUser = DEMO_USERS.find(d => d.email === email);
-    if (demoUser && password === "demo1234") {
-      document.cookie = `demo_role=${demoUser.role}; path=/; max-age=86400`;
-      setTimeout(() => { setLoginLoading(false); router.push(`/${demoUser.role}`); }, 600);
-      return;
-    }
-
-    // 2. Real Supabase auth (tài khoản học viên được duyệt / admin / teacher)
-    const KNOWN_ROLES = ["student", "parent", "teacher", "admin"];
     try {
       const supabase = createClient();
-      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-      if (!error && data.user) {
-        ["demo_role", "enrolled_student_id", "enrolled_student_name", "enrolled_student_class"]
-          .forEach(c => { document.cookie = `${c}=; path=/; max-age=0`; });
-        const metaRole = data.user.user_metadata?.role as string | undefined;
-        let role = metaRole;
-        if (!role) {
-          const { data: profile } = await supabase.from("profiles").select("role").eq("id", data.user.id).single();
-          role = profile?.role;
-        }
-        router.push(KNOWN_ROLES.includes(role ?? "") ? `/${role}` : "/student");
+      const { error } = await supabase.auth.signInWithPassword({
+        email: email.trim().toLowerCase(),
+        password,
+      });
+      if (error) {
+        setLoginError("Email hoặc mật khẩu không đúng.");
         return;
       }
-    } catch { /* tiếp tục thử fallback */ }
 
-    // 3. Fallback: tài khoản enrollment cũ (được duyệt trước khi có Supabase Auth)
-    const enrollments = await getEnrollments();
-    const matched = enrollments.find(
-      enr => enr.status === "approved" &&
-        enr.account_username?.toLowerCase() === email.toLowerCase() &&
-        enr.account_password === password
-    );
-    if (matched) {
-      document.cookie = `demo_role=student; path=/; max-age=86400`;
-      document.cookie = `enrolled_student_id=enr_${matched.id}; path=/; max-age=86400`;
-      document.cookie = `enrolled_student_name=${encodeURIComponent(matched.full_name)}; path=/; max-age=86400`;
-      document.cookie = `enrolled_student_class=${encodeURIComponent(matched.assigned_class_id ?? "")}; path=/; max-age=86400`;
-      setTimeout(() => { setLoginLoading(false); router.push("/student"); }, 600);
+      const identityResponse = await fetch("/api/account/me", {
+        cache: "no-store",
+      });
+      if (!identityResponse.ok) {
+        await supabase.auth.signOut();
+        setLoginError(
+          "Tài khoản chưa được cấp hồ sơ hoặc quyền truy cập. Vui lòng liên hệ quản trị viên.",
+        );
+        return;
+      }
+
+      const identity = (await identityResponse.json()) as {
+        role: "student" | "parent" | "teacher" | "admin";
+        mustResetPassword: boolean;
+      };
+      router.push(
+        identity.mustResetPassword ? "/reset-password" : `/${identity.role}`,
+      );
+      router.refresh();
+    } catch {
+      setLoginError("Không thể kết nối hệ thống đăng nhập. Vui lòng thử lại.");
+    } finally {
+      setLoginLoading(false);
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    setLoginError("");
+    setLoginNotice("");
+    if (!email.trim()) {
+      setLoginError("Vui lòng nhập email trước khi yêu cầu đặt lại mật khẩu.");
       return;
     }
 
-    setLoginError("Email hoặc mật khẩu không đúng.");
-    setLoginLoading(false);
+    const supabase = createClient();
+    const { error } = await supabase.auth.resetPasswordForEmail(
+      email.trim().toLowerCase(),
+      {
+        redirectTo: `${window.location.origin}/auth/callback?next=/reset-password`,
+      },
+    );
+    if (error) {
+      setLoginError("Không thể gửi email đặt lại mật khẩu. Vui lòng thử lại.");
+      return;
+    }
+    setLoginNotice(
+      "Nếu email tồn tại, hướng dẫn đặt lại mật khẩu đã được gửi.",
+    );
   };
 
   return (
@@ -167,9 +163,13 @@ export default function LoginPage() {
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
                 <label className="text-sm font-medium text-foreground">Mật khẩu</label>
-                <Link href="#" className="text-xs text-primary hover:underline font-medium">
+                <button
+                  type="button"
+                  onClick={handleForgotPassword}
+                  className="text-xs text-primary hover:underline font-medium"
+                >
                   Quên mật khẩu?
-                </Link>
+                </button>
               </div>
               <Input
                 type={showPass ? "text" : "password"}
@@ -190,6 +190,11 @@ export default function LoginPage() {
             {loginError && (
               <div className="text-sm text-red-500 bg-red-50 dark:bg-red-900/20 px-4 py-3 rounded-xl border border-red-200 dark:border-red-800 animate-in slide-in-from-top-2">
                 {loginError}
+              </div>
+            )}
+            {loginNotice && (
+              <div className="text-sm text-emerald-700 bg-emerald-50 dark:bg-emerald-900/20 px-4 py-3 rounded-xl border border-emerald-200 dark:border-emerald-800">
+                {loginNotice}
               </div>
             )}
 
@@ -222,31 +227,6 @@ export default function LoginPage() {
             </Link>
           </p>
 
-          {/* Divider */}
-          <div className="flex items-center gap-3 my-8">
-            <div className="flex-1 h-px bg-border" />
-            <span className="text-xs text-muted-foreground font-medium uppercase tracking-wider">Đăng nhập trải nghiệm</span>
-            <div className="flex-1 h-px bg-border" />
-          </div>
-
-          {/* Demo role buttons */}
-          <div className="grid grid-cols-2 gap-3">
-            {DEMO_USERS.map((demo) => (
-              <button
-                key={demo.role}
-                onClick={() => handleDemo(demo.email, demo.role)}
-                disabled={loginLoading}
-                className="group flex flex-col items-center gap-2 p-3 rounded-2xl border border-border bg-card hover:border-primary/30 transition-all hover:shadow-md"
-              >
-                <div className={`h-10 w-10 rounded-xl bg-gradient-to-br ${demo.color} flex items-center justify-center text-lg shadow-sm group-hover:scale-110 transition-transform`}>
-                  {demo.icon}
-                </div>
-                <div className="text-center">
-                  <p className="text-sm font-semibold text-foreground">{demo.label}</p>
-                </div>
-              </button>
-            ))}
-          </div>
         </div>
       </div>
 

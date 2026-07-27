@@ -5,7 +5,7 @@
 // Idempotent: mỗi lần chạy sẽ GHI ĐÈ các key trên (không cộng dồn trùng lặp).
 
 import {
-  getClasses, getStudents, kvSet, saveClassTuition,
+  getClasses, getStudents, kvSet, saveClassTuition, saveClassAttendance,
   type ClassTuitionConfig, type StoredExamScore, type TuitionInvoice,
   type TeacherAttendanceRecord,
 } from "@/lib/storage";
@@ -108,7 +108,7 @@ export async function seedRealData(monthsBack = 5): Promise<SeedResult> {
 
   // Ghi đè các key thật
   await kvSet("tutorhub_exam_scores", examScores);
-  await kvSet("tutorhub_teacher_attendance", attendance);
+  await saveClassAttendance(attendance);
   await kvSet("tutorhub_invoices", invoices);
 
   return { examScores: examScores.length, attendance: attendance.length, tuitionClasses, invoices: invoices.length, revenue };

@@ -120,7 +120,7 @@ export default function StudentNotificationsPage() {
   const unified: UnifiedNotif[] = [
     ...scheduleFiltered.map(n => ({ source: "schedule" as const, ...n })),
     ...mockNotifs.map(n => ({ source: "mock" as const, ...n })),
-  ].sort((a, b) => b.created_at.localeCompare(a.created_at));
+  ].sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""));
 
   const isRead = (n: UnifiedNotif) => n.is_read || readIds.has(n.id);
   const unreadCount = unified.filter(n => !isRead(n)).length;

@@ -22,6 +22,7 @@ const BUCKET = "homework-submissions";
 
 // ── File upload ───────────────────────────────────────────────────────────────
 export async function uploadSubmissionFile(
+  classId: string,
   homeworkId: string,
   studentId: string,
   file: File
@@ -29,7 +30,7 @@ export async function uploadSubmissionFile(
   const supabase = createClient();
   // Sanitize filename: remove spaces and special chars
   const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-  const path = `${homeworkId}/${studentId}/${Date.now()}_${safeName}`;
+  const path = `${classId}/submissions/${studentId}/${homeworkId}/${Date.now()}_${safeName}`;
 
   const { data, error } = await supabase.storage
     .from(BUCKET)
@@ -40,8 +41,10 @@ export async function uploadSubmissionFile(
     return null;
   }
 
-  const { data: { publicUrl } } = supabase.storage.from(BUCKET).getPublicUrl(data.path);
-  return { url: publicUrl, path: data.path };
+  return {
+    url: `/api/files?bucket=${BUCKET}&path=${encodeURIComponent(data.path)}`,
+    path: data.path,
+  };
 }
 
 // ── DB operations ─────────────────────────────────────────────────────────────

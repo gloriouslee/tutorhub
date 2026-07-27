@@ -19,11 +19,14 @@ import {
   getAllExamResults,
   getStudentPackages, saveStudentPackages, type StudentPackage,
   getClassMaterials, type StoredClassMaterial,
-  kvGet, kvSet, kvUpdate,
+  kvGet, kvUpdate,
   getClasses, removeStudentFromClass,
+  getTeacherHomework, upsertTeacherHomework, removeTeacherHomework,
+  getTeacherExtraClasses, getAllTeacherAttendance, getHwSubmissions,
 } from "@/lib/storage";
 import { toLocalDateKey } from "@/lib/utils";
 import { ClassSchedule } from "@/types";
+import { useTeacherContext } from "@/hooks/useTeacherContext";
 import {
   BookOpen, Users, ArrowLeft, FileText, Plus,
   Calendar, Presentation, StickyNote,
@@ -75,6 +78,7 @@ export default function TeacherClassDetailPage() {
   const params = useParams();
   const classId = params.classId as string;
   const router = useRouter();
+  const { teacherId, teacherName, myClasses } = useTeacherContext();
 
   // Tab hiện tại đồng bộ với URL (?tab=) để nút back của trình duyệt khôi phục đúng tab.
   // Đọc từ URL khi mount + khi back/forward (popstate); mặc định "overview" để khớp SSR.
@@ -180,7 +184,7 @@ export default function TeacherClassDetailPage() {
   const [extraClass, setExtraClass] = useState<(typeof MOCK_CLASSES)[number] | null>(null);
   const [extraClassLoaded, setExtraClassLoaded] = useState(false);
   useEffect(() => {
-    kvGet<any[]>("tutorhub_teacher_classes", [])
+    getTeacherExtraClasses<any>()
       .then(list => {
         const found = list.find(c => c.id === classId);
         if (found) {
@@ -196,7 +200,7 @@ export default function TeacherClassDetailPage() {
             student_ids: found.student_ids ?? [],
             schedule: found.schedule ?? [],
             color: found.color ?? "#6366f1",
-            tutor_id: found.tutor_id ?? "t1",
+            tutor_id: found.tutor_id ?? teacherId,
             zoom_link: found.zoom_link,
           } as unknown as (typeof MOCK_CLASSES)[number]);
         }
@@ -205,7 +209,7 @@ export default function TeacherClassDetailPage() {
       .catch(() => setExtraClassLoaded(true));
   }, [classId]);
 
-  const cls = MOCK_CLASSES.find(c => c.id === classId) ?? extraClass ?? undefined;
+  const cls = myClasses.find(c => c.id === classId) ?? MOCK_CLASSES.find(c => c.id === classId) ?? extraClass ?? undefined;
 
   useEffect(() => {
     if (!cls) return;
@@ -306,7 +310,7 @@ export default function TeacherClassDetailPage() {
     if (!cls) return;
     (async () => {
       try {
-        const all = await kvGet<Homework[]>("tutorhub_teacher_homework", []);
+        const all = await getTeacherHomework<Homework>();
         const forClass = all.filter(h => h.class_id === classId && h.source !== "curriculum");
         const base: Homework[] = forClass.length === 0
           ? (MOCK_HOMEWORK as any[])
@@ -332,8 +336,8 @@ export default function TeacherClassDetailPage() {
       }
 
       try {
-        const rawSub = await kvGet<Submission[] | null>("tutorhub_submissions", null);
-        setSubmissions(rawSub ?? (MOCK_SUBMISSIONS as any[]));
+        const rawSub = await getHwSubmissions<Submission>();
+        setSubmissions(rawSub.length ? rawSub : (MOCK_SUBMISSIONS as any[]));
       } catch {
         setSubmissions(MOCK_SUBMISSIONS as any[]);
       }
@@ -342,8 +346,8 @@ export default function TeacherClassDetailPage() {
 
   // Load attendance from localStorage
   useEffect(() => {
-    kvGet<SavedAttendanceRecord[]>("tutorhub_teacher_attendance", [])
-      .then(setSavedAttendanceRecords)
+    getAllTeacherAttendance()
+      .then(recs => setSavedAttendanceRecords(recs as SavedAttendanceRecord[]))
       .catch(() => setSavedAttendanceRecords([]));
   }, []);
 
@@ -386,12 +390,20 @@ export default function TeacherClassDetailPage() {
 
   async function persistHomeworks(updated: Homework[]) {
     try {
-      const all = await kvGet<Homework[]>("tutorhub_teacher_homework", []);
-      const others = all.filter(h => h.class_id !== classId);
-      // Không ghi lại các bài tập nguồn từ lộ trình (source:"curriculum") — chúng
-      // sống trong tutorhub_curriculum_*, ghi vào đây sẽ tạo bản sao "đông cứng".
-      const manualOnly = updated.filter(h => h.source !== "curriculum");
-      await kvSet("tutorhub_teacher_homework", [...others, ...manualOnly]);
+      // Lưu theo từng row: chỉ ghi/xóa bài tập của LỚP này, nguồn thủ công.
+      // Không đụng bài tập nguồn từ lộ trình (source:"curriculum") — chúng sống
+      // trong tutorhub_curriculum_*, ghi vào đây sẽ tạo bản sao "đông cứng".
+      const prevManual = homeworks.filter(h => h.class_id === classId && h.source !== "curriculum");
+      const nextManual = updated.filter(h => h.class_id === classId && h.source !== "curriculum");
+      const nextIds = new Set(nextManual.map(h => h.id));
+      // Bài bị bỏ khỏi danh sách so với lần trước → xóa từng row.
+      for (const h of prevManual) {
+        if (!nextIds.has(h.id)) await removeTeacherHomework(h.id);
+      }
+      // Bài thêm mới / cập nhật → upsert từng row.
+      for (const h of nextManual) {
+        await upsertTeacherHomework(h);
+      }
     } catch {}
     setHomeworks(updated);
   }
@@ -410,7 +422,7 @@ export default function TeacherClassDetailPage() {
 
   if (!cls) {
     return (
-      <PortalLayout role="teacher" userName="Thầy Hùng Toán" pageTitle="Lớp học">
+      <PortalLayout role="teacher" userName={teacherName || "Giáo viên"} pageTitle="Lớp học">
         {!extraClassLoaded ? (
           <div className="py-20 text-center text-sm text-muted-foreground">Đang tải lớp học…</div>
         ) : (
@@ -517,7 +529,7 @@ export default function TeacherClassDetailPage() {
   }
 
   return (
-    <PortalLayout role="teacher" userName="Thầy Hùng Toán" pageTitle={cls.class_name}>
+    <PortalLayout role="teacher" userName={teacherName || "Giáo viên"} pageTitle={cls.class_name}>
       <div className="space-y-6 max-w-6xl mx-auto">
         <Link href="/teacher/classes" className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-primary transition-colors">
           <ArrowLeft className="h-4 w-4" /> Quay lại danh sách lớp
@@ -572,13 +584,13 @@ export default function TeacherClassDetailPage() {
           {/* ── Overview ── */}
           {activeTab === "overview" && (
             <OverviewTab
-              description={cls.description}
+              description={cls.description ?? ""}
               scheduleForDisplay={scheduleForDisplay}
               lectures={lectures}
               materials={materials}
               notes={notes}
               classStudentsCount={classStudents.length}
-              maxStudents={cls.max_students}
+              maxStudents={cls.max_students ?? 0}
               onlineLink={onlineLink}
               onEditSchedule={() => setActiveTab("schedule")}
               onQuickAdd={type => {

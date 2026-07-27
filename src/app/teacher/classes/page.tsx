@@ -7,18 +7,14 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { LearningModeBadge, SectionHeader } from "@/components/shared";
-import { MOCK_CLASSES } from "@/lib/mock-data";
-import { getOnlineLink, getClassTeacherOverrides, kvGet, kvSet } from "@/lib/storage";
+import { getOnlineLink, getTeacherExtraClasses, upsertTeacherExtraClass } from "@/lib/storage";
+import { useTeacherContext } from "@/hooks/useTeacherContext";
 import {
   BookOpen, Clock, Video, MapPin, Users, Settings, Search,
   GraduationCap, X, Plus, Trash2, Check,
 } from "lucide-react";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-const TEACHER_ID   = "t1";
-const TEACHER_NAME = "Thầy Hùng Toán";
-const LS_KEY       = "tutorhub_teacher_classes";
-
 const DAY_VI: Record<string, string> = {
   Monday: "Thứ Hai", Tuesday: "Thứ Ba", Wednesday: "Thứ Tư",
   Thursday: "Thứ Năm", Friday: "Thứ Sáu", Saturday: "Thứ Bảy", Sunday: "Chủ Nhật",
@@ -51,10 +47,7 @@ interface ExtraClass {
 }
 
 async function loadExtraClasses(): Promise<ExtraClass[]> {
-  try { return await kvGet<ExtraClass[]>(LS_KEY, []); } catch { return []; }
-}
-async function saveExtraClasses(list: ExtraClass[]) {
-  await kvSet(LS_KEY, list);
+  try { return await getTeacherExtraClasses<ExtraClass>(); } catch { return []; }
 }
 
 // ── Form state ────────────────────────────────────────────────────────────────
@@ -81,9 +74,11 @@ const EMPTY_FORM: FormState = {
 function CreateClassModal({
   onClose,
   onCreated,
+  teacherId,
 }: {
   onClose: () => void;
   onCreated: (cls: ExtraClass) => void;
+  teacherId: string;
 }) {
   const [form, setForm]     = useState<FormState>(EMPTY_FORM);
   const [errors, setErrors] = useState<Partial<Record<keyof FormState, string>>>({});
@@ -136,11 +131,10 @@ function CreateClassModal({
       student_ids:   [],
       schedule:      form.schedule,
       color:         form.color,
-      tutor_id:      TEACHER_ID,
+      tutor_id:      teacherId,
       created_at:    new Date().toISOString(),
     };
-    const list = await loadExtraClasses();
-    await saveExtraClasses([cls, ...list]);
+    await upsertTeacherExtraClass(cls);
     onCreated(cls);
     onClose();
   }
@@ -344,29 +338,20 @@ function input(error?: string) {
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function TeacherClassesPage() {
+  const { teacherId, teacherName, myClasses: dbClasses } = useTeacherContext();
   const [search,       setSearch]       = useState("");
   const [onlineLinks,  setOnlineLinks]  = useState<Record<string, string>>({});
   const [extraClasses, setExtraClasses] = useState<ExtraClass[]>([]);
   const [showCreate,   setShowCreate]   = useState(false);
 
-  const [teacherOverrides, setTeacherOverrides] = useState<Record<string, string>>({});
-
   useEffect(() => {
-    getClassTeacherOverrides().then(setTeacherOverrides);
-    loadExtraClasses().then(list => setExtraClasses(list.filter(c => c.tutor_id === TEACHER_ID)));
-  }, []);
-
-  const baseClasses = useMemo(
-    () => MOCK_CLASSES.filter(c => {
-      const effectiveTutor = teacherOverrides[c.id] ?? c.tutor_id;
-      return effectiveTutor === TEACHER_ID;
-    }),
-    [teacherOverrides]
-  );
+    if (!teacherId) return;
+    loadExtraClasses().then(list => setExtraClasses(list.filter(c => c.tutor_id === teacherId)));
+  }, [teacherId]);
 
   const myClasses = useMemo(
-    () => [...baseClasses, ...extraClasses],
-    [baseClasses, extraClasses]
+    () => [...dbClasses, ...extraClasses],
+    [dbClasses, extraClasses]
   );
 
   // Load saved online links from localStorage
@@ -399,7 +384,7 @@ export default function TeacherClassesPage() {
   }
 
   return (
-    <PortalLayout role="teacher" userName={TEACHER_NAME} pageTitle="Lớp học của tôi">
+    <PortalLayout role="teacher" userName={teacherName || "Giáo viên"} pageTitle="Lớp học của tôi">
       <div className="space-y-6 max-w-6xl mx-auto">
         <SectionHeader
           title="Danh sách lớp đang dạy"
@@ -565,6 +550,7 @@ export default function TeacherClassesPage() {
         <CreateClassModal
           onClose={() => setShowCreate(false)}
           onCreated={handleCreated}
+          teacherId={teacherId}
         />
       )}
     </PortalLayout>

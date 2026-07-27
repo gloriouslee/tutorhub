@@ -9,16 +9,12 @@ import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/componen
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SectionHeader } from "@/components/shared";
-import { MOCK_HOMEWORK, MOCK_CLASSES } from "@/lib/mock-data";
-import { kvGet, kvUpdate, getCurriculum, getAllExamResults } from "@/lib/storage";
+import { MOCK_HOMEWORK } from "@/lib/mock-data";
+import { useTeacherContext } from "@/hooks/useTeacherContext";
+import { getCurriculum, getAllExamResults, getTeacherHomework, upsertTeacherHomework, removeTeacherHomework, getTeacherExtraClasses, getHwSubmissions } from "@/lib/storage";
 import { FileText, Plus, Calendar, CheckCircle2, Clock, X, Trash2, Edit2, ArrowRight, BookOpen, NotebookPen, PenSquare, Download } from "lucide-react";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-const TEACHER_ID   = "t1";
-const TEACHER_NAME = "Thầy Hùng Toán";
-const HW_KEY       = "tutorhub_teacher_homework";
-const SUB_KEY      = "tutorhub_submissions";
-const CLS_KEY      = "tutorhub_teacher_classes";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface Homework {
@@ -52,34 +48,35 @@ interface ExtraClass {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 async function loadExtraClasses(): Promise<ExtraClass[]> {
-  try { return await kvGet<ExtraClass[]>(CLS_KEY, []); } catch { return []; }
+  try { return await getTeacherExtraClasses<ExtraClass>(); } catch { return []; }
 }
 
 async function loadHw(seedIds: string[]): Promise<Homework[]> {
   try {
-    const raw = await kvGet<Homework[] | null>(HW_KEY, null);
-    if (raw) return raw;
-    // First visit: seed from mock data filtered to teacher's classes
+    const raw = await getTeacherHomework<Homework>();
+    if (raw.length) return raw;
+    if (process.env.NODE_ENV === "production") return [];
+    // Demo only: seed from mock data filtered to teacher's classes
     return MOCK_HOMEWORK
       .filter(h => seedIds.includes(h.class_id))
       .map(h => ({ ...h, description: (h as any).description ?? "" }));
   } catch { return []; }
 }
 
-// Atomic read-modify-write: only touch the affected item, keep the rest fresh.
+// Persist a single homework row (insert or update), then reflect the change locally.
 async function upsertHw(item: Homework, fallback: Homework[]): Promise<Homework[]> {
-  return kvUpdate<Homework[]>(HW_KEY, fallback, fresh => {
-    const exists = fresh.some(h => h.id === item.id);
-    return exists ? fresh.map(h => (h.id === item.id ? item : h)) : [item, ...fresh];
-  });
+  await upsertTeacherHomework(item);
+  const exists = fallback.some(h => h.id === item.id);
+  return exists ? fallback.map(h => (h.id === item.id ? item : h)) : [item, ...fallback];
 }
 
 async function removeHw(id: string, fallback: Homework[]): Promise<Homework[]> {
-  return kvUpdate<Homework[]>(HW_KEY, fallback, fresh => fresh.filter(h => h.id !== id));
+  await removeTeacherHomework(id);
+  return fallback.filter(h => h.id !== id);
 }
 
 async function loadSubs(): Promise<Submission[]> {
-  try { return await kvGet<Submission[]>(SUB_KEY, []); } catch { return []; }
+  try { return await getHwSubmissions<Submission>(); } catch { return []; }
 }
 
 // Bài tập từ lộ trình (nộp file + làm câu hỏi) cho các lớp của giáo viên.
@@ -133,6 +130,7 @@ function dueStatus(dueDate: string): { label: string; color: string; dot: string
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function TeacherHomeworkPage() {
   const router = useRouter();
+  const { teacherId, teacherName, myClasses: baseClasses } = useTeacherContext();
 
   const [myClasses,    setMyClasses]    = useState<{ id: string; class_name: string; student_ids?: string[] }[]>([]);
   const [homeworks,    setHomeworks]    = useState<Homework[]>([]);
@@ -150,10 +148,10 @@ export default function TeacherHomeworkPage() {
   const [fErr,   setFErr]   = useState("");
 
   useEffect(() => {
+    if (!teacherId) return;
     (async () => {
-      // Build full class list: MOCK_CLASSES (filtered to teacher) + localStorage extra classes
-      const baseClasses = MOCK_CLASSES.filter(c => c.tutor_id === TEACHER_ID);
-      const extra       = (await loadExtraClasses()).filter(c => c.tutor_id === TEACHER_ID);
+      // Build full class list: real teacher classes + localStorage extra classes
+      const extra = (await loadExtraClasses()).filter(c => c.tutor_id === teacherId);
       const all = [
         ...baseClasses.map(c => ({ id: c.id, class_name: c.class_name, student_ids: c.student_ids })),
         ...extra.map(c => ({ id: c.id, class_name: c.class_name, student_ids: c.student_ids })),
@@ -168,7 +166,7 @@ export default function TeacherHomeworkPage() {
       setHomeworks([...manual.filter(h => !currIds.has(h.id)), ...curriculum]);
       setSubmissions(await loadSubs());
     })();
-  }, []);
+  }, [teacherId, baseClasses]);
 
   function openCreate() {
     setEditTarget(null);
@@ -240,7 +238,7 @@ export default function TeacherHomeworkPage() {
   const overdueCount = homeworks.filter(h =>  isHwOverdue(h)).length;
 
   return (
-    <PortalLayout role="teacher" userName={TEACHER_NAME} pageTitle="Quản lý Bài tập">
+    <PortalLayout role="teacher" userName={teacherName || "Giáo viên"} pageTitle="Quản lý Bài tập">
       <div className="space-y-6 max-w-6xl mx-auto">
         <SectionHeader
           title="Bài tập đã giao"
@@ -286,7 +284,7 @@ export default function TeacherHomeworkPage() {
           <div className="py-16 text-center text-muted-foreground border-2 border-dashed border-border/50 rounded-2xl">
             <FileText className="h-10 w-10 mx-auto mb-3 opacity-20" />
             <p className="font-medium text-sm">Chưa có bài tập nào.</p>
-            <p className="text-xs mt-1">Nhấn "Giao bài mới" để bắt đầu.</p>
+                    <p className="text-xs mt-1">Nhấn &quot;Giao bài mới&quot; để bắt đầu.</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">

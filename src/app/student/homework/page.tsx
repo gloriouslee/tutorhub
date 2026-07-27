@@ -19,20 +19,18 @@ import {
   getSubmissionsByStudent,
   type SubmissionRecord,
 } from "@/lib/supabase/submissions";
-import { kvGet, kvSet, getCurriculum, getExamResult, isLessonVisibleToStudent, isAssignedToStudent } from "@/lib/storage";
+import { getTeacherHomework, getHwSubmissions, upsertHwSubmission, getCurriculum, getExamResult, isLessonVisibleToStudent, isAssignedToStudent } from "@/lib/storage";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const ACCEPTED = ".pdf,.doc,.docx,.jpg,.jpeg,.png";
 const MAX_MB   = 10;
-const LS_KEY   = "tutorhub_submissions";
 
 // ── localStorage fallback ─────────────────────────────────────────────────────
 async function loadLocalSubs(): Promise<SubmissionRecord[]> {
-  try { return await kvGet<SubmissionRecord[]>(LS_KEY, []); } catch { return []; }
+  try { return await getHwSubmissions<SubmissionRecord>(); } catch { return []; }
 }
-async function saveLocalSub(sub: SubmissionRecord) {
-  const arr = await loadLocalSubs();
-  await kvSet(LS_KEY, [...arr.filter(s => s.id !== sub.id), sub]);
+async function saveLocalSub(sub: SubmissionRecord, classId?: string) {
+  await upsertHwSubmission({ ...sub, class_id: classId });
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -67,7 +65,9 @@ export default function StudentHomeworkPage() {
   const kvHwIds = new Set(teacherHw.map(h => h.id));
   const myHomework: HomeworkItem[] = [
     ...teacherHw,
-    ...MOCK_HOMEWORK.filter(h => myClassIds.includes(h.class_id) && !kvHwIds.has(h.id)),
+    ...(process.env.NODE_ENV === "production"
+      ? []
+      : MOCK_HOMEWORK.filter(h => myClassIds.includes(h.class_id) && !kvHwIds.has(h.id))),
   ];
   const [submissions,  setSubmissions]  = useState<SubmissionRecord[]>([]);
   const [filterTab,    setFilterTab]    = useState<FilterTab>("all");
@@ -83,7 +83,7 @@ export default function StudentHomeworkPage() {
     if (!classKey) return;
 
     // Load manually-created homework
-    kvGet<HomeworkItem[]>("tutorhub_teacher_homework", [])
+    getTeacherHomework<HomeworkItem>()
       .then(all => setTeacherHw(prev => {
         const manual = all.filter(h => myClassIds.includes(h.class_id) && isAssignedToStudent(h.assigned_to, STUDENT_ID));
         const existingIds = new Set(prev.map(h => h.id));
@@ -237,7 +237,12 @@ export default function StudentHomeworkPage() {
     if (!file || !selectedHw) return;
     setUploadState("uploading");
 
-    const uploaded = await uploadSubmissionFile(selectedHw.id, STUDENT_ID, file);
+    const uploaded = await uploadSubmissionFile(
+      selectedHw.class_id,
+      selectedHw.id,
+      STUDENT_ID,
+      file,
+    );
     const subData: Omit<SubmissionRecord, "id"> = {
       homework_id:  selectedHw.id,
       student_id:   STUDENT_ID,
@@ -251,7 +256,7 @@ export default function StudentHomeworkPage() {
 
     const saved = await insertSubmission(subData);
     const finalSub: SubmissionRecord = saved ?? { ...subData, id: `local-${Date.now()}` };
-    if (!saved) await saveLocalSub(finalSub);
+    if (!saved) await saveLocalSub(finalSub, selectedHw.class_id);
 
     setSubmissions(prev => [
       ...prev.filter(s => !(s.homework_id === selectedHw.id && s.student_id === STUDENT_ID)),
@@ -437,7 +442,7 @@ export default function StudentHomeworkPage() {
                                 )}
                               </div>
                               {sub.feedback
-                                ? <p className="text-foreground/80 italic">"{sub.feedback}"</p>
+                            ? <p className="text-foreground/80 italic">&quot;{sub.feedback}&quot;</p>
                                 : <p className="text-muted-foreground italic">Giáo viên chưa để lại nhận xét.</p>
                               }
                               {sub.score != null && (
@@ -729,7 +734,7 @@ export default function StudentHomeworkPage() {
                         {sub.feedback && (
                           <div className="bg-white dark:bg-card p-3 rounded-lg border border-border text-sm space-y-1.5">
                             <p className="font-bold text-xs text-muted-foreground uppercase tracking-wide">Nhận xét của giáo viên</p>
-                            <p className="italic text-foreground/80">"{sub.feedback}"</p>
+                            <p className="italic text-foreground/80">&quot;{sub.feedback}&quot;</p>
                             {sub.score != null && (
                               <p className="font-bold text-primary">Điểm: {sub.score}/10</p>
                             )}

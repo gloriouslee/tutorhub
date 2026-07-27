@@ -10,4 +10,4 @@ CREATE TABLE IF NOT EXISTS public.kv_teacher_settings (
 
 ALTER TABLE public.kv_teacher_settings ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "phase1_open_all" ON public.kv_teacher_settings;
-CREATE POLICY "phase1_open_all" ON public.kv_teacher_settings FOR ALL USING (true) WITH CHECK (true);
+-- Default deny. Production policies are defined by the production security migration.

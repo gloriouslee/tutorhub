@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   getServiceKey, serviceClient, findExamLesson, checkExamAccess,
-  sanitizeQuestions, calcScoreServer, calcTotalServer, kvGetServer, kvSetServer,
-  examResultId, examSubmissionsId,
+  sanitizeQuestions, calcScoreServer, calcTotalServer, kvGetServer,
+  examResultId, verifyStudentExamScope,
   type StoredExamResult, type StudentAnswer,
 } from "@/lib/exam-server";
 import { getRequestIdentity } from "@/lib/api-auth";
+import { hasValidMutationOrigin } from "@/lib/request-security";
+import { logEvent } from "@/lib/logger";
 
 // POST /api/exam/[classId]/[lessonId]/submit
 // Body: { studentId, studentName, answers }
@@ -14,6 +16,9 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ classId: string; lessonId: string }> }
 ) {
+  if (!hasValidMutationOrigin(req)) {
+    return NextResponse.json({ error: "invalid_origin" }, { status: 403 });
+  }
   const serviceKey = getServiceKey();
   if (!serviceKey) {
     return NextResponse.json({ error: "not_configured" }, { status: 501 });
@@ -34,18 +39,35 @@ export async function POST(
     return NextResponse.json({ error: "student_mismatch" }, { status: 403 });
   }
   const studentId = identity.studentId;
-  const studentName = body.studentName ?? "";
+  const studentName = identity.displayName;
   const answers = body.answers ?? {};
+  if (
+    !answers ||
+    typeof answers !== "object" ||
+    Array.isArray(answers) ||
+    JSON.stringify(answers).length > 500_000
+  ) {
+    return NextResponse.json({ error: "invalid_answers" }, { status: 400 });
+  }
 
   const admin = serviceClient(serviceKey);
   let lesson;
   try {
     lesson = await findExamLesson(admin, classId, lessonId);
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 });
+    logEvent("error", "exam.submit_load_failed", {
+      actor_id: identity.userId,
+      class_id: classId,
+      lesson_id: lessonId,
+      error: e instanceof Error ? e.message : "unknown",
+    });
+    return NextResponse.json({ error: "exam_load_failed" }, { status: 500 });
   }
   if (!lesson || lesson.type !== "exam") {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
+  }
+  if (!(await verifyStudentExamScope(admin, classId, studentId, lesson))) {
+    return NextResponse.json({ error: "not_assigned" }, { status: 403 });
   }
   const access = checkExamAccess(lesson);
   if (!access.ok) {
@@ -57,21 +79,10 @@ export async function POST(
 
   const resultId = examResultId(classId, lessonId, studentId);
   try {
-    // Đã nộp rồi → 409. (Luồng "làm lại" xóa row này client-side trước,
-    // nên không có row = được phép nộp lại.)
+    // Check trước để trả lỗi rõ; RPC bên dưới vẫn là nguồn chống race chính.
     const existing = await kvGetServer<StoredExamResult>(admin, "kv_exam_results", resultId);
     if (existing) {
       return NextResponse.json({ error: "already_submitted" }, { status: 409 });
-    }
-
-    // Giáo viên tắt "Cho làm lại": registry bài nộp còn ghi vết dù kết quả
-    // đã bị xóa client-side → chặn nộp lần 2 tại server (không lách được).
-    if (lesson.exam_content?.allow_retry === false) {
-      const subsIdCheck = examSubmissionsId(classId, lessonId);
-      const submittedIds = (await kvGetServer<string[]>(admin, "kv_exam_submissions", subsIdCheck)) ?? [];
-      if (submittedIds.includes(studentId)) {
-        return NextResponse.json({ error: "retry_not_allowed" }, { status: 409 });
-      }
     }
 
     const questions = lesson.exam_content?.questions ?? [];
@@ -88,14 +99,26 @@ export async function POST(
       attempt: typeof body.attempt === "number" ? body.attempt : undefined,
     };
 
-    await kvSetServer(admin, "kv_exam_results", resultId, result);
-
-    // Sổ đăng ký bài nộp (read-modify-write server-side)
-    const subsId = examSubmissionsId(classId, lessonId);
-    const subs = (await kvGetServer<string[]>(admin, "kv_exam_submissions", subsId)) ?? [];
-    if (!subs.includes(studentId)) {
-      await kvSetServer(admin, "kv_exam_submissions", subsId, [...subs, studentId]);
+    const { data: saved, error: saveError } = await admin.rpc(
+      "submit_exam_result_secure",
+      {
+        p_result_id: resultId,
+        p_submissions_id: `${classId}_${lessonId}`,
+        p_student_id: studentId,
+        p_result: result,
+        p_allow_retry: lesson.exam_content?.allow_retry !== false,
+      },
+    );
+    if (saveError) {
+      if (saveError.message.includes("already_submitted")) {
+        return NextResponse.json({ error: "already_submitted" }, { status: 409 });
+      }
+      if (saveError.message.includes("retry_not_allowed")) {
+        return NextResponse.json({ error: "retry_not_allowed" }, { status: 409 });
+      }
+      throw saveError;
     }
+    if (saved !== true) throw new Error("exam_result_not_saved");
 
     const showSolution = lesson.exam_content?.show_solution_after_submit !== false;
     return NextResponse.json({
@@ -105,6 +128,12 @@ export async function POST(
       questions: showSolution ? questions : sanitizeQuestions(questions),
     });
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 });
+    logEvent("error", "exam.submit_failed", {
+      actor_id: identity.userId,
+      class_id: classId,
+      lesson_id: lessonId,
+      error: e instanceof Error ? e.message : "unknown",
+    });
+    return NextResponse.json({ error: "exam_submit_failed" }, { status: 500 });
   }
 }

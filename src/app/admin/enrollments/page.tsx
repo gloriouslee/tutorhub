@@ -50,13 +50,14 @@ interface ApproveModalProps {
 
 function ApproveModal({ enrollment, classes, onClose, onDone }: ApproveModalProps) {
   const defaultUsername = enrollment.email.toLowerCase();
-  const localPart = enrollment.email.split("@")[0];
-  // Đảm bảo mật khẩu mặc định đủ dài (Supabase yêu cầu tối thiểu 6 ký tự)
-  const defaultPassword = localPart.length >= 8 ? localPart : `${localPart}@2026`;
+  const createTemporaryPassword = () => {
+    const random = crypto.getRandomValues(new Uint32Array(3));
+    return `Th@${random[0].toString(36)}-${random[1].toString(36)}-${random[2].toString(36)}9`;
+  };
 
   const [assignedClassId, setAssignedClassId] = useState(enrollment.requested_class_id);
   const [username, setUsername]               = useState(defaultUsername);
-  const [password, setPassword]               = useState(defaultPassword);
+  const [password, setPassword]               = useState(createTemporaryPassword);
   const [showPassword, setShowPassword]       = useState(false);
   const [submitting, setSubmitting]           = useState(false);
 
@@ -64,6 +65,16 @@ function ApproveModal({ enrollment, classes, onClose, onDone }: ApproveModalProp
 
   const handleApprove = async () => {
     if (!assignedClassId || !username.trim() || !password.trim()) return;
+    if (
+      password.length < 12 ||
+      !/[a-z]/.test(password) ||
+      !/[A-Z]/.test(password) ||
+      !/[0-9]/.test(password) ||
+      !/[^A-Za-z0-9]/.test(password)
+    ) {
+      setApproveError("Mật khẩu phải có ít nhất 12 ký tự, gồm chữ hoa, chữ thường, số và ký hiệu.");
+      return;
+    }
     setSubmitting(true);
     setApproveError("");
     try {
@@ -84,8 +95,8 @@ function ApproveModal({ enrollment, classes, onClose, onDone }: ApproveModalProp
     } catch (err: unknown) {
       const raw = err instanceof Error ? err.message : "";
       setApproveError(
-        raw.includes("at least 6 characters")
-          ? "Mật khẩu tối thiểu 6 ký tự."
+        raw.startsWith("password_")
+          ? "Mật khẩu phải có ít nhất 12 ký tự, gồm chữ hoa, chữ thường, số và ký hiệu."
           : raw || "Lỗi khi duyệt đơn"
       );
       setSubmitting(false);
@@ -293,14 +304,6 @@ export default function AdminEnrollmentsPage() {
   const [search, setSearch]           = useState("");
   const [approveTarget, setApproveTarget] = useState<EnrollmentRequest | null>(null);
   const [rejectTarget,  setRejectTarget]  = useState<EnrollmentRequest | null>(null);
-  const [shownPassIds,  setShownPassIds]  = useState<Set<string>>(new Set());
-
-  const togglePass = (id: string) => setShownPassIds(prev => {
-    const next = new Set(prev);
-    next.has(id) ? next.delete(id) : next.add(id);
-    return next;
-  });
-
   const reload = () => { getEnrollments().then(setEnrollments); };
   useEffect(() => {
     reload();
@@ -502,18 +505,9 @@ export default function AdminEnrollmentsPage() {
                                 <span className="text-muted-foreground">Tên đăng nhập: </span>
                                 <strong>{enr.account_username}</strong>
                               </div>
-                              <div className="flex items-center gap-1.5">
+                              <div>
                                 <span className="text-muted-foreground">Mật khẩu: </span>
-                                <strong className="font-mono">
-                                  {shownPassIds.has(enr.id) ? enr.account_password : "••••••••"}
-                                </strong>
-                                <button
-                                  type="button"
-                                  onClick={() => togglePass(enr.id)}
-                                  className="text-muted-foreground hover:text-foreground ml-1"
-                                >
-                                  {shownPassIds.has(enr.id) ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                                </button>
+                                <strong>Không lưu trữ — học viên phải đổi sau lần đăng nhập đầu.</strong>
                               </div>
                             </div>
                             {enr.assigned_class_id && (

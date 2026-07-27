@@ -75,7 +75,7 @@ export default function StudentSchedulePage() {
         if (dow === undefined) return;
         map[dow].push({
           classId: cls.id, className: cls.class_name, subject: cls.subject,
-          start: slot.start_time, end: slot.end_time, color: cls.color,
+          start: slot.start_time, end: slot.end_time, color: cls.color ?? "#6366f1",
           isOnline: cls.learning_mode === "online", classroom: cls.classroom, teacher,
         });
       });

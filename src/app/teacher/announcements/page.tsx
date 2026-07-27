@@ -14,14 +14,9 @@ import {
 import { getNotifications, saveNotifications } from "@/lib/storage";
 import { Notification, NotificationCategory } from "@/types";
 import { formatDate } from "@/lib/utils";
-import { MOCK_CLASSES } from "@/lib/mock-data";
+import { useTeacherContext } from "@/hooks/useTeacherContext";
 
-const TEACHER_ID   = "t1";
-const TEACHER_NAME = "Thầy Hùng Toán";
 const TEACHER_INITIALS = "HT";
-
-// Classes this teacher teaches
-const MY_CLASSES = MOCK_CLASSES.filter(c => c.tutor_id === TEACHER_ID);
 
 const CATEGORY_OPTIONS: { value: NotificationCategory; label: string; Icon: React.ElementType; color: string }[] = [
   { value: "general",    label: "Thông tin chung",   Icon: Info,          color: "text-blue-500" },
@@ -30,12 +25,17 @@ const CATEGORY_OPTIONS: { value: NotificationCategory; label: string; Icon: Reac
   { value: "system",     label: "Nhắc nhở lịch học", Icon: Calendar,      color: "text-indigo-500" },
 ];
 
-const TARGET_OPTIONS = [
-  { value: "all-students", label: "Tất cả học viên của tôi", Icon: Users },
-  ...MY_CLASSES.map(c => ({ value: c.id, label: c.class_name, Icon: School })),
-];
-
 export default function TeacherAnnouncementsPage() {
+  const { teacherName, myClasses } = useTeacherContext();
+
+  // Classes this teacher teaches
+  const MY_CLASSES = myClasses;
+
+  const TARGET_OPTIONS = [
+    { value: "all-students", label: "Tất cả học viên của tôi", Icon: Users },
+    ...MY_CLASSES.map(c => ({ value: c.id, label: c.class_name, Icon: School })),
+  ];
+
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [filterClass, setFilterClass] = useState<string>("all");
   const [title,    setTitle]    = useState("");
@@ -44,12 +44,12 @@ export default function TeacherAnnouncementsPage() {
   const [target,   setTarget]   = useState("all-students");
   const [submitting, setSubmitting] = useState(false);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [teacherName]);
 
   async function load() {
     const all = await getNotifications();
     setNotifications(
-      all.filter(n => n.sent_by === TEACHER_NAME)
+      all.filter(n => n.sent_by === teacherName)
          .sort((a, b) => b.created_at.localeCompare(a.created_at))
     );
   }
@@ -67,7 +67,7 @@ export default function TeacherAnnouncementsPage() {
       content: content.trim(),
       target_role: "student",
       category,
-      sent_by: TEACHER_NAME,
+      sent_by: teacherName,
       target_class_id:   targetClass?.id,
       target_class_name: targetClass?.class_name,
       is_read:    false,
@@ -92,7 +92,7 @@ export default function TeacherAnnouncementsPage() {
   const catMap = Object.fromEntries(CATEGORY_OPTIONS.map(o => [o.value, o]));
 
   return (
-    <PortalLayout role="teacher" userName={TEACHER_NAME} pageTitle="Thông báo lớp học">
+    <PortalLayout role="teacher" userName={teacherName || "Giáo viên"} pageTitle="Thông báo lớp học">
       <div className="space-y-6">
         <SectionHeader
           title="Thông báo lớp học"
@@ -256,7 +256,7 @@ export default function TeacherAnnouncementsPage() {
                         <div className="flex-1 min-w-0 space-y-1">
                           {/* Row 1: name + target badge + time */}
                           <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-xs font-bold text-foreground">{TEACHER_NAME}</span>
+                            <span className="text-xs font-bold text-foreground">{teacherName || "Giáo viên"}</span>
                             <span className={`inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${
                               n.target_class_id
                                 ? "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300"

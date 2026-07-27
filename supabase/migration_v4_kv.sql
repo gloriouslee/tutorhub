@@ -12,5 +12,4 @@ CREATE TABLE IF NOT EXISTS public.app_kv (
 
 ALTER TABLE public.app_kv ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "phase1_open_all" ON public.app_kv;
-CREATE POLICY "phase1_open_all" ON public.app_kv
-  FOR ALL USING (true) WITH CHECK (true);
+-- Default deny. Do not recreate the former open policy.

@@ -10,7 +10,8 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import {
-  kvGet, getCurriculum, getExamResult, getExamScoresByStudent,
+  getAllTeacherAttendance, getCurriculum, getExamResult, getExamScoresByStudent,
+  getTeacherHomework,
   type StoredExamScore,
 } from "@/lib/storage";
 import { MOCK_ATTENDANCE, MOCK_HOMEWORK, MOCK_EXAM_SCORES, MOCK_CLASSES } from "@/lib/mock-data";
@@ -37,7 +38,7 @@ interface TeacherAttendanceKvRecord {
 // Trùng (class_id, student_id, date) → bản thật thắng.
 export async function loadChildrenAttendance(studentIds: string[]): Promise<ChildAttendanceRecord[]> {
   const idSet = new Set(studentIds);
-  const real = (await kvGet<TeacherAttendanceKvRecord[]>("tutorhub_teacher_attendance", []))
+  const real = ((await getAllTeacherAttendance()) as unknown as TeacherAttendanceKvRecord[])
     .filter(r => idSet.has(r.student_id))
     .map(r => ({
       id:         `real_${r.class_id}_${r.student_id}_${r.date}`,
@@ -136,7 +137,7 @@ export interface ChildHomework {
 // Bài tập của các lớp: giáo viên tạo (kv) + mock nền, kv thắng khi trùng id.
 export async function loadClassHomework(classIds: string[]): Promise<ChildHomework[]> {
   const idSet = new Set(classIds);
-  const teacher = (await kvGet<ChildHomework[]>("tutorhub_teacher_homework", []))
+  const teacher = (await getTeacherHomework<ChildHomework>())
     .filter(h => idSet.has(h.class_id));
   const kvIds = new Set(teacher.map(h => h.id));
   const mock = MOCK_HOMEWORK.filter(h => idSet.has(h.class_id) && !kvIds.has(h.id));

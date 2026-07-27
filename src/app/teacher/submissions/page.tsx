@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { SectionHeader } from "@/components/shared";
 import { MOCK_STUDENTS, MOCK_HOMEWORK, MOCK_CLASSES } from "@/lib/mock-data";
+import { useTeacherContext } from "@/hooks/useTeacherContext";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   Search, CheckCircle2, Clock, FileText, ChevronDown, ChevronUp,
@@ -17,15 +18,13 @@ import {
   updateGrade as supabaseUpdateGrade,
   type SubmissionRecord,
 } from "@/lib/supabase/submissions";
-import { kvGet, kvUpdate, addNotification } from "@/lib/storage";
+import { getTeacherHomework, getHwSubmissions, upsertHwSubmission, addNotification } from "@/lib/storage";
 
 // ── Data types ────────────────────────────────────────────────────────────────
 // Use SubmissionRecord from Supabase lib; extend with student_name for display
 type Submission = SubmissionRecord & { student_name: string };
 
-// ── localStorage helpers ──────────────────────────────────────────────────────
-const SUBMISSION_KEY = "tutorhub_submissions";
-
+// ── Seed data ─────────────────────────────────────────────────────────────────
 const DEFAULT_SUBMISSIONS: Submission[] = [
   { id: "sub1", homework_id: "h1", student_id: "s1", student_name: "Nguyễn Anh Tuấn", status: "graded",    submitted_at: "2026-07-08T14:30:00Z", file_name: "bai_dao_ham_nguyen_anh_tuan.pdf",  score: 9.2, feedback: "Em làm bài rất tốt! Lời giải rõ ràng, lập luận chặt chẽ. Chú ý thêm ở bài 2.14 tính toán sai dấu ở dòng cuối.", graded_at: "2026-07-09T10:00:00Z" },
   { id: "sub2", homework_id: "h1", student_id: "s2", student_name: "Trần Mai Phương",  status: "submitted", submitted_at: "2026-07-09T20:15:00Z", file_name: "tran_mai_phuong_chuong2.pdf" },
@@ -37,22 +36,18 @@ const DEFAULT_SUBMISSIONS: Submission[] = [
 
 async function loadSubmissions(): Promise<Submission[]> {
   try {
-    const raw = await kvGet<Submission[] | null>(SUBMISSION_KEY, null);
-    return raw ?? DEFAULT_SUBMISSIONS;
-  } catch { return DEFAULT_SUBMISSIONS; }
+    const raw = await getHwSubmissions<Submission>();
+    if (raw.length > 0) return raw;
+    return process.env.NODE_ENV === "production" ? [] : DEFAULT_SUBMISSIONS;
+  } catch { return process.env.NODE_ENV === "production" ? [] : DEFAULT_SUBMISSIONS; }
 }
 
-// Atomic-ish update: patch only the graded submission in the freshest stored list.
-async function updateSubmission(subId: string, patch: Partial<Submission>): Promise<Submission[]> {
-  return kvUpdate<Submission[]>(SUBMISSION_KEY, DEFAULT_SUBMISSIONS, fresh =>
-    fresh.map(s => (s.id === subId ? { ...s, ...patch } : s))
-  );
+// Upsert the graded submission as its own per-row record.
+async function updateSubmission(sub: Submission, classId?: string): Promise<void> {
+  await upsertHwSubmission({ ...sub, class_id: (sub as { class_id?: string }).class_id ?? classId });
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-const TEACHER_ID = "t1";
-const HW_KEY = "tutorhub_teacher_homework";
-const myClassIds = MOCK_CLASSES.filter(c => c.tutor_id === TEACHER_ID).map(c => c.id);
 
 interface HomeworkItem {
   id: string;
@@ -62,14 +57,12 @@ interface HomeworkItem {
   [key: string]: unknown;
 }
 
-const MOCK_MY_HOMEWORK: HomeworkItem[] = MOCK_HOMEWORK.filter(h => myClassIds.includes(h.class_id));
-
 // Merge mock homework with teacher-created homework from localStorage
-async function loadMyHomework(): Promise<HomeworkItem[]> {
+async function loadMyHomework(mockMyHomework: HomeworkItem[]): Promise<HomeworkItem[]> {
   let stored: HomeworkItem[] = [];
-  try { stored = await kvGet<HomeworkItem[]>(HW_KEY, []); } catch {}
+  try { stored = await getTeacherHomework<HomeworkItem>(); } catch {}
   const storedIds = new Set(stored.map(h => h.id));
-  return [...stored, ...MOCK_MY_HOMEWORK.filter(h => !storedIds.has(h.id))];
+  return [...stored, ...mockMyHomework.filter(h => !storedIds.has(h.id))];
 }
 
 function relativeTime(iso: string) {
@@ -93,9 +86,16 @@ function scoreColor(score: number) {
 function TeacherSubmissionsPageInner() {
   const searchParams = useSearchParams();
   const hwParam = searchParams.get("hw");
+  const { teacherId, teacherName, myClasses } = useTeacherContext();
+
+  const myClassIds = useMemo(() => myClasses.map(c => c.id), [myClasses]);
+  const mockMyHomework = useMemo<HomeworkItem[]>(
+    () => process.env.NODE_ENV === "production" ? [] : MOCK_HOMEWORK.filter(h => myClassIds.includes(h.class_id)),
+    [myClassIds]
+  );
 
   const [submissions, setSubmissions] = useState<Submission[]>([]);
-  const [myHomework,  setMyHomework]  = useState<HomeworkItem[]>(MOCK_MY_HOMEWORK);
+  const [myHomework,  setMyHomework]  = useState<HomeworkItem[]>([]);
   const [hwFilter,    setHwFilter]    = useState<string>(hwParam ?? "all");
   const [statusFilter, setStatusFilter] = useState<"all" | "graded" | "ungraded">("all");
   const [search,      setSearch]      = useState("");
@@ -106,8 +106,9 @@ function TeacherSubmissionsPageInner() {
   const [tfDragOver,    setTfDragOver]    = useState(false);
 
   useEffect(() => {
+    if (!teacherId) return;
     (async () => {
-      const hwList = await loadMyHomework();
+      const hwList = await loadMyHomework(mockMyHomework);
       setMyHomework(hwList);
       // Try Supabase first, fall back to localStorage seed
       const remote = await getSubmissionsByHomeworks(hwList.map(h => h.id));
@@ -124,7 +125,7 @@ function TeacherSubmissionsPageInner() {
         setSubmissions(await loadSubmissions());
       }
     })();
-  }, []);
+  }, [teacherId, mockMyHomework]);
 
   // Filtered list
   const displayed = useMemo(() => {
@@ -179,7 +180,10 @@ function TeacherSubmissionsPageInner() {
 
     const patch = { score, feedback: feedback || undefined, status: "graded" as const, graded_at: new Date().toISOString(), teacher_file_url: teacherFileUrl, teacher_file_name: teacherFileName };
     setSubmissions(prev => prev.map(s => (s.id === subId ? { ...s, ...patch } : s)));
-    try { await updateSubmission(subId, patch); } catch {}
+    const hw = existing ? myHomework.find(h => h.id === existing.homework_id) : undefined;
+    if (existing) {
+      try { await updateSubmission({ ...existing, ...patch }, hw?.class_id); } catch {}
+    }
     setGrading(null);
     setTeacherFile(null);
 
@@ -187,7 +191,6 @@ function TeacherSubmissionsPageInner() {
 
     // Báo cho học sinh: bài tập đã được chấm
     if (existing) {
-      const hw = myHomework.find(h => h.id === existing.homework_id);
       await addNotification({
         title: "Bài tập đã được chấm",
         content: `"${hw?.title ?? "Bài tập"}" đã được chấm: ${score}/10${feedback ? " — có nhận xét của giáo viên." : "."}`,
@@ -197,10 +200,11 @@ function TeacherSubmissionsPageInner() {
   }
 
   const hwForSub = (sub: Submission) => myHomework.find(h => h.id === sub.homework_id);
-  const classForHw = (classId: string) => MOCK_CLASSES.find(c => c.id === classId);
+  const classForHw = (classId: string) =>
+    myClasses.find(c => c.id === classId) ?? MOCK_CLASSES.find(c => c.id === classId);
 
   return (
-    <PortalLayout role="teacher" userName="Thầy Hùng Toán" pageTitle="Quản lý Bài nộp">
+    <PortalLayout role="teacher" userName={teacherName || "Giáo viên"} pageTitle="Quản lý Bài nộp">
       <div className="space-y-6">
         <SectionHeader
           title="Chấm bài & Phản hồi"

@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   getServiceKey, serviceClient, findExamLesson, checkExamAccess,
-  sanitizeQuestions, kvGetServer, examResultId,
+  sanitizeQuestions, kvGetServer, examResultId, verifyStudentExamScope,
   type StoredExamResult,
 } from "@/lib/exam-server";
 import { getRequestIdentity } from "@/lib/api-auth";
+import { logEvent } from "@/lib/logger";
 
 // GET /api/exam/[classId]/[lessonId]?studentId=...
 // Trả đề thi ĐÃ LỌC ĐÁP ÁN cho học sinh. Nếu đã nộp → kèm kết quả,
@@ -33,10 +34,18 @@ export async function GET(
   try {
     lesson = await findExamLesson(admin, classId, lessonId);
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 });
+    logEvent("error", "exam.load_failed", {
+      class_id: classId,
+      lesson_id: lessonId,
+      error: e instanceof Error ? e.message : "unknown",
+    });
+    return NextResponse.json({ error: "exam_load_failed" }, { status: 500 });
   }
   if (!lesson || lesson.type !== "exam") {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
+  }
+  if (!(await verifyStudentExamScope(admin, classId, studentId, lesson))) {
+    return NextResponse.json({ error: "not_assigned" }, { status: 403 });
   }
 
   const access = checkExamAccess(lesson);

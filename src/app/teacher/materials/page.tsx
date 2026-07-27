@@ -14,10 +14,10 @@ import {
   X, Check, Edit2, AlertCircle, Link2, File as FileIcon,
 } from "lucide-react";
 import type { StudentPackage } from "@/lib/storage";
-import { kvGet, kvSet } from "@/lib/storage";
-import { MOCK_CLASSES } from "@/lib/mock-data";
+import { getTeacherMaterials, saveTeacherMaterials } from "@/lib/storage";
 import { formatCurrency } from "@/lib/utils";
 import { uploadClassFile } from "@/lib/upload";
+import { useTeacherContext } from "@/hooks/useTeacherContext";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -132,17 +132,18 @@ const SEED_COURSES: Course[] = [
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-const LS_KEY = "tutorhub_teacher_materials";
 async function loadCourses(): Promise<Course[]> {
-  if (typeof window === "undefined") return SEED_COURSES;
+  const seed = process.env.NODE_ENV === "production" ? [] : SEED_COURSES;
+  if (typeof window === "undefined") return seed;
   try {
-    const raw = await kvGet<Course[] | null>(LS_KEY, null);
-    if (raw) return raw;
+    const raw = await getTeacherMaterials<Course>();
+    if (raw.length) return raw;
   } catch {}
-  return SEED_COURSES;
+  return seed;
 }
-function saveCourses(courses: Course[]) {
-  kvSet(LS_KEY, courses).catch(() => {});
+function saveCourses(courses: Course[], teacherId: string) {
+  if (!teacherId) return;
+  saveTeacherMaterials(courses, teacherId).catch(() => {});
 }
 
 function uid() { return Math.random().toString(36).slice(2, 9); }
@@ -668,6 +669,7 @@ function CourseEditor({
   onUpdate: (updated: Course) => void;
   onClose: () => void;
 }) {
+  const { myClasses } = useTeacherContext();
   const [draft, setDraft] = useState<Course>(course);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [lessonModal, setLessonModal] = useState<{ chapterId: string; lesson?: Lesson } | null>(null);
@@ -846,7 +848,7 @@ function CourseEditor({
                   className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-primary"
                 >
                   <option value="">— Chọn lớp —</option>
-                  {MOCK_CLASSES.map(c => (
+                  {myClasses.map(c => (
                     <option key={c.id} value={c.id}>{c.class_name}</option>
                   ))}
                 </select>
@@ -1151,6 +1153,7 @@ function CourseCard({
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default function TeacherMaterialsPage() {
+  const { teacherName, teacherId } = useTeacherContext();
   const [courses, setCourses] = useState<Course[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [editing, setEditing] = useState<Course | null>(null);
@@ -1166,23 +1169,23 @@ export default function TeacherMaterialsPage() {
       type: "class", description: "", chapters: [], published: false,
       packages: ["online", "advanced", "offline"], includes: [],
     };
-    setCourses(prev => { const next = [c, ...prev]; saveCourses(next); return next; });
+    setCourses(prev => { const next = [c, ...prev]; saveCourses(next, teacherId); return next; });
     setEditing(c);
   };
 
   const updateCourse = (updated: Course) => {
     if (!loaded) return;
-    setCourses(prev => { const next = prev.map(c => c.id === updated.id ? updated : c); saveCourses(next); return next; });
+    setCourses(prev => { const next = prev.map(c => c.id === updated.id ? updated : c); saveCourses(next, teacherId); return next; });
   };
 
   const deleteCourse = (id: string) => {
     if (!loaded) return;
-    setCourses(prev => { const next = prev.filter(c => c.id !== id); saveCourses(next); return next; });
+    setCourses(prev => { const next = prev.filter(c => c.id !== id); saveCourses(next, teacherId); return next; });
     if (editing?.id === id) setEditing(null);
   };
 
   return (
-    <PortalLayout role="teacher" userName="Thầy Hùng Toán" pageTitle="Tài liệu">
+    <PortalLayout role="teacher" userName={teacherName || "Giáo viên"} pageTitle="Tài liệu">
       <div className="max-w-4xl mx-auto">
         {editing ? (
           <CourseEditor

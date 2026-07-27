@@ -1,0 +1,1617 @@
+-- ============================================================================
+-- TutorHub — CANONICAL SUPABASE SCHEMA (single-run, idempotent)
+-- ============================================================================
+-- WHAT THIS IS
+--   The single canonical database setup for a fresh Supabase project. Running
+--   this one file on an empty project produces the complete, production-shaped
+--   schema (tables, helper/RPC functions, RLS policies, grants, storage buckets
+--   and storage policies) that the TutorHub app expects.
+--
+--   It is a faithful MERGE of the incremental migrations, not a redesign. It
+--   SUPERSEDES and replaces all of the following (do not run them alongside it):
+--     - supabase/schema.sql                       (LEGACY UUID prototype)
+--     - supabase/migration_v2_production.sql
+--     - supabase/migration_app_tables.sql
+--     - supabase/migration_v3_transactions.sql
+--     - supabase/migration_v5_domain_tables.sql
+--     - supabase/migration_missing_columns.sql
+--     - supabase/migration_enrollment_package.sql
+--     - supabase/migration_teacher_settings.sql
+--     - supabase/migrations/20260727140000_production_security.sql
+--     - supabase/migrations/20260727150001..150004_perrow_*.sql
+--     - supabase/storage_open_policies.sql / storage_policies_v2.sql
+--
+--   IDEMPOTENT: safe to re-run. Uses create extension if not exists,
+--   create table if not exists, create or replace function, and
+--   drop policy if exists <name> before every create policy. RLS is (re)enabled
+--   with alter table ... enable/force row level security (safe to re-run).
+--
+--   NOTE: `set check_function_bodies = off` is issued so the SQL-language helper
+--   functions in section 2 may reference tables that are created later in the
+--   file (forward references). This is required for a clean single-pass run.
+-- ============================================================================
+--
+-- ─────────────────────────── COVERAGE MANIFEST ─────────────────────────────
+-- TABLES (42)
+--   Core (11):    profiles, parents, teachers, students, classes, payments,
+--                 attendance, notifications, homework, submissions, materials
+--   Domain (3):   enrollment_requests, purchase_transactions, app_exam_scores
+--   KV (14):      kv_curriculum, kv_schedules, kv_online_links, kv_tuition,
+--                 kv_student_packages, kv_session_notes, kv_class_extra_students,
+--                 kv_exam_results, kv_exam_submissions, kv_exam_scores,
+--                 kv_invoices, kv_managed_users, kv_student_accounts,
+--                 kv_teacher_settings
+--   Per-row (13): course_reviews, student_comments, schedule_notifications,
+--                 schedule_notification_reads, class_materials,
+--                 homework_attachments, class_teacher_overrides,
+--                 teacher_homework, teacher_extra_classes, hw_submissions,
+--                 class_attendance, teacher_materials, parent_messages
+--   Infra (1):    api_rate_limits
+--
+-- FUNCTIONS (17)
+--   Auth helpers (9): get_my_role, my_student_id, my_teacher_id, my_parent_id,
+--                     teaches_class, enrolled_in_class, parent_has_student,
+--                     teaches_student, is_my_child
+--   Trigger fn (1):   handle_new_user  (+ trigger on_auth_user_created)
+--   Secure RPC (7):   consume_rate_limit, approve_enrollment_request_secure,
+--                     delete_enrollment_request_secure, submit_exam_result_secure,
+--                     retry_exam_secure, replace_admin_entity_rows_secure,
+--                     mutate_invoice_secure
+--
+-- STORAGE
+--   Buckets (3, private): avatars, homework-submissions, class-materials
+--   Policies: owner-scoped avatars + class-scoped materials/submissions
+--
+-- DELIBERATE EXCLUSIONS (see the report accompanying this file)
+--   - Legacy UUID `exam_scores` table (schema.sql only) and its grant/policy:
+--     the app uses app_exam_scores / kv_exam_scores instead; keeping the UUID
+--     table would require FKs to now-TEXT students/classes.
+--   - Legacy UUID `enrollments` table (schema.sql only): dropped by v2, unused.
+--   - KV blobs replaced by the per-row tables above: kv_teacher_homework,
+--     kv_submissions, kv_teacher_classes, kv_teacher_attendance,
+--     kv_teacher_materials, kv_class_materials, kv_homework_attachments,
+--     kv_class_overrides, kv_student_comments, kv_course_reviews,
+--     kv_schedule_notifications, kv_parent_messages.
+--     (This file simply does not create them. To DROP them from an existing
+--      database, run the destructive supabase/drop_retired_kv.sql separately.)
+--   - enrollment_requests.account_password (dropped by the security migration).
+-- ============================================================================
+
+set check_function_bodies = off;
+
+-- ─────────────────────────── 1. Extensions ─────────────────────────────────
+create extension if not exists "pgcrypto";
+create extension if not exists "uuid-ossp";
+
+
+-- ─────────────────────────── 2. Helper functions ───────────────────────────
+-- SECURITY DEFINER helpers avoid recursive RLS lookups. None are executable by
+-- anon/public (grants are (re)applied in the RLS section). Defined before the
+-- tables they read thanks to `check_function_bodies = off` above.
+
+create or replace function public.get_my_role()
+returns text
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$ select role from public.profiles where id = auth.uid() limit 1 $$;
+
+create or replace function public.my_student_id()
+returns text
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$ select id::text from public.students where user_id = auth.uid() limit 1 $$;
+
+create or replace function public.my_teacher_id()
+returns text
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$ select id::text from public.teachers where user_id = auth.uid() limit 1 $$;
+
+create or replace function public.my_parent_id()
+returns text
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$ select id::text from public.parents where user_id = auth.uid() limit 1 $$;
+
+create or replace function public.teaches_class(p_class_id text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+  select exists (
+    select 1 from public.classes
+    where id::text = p_class_id
+      and tutor_id::text = public.my_teacher_id()
+  )
+$$;
+
+create or replace function public.enrolled_in_class(p_class_id text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+  select exists (
+    select 1 from public.classes c
+    where c.id::text = p_class_id
+      and exists (
+        select 1
+        from unnest(c.student_ids) student_id
+        where student_id::text = public.my_student_id()
+      )
+  )
+$$;
+
+-- parent owns a student (name used by the production-security policies).
+create or replace function public.parent_has_student(p_student_id text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+  select exists (
+    select 1 from public.students
+    where id::text = p_student_id
+      and parent_id::text = public.my_parent_id()
+  )
+$$;
+
+-- A teacher "teaches" a student when the student is in one of the teacher's classes.
+create or replace function public.teaches_student(p_student_id text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+  select exists (
+    select 1 from public.classes c
+    where c.tutor_id::text = public.my_teacher_id()
+      and exists (
+        select 1 from unnest(c.student_ids) sid where sid::text = p_student_id
+      )
+  )
+$$;
+
+-- parent owns a student (name used by the per-row policies; equivalent to
+-- parent_has_student, kept because both names are referenced by policies).
+create or replace function public.is_my_child(p_student_id text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+  select exists (
+    select 1 from public.students s
+    where s.id::text = p_student_id and s.parent_id::text = public.my_parent_id()
+  )
+$$;
+
+
+-- ─────────────────────────── 3. Core tables ────────────────────────────────
+-- profiles: recovered from schema.sql (the only place it is defined) and merged
+-- with the columns added by the production-security migration (full_name,
+-- must_reset_password).
+create table if not exists public.profiles (
+  id                  uuid primary key references auth.users(id) on delete cascade,
+  email               text,
+  phone               text,
+  full_name           text,
+  role                text not null check (role in ('student','parent','teacher','admin')) default 'student',
+  must_reset_password boolean not null default true,
+  created_at          timestamptz default now()
+);
+
+-- Auto-create a profile on auth signup (production-security version of the fn).
+create or replace function public.handle_new_user()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  requested_role text;
+begin
+  requested_role := coalesce(new.raw_app_meta_data->>'role', 'student');
+  if requested_role not in ('student', 'parent', 'teacher', 'admin') then
+    requested_role := 'student';
+  end if;
+
+  insert into public.profiles (
+    id, email, full_name, role, must_reset_password
+  )
+  values (
+    new.id,
+    new.email,
+    nullif(new.raw_user_meta_data->>'full_name', ''),
+    requested_role,
+    requested_role <> 'admin'
+  )
+  on conflict (id) do update
+  set email = excluded.email,
+      full_name = coalesce(public.profiles.full_name, excluded.full_name);
+  return new;
+end;
+$$;
+
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute function public.handle_new_user();
+
+-- Entity tables use TEXT ids (compatible with the app's "s1", "c1", "cls_…" ids).
+create table if not exists public.parents (
+  id         text primary key,
+  user_id    uuid references public.profiles(id) on delete set null,
+  full_name  text not null,
+  email      text,
+  phone      text,
+  avatar_url text,
+  created_at timestamptz default now()
+);
+
+create table if not exists public.teachers (
+  id             text primary key,
+  user_id        uuid references public.profiles(id) on delete set null,
+  full_name      text not null,
+  email          text,
+  specialization text,
+  bio            text,
+  avatar_url     text,
+  created_at     timestamptz default now()
+);
+
+create table if not exists public.students (
+  id            text primary key,
+  user_id       uuid references public.profiles(id) on delete set null,
+  full_name     text not null,
+  email         text,
+  dob           text,
+  school        text,
+  grade         text,
+  learning_type text check (learning_type in ('online','offline','hybrid')) default 'hybrid',
+  parent_id     text references public.parents(id) on delete set null,
+  avatar_url    text,
+  created_at    timestamptz default now()
+);
+
+create table if not exists public.classes (
+  id            text primary key,
+  class_name    text not null,
+  subject       text not null,
+  grade         integer,
+  learning_mode text check (learning_mode in ('online','offline','hybrid')) not null default 'hybrid',
+  tutor_id      text references public.teachers(id) on delete set null,
+  classroom     text,
+  zoom_link     text,
+  schedule      jsonb default '[]',
+  student_ids   text[] default '{}',
+  description   text,
+  max_students  integer default 15,
+  color         text default '#6366f1',
+  created_at    timestamptz default now()
+);
+
+create table if not exists public.payments (
+  id             text primary key,
+  student_id     text references public.students(id) on delete cascade,
+  class_id       text references public.classes(id) on delete set null,
+  amount         numeric(12,0) not null,
+  due_date       date not null,
+  paid_date      date,
+  payment_status text check (payment_status in ('paid','pending','overdue')) default 'pending',
+  description    text,
+  created_at     timestamptz default now()
+);
+
+create table if not exists public.attendance (
+  id              text primary key,
+  class_id        text references public.classes(id) on delete cascade,
+  student_id      text references public.students(id) on delete cascade,
+  attendance_date date not null,
+  status          text check (status in ('present','absent','late','excused')) not null,
+  notes           text,
+  created_at      timestamptz default now()
+);
+
+create table if not exists public.notifications (
+  id              text primary key,
+  title           text not null,
+  content         text not null,
+  category        text,
+  target_role     text check (target_role in ('student','parent','teacher','admin','all')) not null,
+  target_class_id text,
+  sent_by         text,
+  is_read         boolean default false,
+  created_at      timestamptz default now()
+);
+
+create table if not exists public.homework (
+  id          text primary key,
+  class_id    text references public.classes(id) on delete cascade,
+  title       text not null,
+  description text,
+  due_date    date not null,
+  attachments text[] default '{}',
+  created_at  timestamptz default now()
+);
+
+create table if not exists public.submissions (
+  id                text primary key,
+  homework_id       text not null,
+  student_id        text not null,
+  student_name      text,
+  file_url          text,
+  file_name         text,
+  file_size         bigint,
+  text_content      text,
+  score             numeric(5,2),
+  feedback          text,
+  teacher_file_url  text,
+  teacher_file_name text,
+  status            text check (status in ('submitted','graded','returned')) default 'submitted',
+  submitted_at      timestamptz default now(),
+  graded_at         timestamptz,
+  unique (homework_id, student_id)
+);
+
+create table if not exists public.materials (
+  id                 text primary key,
+  class_id           text,
+  title              text not null,
+  description        text,
+  file_url           text,
+  file_type          text,
+  file_size          text,
+  target_role        text,
+  target_grades      text[],
+  target_class_ids   text[],
+  target_student_ids text[],
+  uploaded_by        text,
+  created_at         timestamptz default now()
+);
+
+create index if not exists idx_students_parent    on public.students (parent_id);
+create index if not exists idx_payments_student   on public.payments (student_id);
+create index if not exists idx_attendance_student on public.attendance (student_id);
+create index if not exists idx_attendance_class   on public.attendance (class_id, attendance_date);
+create index if not exists idx_submissions_hw     on public.submissions (homework_id);
+
+
+-- ─────────────────────────── 4. Domain tables ──────────────────────────────
+-- enrollment_requests: TEXT-id (v2) shape + `package` column
+-- (migration_enrollment_package). account_password is intentionally NOT created
+-- (the production-security migration drops it).
+create table if not exists public.enrollment_requests (
+  id                 text primary key,
+  full_name          text not null,
+  email              text not null,
+  dob                text,
+  school             text,
+  grade              text,
+  requested_class_id text,
+  parent_phone       text,
+  student_phone      text,
+  note               text,
+  status             text not null default 'pending' check (status in ('pending','approved','rejected')),
+  assigned_class_id  text,
+  account_username   text,
+  reject_reason      text,
+  supabase_user_id   uuid,
+  package            text,
+  created_at         timestamptz not null default now(),
+  reviewed_at        timestamptz
+);
+comment on column public.enrollment_requests.package is
+  'Gói học viên đăng ký: online | advanced | offline';
+
+create table if not exists public.purchase_transactions (
+  id            text primary key,
+  pkg_id        text not null,
+  pkg_title     text not null,
+  amount        numeric(12,0) not null,
+  student_id    text not null,
+  student_name  text,
+  student_email text,
+  transfer_note text,
+  status        text not null default 'pending' check (status in ('pending','approved','rejected')),
+  created_at    timestamptz not null default now(),
+  reviewed_at   timestamptz
+);
+create index if not exists idx_tx_student on public.purchase_transactions (student_id, status);
+
+-- app_exam_scores: TEXT-id (v2) shape.
+create table if not exists public.app_exam_scores (
+  id          text primary key,
+  student_ref text not null,
+  class_id    text not null,
+  exam_name   text not null,
+  score       numeric(5,2) not null,
+  max_score   numeric(5,2) not null default 10,
+  exam_date   date not null,
+  created_by  text,
+  created_at  timestamptz not null default now()
+);
+create index if not exists idx_scores_student on public.app_exam_scores (student_ref);
+
+
+-- ─────────────────────────── 5. KV tables ──────────────────────────────────
+-- Generic key/value tables (id TEXT scope + JSONB value). Only the KV datasets
+-- NOT superseded by per-row tables are kept (see exclusions in the manifest).
+do $$
+declare t text;
+begin
+  foreach t in array array[
+    -- class-scoped (id = class_id)
+    'kv_curriculum',
+    'kv_schedules',
+    'kv_online_links',
+    'kv_tuition',
+    'kv_student_packages',
+    'kv_session_notes',
+    'kv_class_extra_students',
+    -- student-scoped (id = student_id / composite)
+    'kv_exam_results',
+    'kv_exam_submissions',
+    -- global (id = 'global')
+    'kv_exam_scores',
+    'kv_invoices',
+    'kv_managed_users',
+    'kv_student_accounts',
+    -- teacher-scoped (id = teacher_id)
+    'kv_teacher_settings'
+  ]
+  loop
+    execute format(
+      'create table if not exists public.%I (
+         id         text primary key,
+         value      jsonb not null,
+         updated_at timestamptz not null default now()
+       )', t);
+  end loop;
+end $$;
+
+
+-- ─────────────────────────── 6. Per-row tables ─────────────────────────────
+-- These replace the corresponding kv_* JSON blobs. TEXT ids match the app id
+-- model ("c1","s1","cls_…","mat_…"). Policies/grants are applied in section 8.
+
+create table if not exists public.course_reviews (
+  id           text primary key,
+  course_id    text not null,
+  student_id   text not null,
+  student_name text,
+  rating       integer not null check (rating between 1 and 5),
+  comment      text,
+  created_at   timestamptz not null default now(),
+  unique (course_id, student_id)
+);
+create index if not exists course_reviews_course_idx on public.course_reviews (course_id);
+
+create table if not exists public.student_comments (
+  id           text primary key,
+  student_id   text not null,
+  comment_text text not null,
+  rating       integer check (rating between 1 and 5),
+  comment_date text not null,
+  created_at   timestamptz not null default now()
+);
+create index if not exists student_comments_student_idx on public.student_comments (student_id);
+
+create table if not exists public.schedule_notifications (
+  id         text primary key,
+  class_id   text not null,
+  class_name text,
+  message    text not null,
+  created_at timestamptz not null default now()
+);
+create index if not exists schedule_notifications_class_idx on public.schedule_notifications (class_id);
+
+-- Per-user read state (replaces the old shared is_read flag).
+create table if not exists public.schedule_notification_reads (
+  notification_id text not null references public.schedule_notifications(id) on delete cascade,
+  user_id         uuid not null default auth.uid(),
+  read_at         timestamptz not null default now(),
+  primary key (notification_id, user_id)
+);
+
+create table if not exists public.class_materials (
+  id             text primary key,
+  class_id       text not null,
+  title          text not null,
+  description    text,
+  file_url       text not null,
+  file_type      text,
+  file_size      text,
+  category       text,
+  uploaded_by    text,
+  created_at     timestamptz not null default now(),
+  download_count integer not null default 0,
+  packages       jsonb,
+  pinned         boolean,
+  kind           text
+);
+create index if not exists class_materials_class_idx on public.class_materials (class_id);
+
+create table if not exists public.homework_attachments (
+  id          text primary key,
+  homework_id text not null,
+  file_url    text not null,
+  file_name   text,
+  file_size   text,
+  file_type   text,
+  created_at  timestamptz not null default now()
+);
+create index if not exists homework_attachments_hw_idx on public.homework_attachments (homework_id);
+
+create table if not exists public.class_teacher_overrides (
+  class_id   text primary key,
+  teacher_id text not null,
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.teacher_homework (
+  id         text primary key,
+  class_id   text not null,
+  data       jsonb not null,
+  created_at timestamptz not null default now()
+);
+create index if not exists teacher_homework_class_idx on public.teacher_homework (class_id);
+
+create table if not exists public.teacher_extra_classes (
+  id          text primary key,
+  tutor_id    text not null,
+  student_ids text[] not null default '{}',
+  data        jsonb not null,
+  created_at  timestamptz not null default now()
+);
+create index if not exists teacher_extra_classes_tutor_idx on public.teacher_extra_classes (tutor_id);
+
+create table if not exists public.hw_submissions (
+  id           text primary key,
+  homework_id  text not null,
+  student_id   text not null,
+  class_id     text,
+  data         jsonb not null,
+  submitted_at timestamptz not null default now()
+);
+create index if not exists hw_submissions_hw_idx      on public.hw_submissions (homework_id);
+create index if not exists hw_submissions_student_idx on public.hw_submissions (student_id);
+
+create table if not exists public.class_attendance (
+  class_id        text not null,
+  student_id      text not null,
+  attendance_date text not null,
+  data            jsonb not null,
+  primary key (class_id, student_id, attendance_date)
+);
+
+create table if not exists public.teacher_materials (
+  id         text primary key,
+  teacher_id text not null,
+  class_id   text,
+  published  boolean not null default false,
+  data       jsonb not null,
+  created_at timestamptz not null default now()
+);
+create index if not exists teacher_materials_teacher_idx on public.teacher_materials (teacher_id);
+
+create table if not exists public.parent_messages (
+  parent_id  text primary key,
+  data       jsonb not null,
+  updated_at timestamptz not null default now()
+);
+
+
+-- ─────────────────────────── 7. api_rate_limits ────────────────────────────
+create table if not exists public.api_rate_limits (
+  scope             text not null,
+  key_hash          text not null,
+  window_started_at timestamptz not null,
+  request_count     integer not null check (request_count >= 0),
+  primary key (scope, key_hash)
+);
+
+
+-- ─────────────────────── 8. Secure RPC functions ───────────────────────────
+-- SECURITY DEFINER application RPCs (executable only by service_role; grants
+-- applied at the end of this section).
+
+create or replace function public.consume_rate_limit(
+  p_scope text,
+  p_key text,
+  p_limit integer,
+  p_window_seconds integer
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  now_at timestamptz := clock_timestamp();
+  current_count integer;
+begin
+  if p_scope = '' or p_key = '' or p_limit < 1
+     or p_window_seconds < 1 or p_window_seconds > 86400 then
+    return false;
+  end if;
+
+  insert into public.api_rate_limits(scope, key_hash, window_started_at, request_count)
+  values (p_scope, p_key, now_at, 1)
+  on conflict (scope, key_hash) do update
+  set window_started_at =
+        case
+          when public.api_rate_limits.window_started_at
+               <= now_at - make_interval(secs => p_window_seconds)
+          then now_at else public.api_rate_limits.window_started_at
+        end,
+      request_count =
+        case
+          when public.api_rate_limits.window_started_at
+               <= now_at - make_interval(secs => p_window_seconds)
+          then 1 else public.api_rate_limits.request_count + 1
+        end
+  returning request_count into current_count;
+  return current_count <= p_limit;
+end;
+$$;
+
+create or replace function public.approve_enrollment_request_secure(
+  p_enrollment_id text,
+  p_assigned_class_id text,
+  p_auth_user_id uuid,
+  p_actor_id uuid
+)
+returns text
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  request_row public.enrollment_requests%rowtype;
+  student_id_value text := 'enr_' || p_enrollment_id;
+begin
+  if not exists (
+    select 1 from public.profiles
+    where id = p_actor_id and role = 'admin'
+  ) then
+    raise exception 'forbidden';
+  end if;
+
+  select * into request_row
+  from public.enrollment_requests
+  where id::text = p_enrollment_id
+  for update;
+  if not found then raise exception 'enrollment_not_found'; end if;
+  if request_row.status <> 'pending' then
+    raise exception 'enrollment_not_pending';
+  end if;
+  perform 1
+  from public.classes
+  where id::text = p_assigned_class_id
+  for update;
+  if not found then raise exception 'class_not_found'; end if;
+
+  insert into public.profiles (
+    id, email, full_name, role, must_reset_password
+  ) values (
+    p_auth_user_id, lower(request_row.email), request_row.full_name,
+    'student', true
+  )
+  on conflict (id) do update
+  set role = 'student', must_reset_password = true;
+
+  insert into public.students (
+    id, user_id, full_name, email, dob, school, grade,
+    learning_type, created_at
+  ) values (
+    student_id_value, p_auth_user_id, request_row.full_name,
+    lower(request_row.email), request_row.dob, request_row.school,
+    request_row.grade, 'hybrid', now()
+  )
+  on conflict (id) do update
+  set user_id = excluded.user_id,
+      full_name = excluded.full_name,
+      email = excluded.email,
+      dob = excluded.dob,
+      school = excluded.school,
+      grade = excluded.grade;
+
+  update public.classes
+  set student_ids =
+    case
+      when student_id_value = any(coalesce(student_ids, '{}'::text[]))
+      then student_ids
+      else array_append(coalesce(student_ids, '{}'::text[]), student_id_value)
+    end
+  where id::text = p_assigned_class_id;
+
+  if request_row.package is not null then
+    insert into public.kv_student_packages(id, value, updated_at)
+    values (
+      p_assigned_class_id,
+      jsonb_build_object(student_id_value, request_row.package),
+      now()
+    )
+    on conflict (id) do update
+    set value = coalesce(public.kv_student_packages.value, '{}'::jsonb)
+                || jsonb_build_object(student_id_value, request_row.package),
+        updated_at = now();
+  end if;
+
+  update public.enrollment_requests
+  set status = 'approved',
+      assigned_class_id = p_assigned_class_id,
+      account_username = lower(request_row.email),
+      supabase_user_id = p_auth_user_id,
+      reviewed_at = now(),
+      reject_reason = null
+  where id::text = p_enrollment_id;
+  return student_id_value;
+end;
+$$;
+
+create or replace function public.delete_enrollment_request_secure(
+  p_enrollment_id text,
+  p_actor_id uuid
+)
+returns text
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  request_row public.enrollment_requests%rowtype;
+  student_id_value text := 'enr_' || p_enrollment_id;
+begin
+  if not exists (
+    select 1 from public.profiles
+    where id = p_actor_id and role = 'admin'
+  ) then
+    raise exception 'forbidden';
+  end if;
+  select * into request_row
+  from public.enrollment_requests
+  where id::text = p_enrollment_id
+  for update;
+  if not found then raise exception 'enrollment_not_found'; end if;
+
+  update public.classes
+  set student_ids = array_remove(coalesce(student_ids, '{}'::text[]), student_id_value)
+  where id::text = request_row.assigned_class_id::text;
+  delete from public.students where id::text = student_id_value;
+  delete from public.enrollment_requests where id::text = p_enrollment_id;
+  return request_row.supabase_user_id::text;
+end;
+$$;
+
+create or replace function public.submit_exam_result_secure(
+  p_result_id text,
+  p_submissions_id text,
+  p_student_id text,
+  p_result jsonb,
+  p_allow_retry boolean
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  registry jsonb;
+begin
+  perform pg_advisory_xact_lock(hashtextextended(p_submissions_id, 0));
+  if exists (
+    select 1 from public.kv_exam_results where id::text = p_result_id
+  ) then
+    raise exception 'already_submitted';
+  end if;
+  select value into registry
+  from public.kv_exam_submissions
+  where id::text = p_submissions_id
+  for update;
+  registry := coalesce(registry, '[]'::jsonb);
+  if not p_allow_retry and registry ? p_student_id then
+    raise exception 'retry_not_allowed';
+  end if;
+
+  insert into public.kv_exam_results(id, value, updated_at)
+  values (p_result_id, p_result, now());
+  insert into public.kv_exam_submissions(id, value, updated_at)
+  values (
+    p_submissions_id,
+    case when registry ? p_student_id
+      then registry else registry || to_jsonb(p_student_id) end,
+    now()
+  )
+  on conflict (id) do update
+  set value = excluded.value, updated_at = now();
+  return true;
+end;
+$$;
+
+create or replace function public.retry_exam_secure(
+  p_result_id text,
+  p_submissions_id text,
+  p_student_id text
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+  perform pg_advisory_xact_lock(hashtextextended(p_submissions_id, 0));
+  delete from public.kv_exam_results where id::text = p_result_id;
+  update public.kv_exam_submissions
+  set value = coalesce(
+    (
+      select jsonb_agg(item)
+      from jsonb_array_elements(value) item
+      where item <> to_jsonb(p_student_id)
+    ),
+    '[]'::jsonb
+  ),
+  updated_at = now()
+  where id::text = p_submissions_id;
+  return true;
+end;
+$$;
+
+create or replace function public.replace_admin_entity_rows_secure(
+  p_table_name text,
+  p_rows jsonb,
+  p_actor_id uuid
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  update_columns text;
+begin
+  if p_table_name not in (
+    'students', 'teachers', 'classes', 'payments', 'attendance', 'notifications'
+  ) then
+    raise exception 'invalid_entity';
+  end if;
+  if jsonb_typeof(p_rows) <> 'array' or jsonb_array_length(p_rows) > 5000 then
+    raise exception 'invalid_rows';
+  end if;
+  if not exists (
+    select 1 from public.profiles
+    where id = p_actor_id and role = 'admin'
+  ) then
+    raise exception 'forbidden';
+  end if;
+
+  select string_agg(
+    format('%1$I = excluded.%1$I', column_name),
+    ', ' order by ordinal_position
+  )
+  into update_columns
+  from information_schema.columns
+  where table_schema = 'public'
+    and table_name = p_table_name
+    and column_name <> 'id';
+
+  execute format(
+    'insert into public.%1$I
+       select * from jsonb_populate_recordset(null::public.%1$I, $1)
+     on conflict (id) do update set %2$s',
+    p_table_name,
+    update_columns
+  ) using p_rows;
+
+  execute format(
+    'delete from public.%I
+     where not exists (
+       select 1 from jsonb_array_elements($1) row_value
+       where row_value->>''id'' = id::text
+     )',
+    p_table_name
+  ) using p_rows;
+  return true;
+end;
+$$;
+
+create or replace function public.mutate_invoice_secure(
+  p_action text,
+  p_invoice_id text,
+  p_child_id text,
+  p_actor_id uuid,
+  p_invoice jsonb
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  actor_role text;
+  actor_student_id text;
+  actor_parent_id text;
+  actor_teacher_id text;
+  invoices jsonb;
+  target jsonb;
+  output_value jsonb;
+begin
+  select role into actor_role from public.profiles where id = p_actor_id;
+  select id::text into actor_student_id
+  from public.students where user_id::text = p_actor_id::text limit 1;
+  select id::text into actor_parent_id
+  from public.parents where user_id::text = p_actor_id::text limit 1;
+  select id::text into actor_teacher_id
+  from public.teachers where user_id::text = p_actor_id::text limit 1;
+
+  perform pg_advisory_xact_lock(hashtextextended('kv_invoices:global', 0));
+  insert into public.kv_invoices(id, value, updated_at)
+  values ('global', '[]'::jsonb, now())
+  on conflict (id) do nothing;
+  select value into invoices
+  from public.kv_invoices where id = 'global' for update;
+  invoices := case when jsonb_typeof(invoices) = 'array'
+    then invoices else '[]'::jsonb end;
+  select item into target
+  from jsonb_array_elements(invoices) item
+  where item->>'id' = p_invoice_id
+  limit 1;
+
+  if p_action = 'submit_receipt' then
+    if actor_role = 'student' then
+      p_child_id := actor_student_id;
+    elsif actor_role = 'parent' then
+      if not exists (
+        select 1 from public.students
+        where id::text = p_child_id
+          and parent_id::text = actor_parent_id
+      ) then raise exception 'forbidden'; end if;
+    else
+      raise exception 'forbidden';
+    end if;
+    if target is null and p_invoice_id <> 'ALL' then
+      raise exception 'invoice_not_found';
+    end if;
+    select coalesce(jsonb_agg(
+      case
+        when (
+          (p_invoice_id = 'ALL' and item->>'child_id' = p_child_id
+            and item->>'status' = 'pending')
+          or (item->>'id' = p_invoice_id and item->>'child_id' = p_child_id
+            and item->>'status' = 'pending')
+        )
+        then item || jsonb_build_object(
+          'status', 'pending_verification',
+          'submitted_by', actor_role
+        )
+        else item
+      end
+    ), '[]'::jsonb) into output_value
+    from jsonb_array_elements(invoices) item;
+  elsif p_action = 'mark_paid' then
+    if target is null then raise exception 'invoice_not_found'; end if;
+    if actor_role = 'teacher' and not exists (
+      select 1 from public.classes
+      where id::text = target->>'class_id'
+        and tutor_id::text = actor_teacher_id
+    ) then raise exception 'forbidden';
+    elsif actor_role not in ('teacher', 'admin') then
+      raise exception 'forbidden';
+    end if;
+    select coalesce(jsonb_agg(
+      case when item->>'id' = p_invoice_id
+        then item || jsonb_build_object(
+          'status', 'paid',
+          'paid_at', coalesce(item->>'paid_at', now()::text)
+        )
+        else item end
+    ), '[]'::jsonb) into output_value
+    from jsonb_array_elements(invoices) item;
+  elsif p_action = 'issue' then
+    if actor_role = 'teacher' and not exists (
+      select 1 from public.classes
+      where id::text = p_invoice->>'class_id'
+        and tutor_id::text = actor_teacher_id
+        and exists (
+          select 1
+          from unnest(classes.student_ids) student_id
+          where student_id::text = p_invoice->>'child_id'
+        )
+    ) then raise exception 'forbidden';
+    elsif actor_role not in ('teacher', 'admin') then
+      raise exception 'forbidden';
+    end if;
+    if target is not null then return target; end if;
+    output_value := invoices || p_invoice;
+  else
+    raise exception 'invalid_action';
+  end if;
+
+  update public.kv_invoices
+  set value = output_value, updated_at = now()
+  where id = 'global';
+  return case when p_action = 'issue' then p_invoice else 'true'::jsonb end;
+end;
+$$;
+
+
+-- ──────────────── 9. RLS: enable/force, grants, policies ────────────────────
+-- Enable + force RLS on every table in public, then start from no direct access
+-- for anon/authenticated and grant back only the explicit allow-list below.
+-- (service_role has BYPASSRLS and is the only path for API-only tables.)
+do $$
+declare table_row record;
+begin
+  for table_row in select tablename from pg_tables where schemaname = 'public'
+  loop
+    execute format('alter table public.%I enable row level security', table_row.tablename);
+    execute format('alter table public.%I force row level security', table_row.tablename);
+  end loop;
+end $$;
+
+revoke all on all tables in schema public from anon;
+revoke all on all sequences in schema public from anon;
+revoke all on all functions in schema public from public, anon, authenticated;
+revoke all on all tables in schema public from authenticated;
+grant usage on schema public to authenticated;
+
+-- Helper function execute grants.
+grant execute on function public.get_my_role()               to authenticated, service_role;
+grant execute on function public.my_student_id()             to authenticated, service_role;
+grant execute on function public.my_teacher_id()             to authenticated, service_role;
+grant execute on function public.my_parent_id()              to authenticated, service_role;
+grant execute on function public.teaches_class(text)         to authenticated, service_role;
+grant execute on function public.enrolled_in_class(text)     to authenticated, service_role;
+grant execute on function public.parent_has_student(text)    to authenticated, service_role;
+grant execute on function public.teaches_student(text)       to authenticated, service_role;
+grant execute on function public.is_my_child(text)           to authenticated, service_role;
+
+-- Secure RPCs: service_role only.
+revoke all on function public.consume_rate_limit(text, text, integer, integer)                 from public, anon, authenticated;
+revoke all on function public.approve_enrollment_request_secure(text, text, uuid, uuid)         from public, anon, authenticated;
+revoke all on function public.delete_enrollment_request_secure(text, uuid)                      from public, anon, authenticated;
+revoke all on function public.submit_exam_result_secure(text, text, text, jsonb, boolean)       from public, anon, authenticated;
+revoke all on function public.retry_exam_secure(text, text, text)                               from public, anon, authenticated;
+revoke all on function public.replace_admin_entity_rows_secure(text, jsonb, uuid)               from public, anon, authenticated;
+revoke all on function public.mutate_invoice_secure(text, text, text, uuid, jsonb)              from public, anon, authenticated;
+grant execute on function public.consume_rate_limit(text, text, integer, integer)               to service_role;
+grant execute on function public.approve_enrollment_request_secure(text, text, uuid, uuid)      to service_role;
+grant execute on function public.delete_enrollment_request_secure(text, uuid)                   to service_role;
+grant execute on function public.submit_exam_result_secure(text, text, text, jsonb, boolean)    to service_role;
+grant execute on function public.retry_exam_secure(text, text, text)                            to service_role;
+grant execute on function public.replace_admin_entity_rows_secure(text, jsonb, uuid)            to service_role;
+grant execute on function public.mutate_invoice_secure(text, text, text, uuid, jsonb)           to service_role;
+
+-- ── profiles ────────────────────────────────────────────────────────────────
+grant select on public.profiles to authenticated;
+grant update (full_name, phone) on public.profiles to authenticated;
+drop policy if exists profiles_self_select on public.profiles;
+create policy profiles_self_select on public.profiles
+  for select to authenticated
+  using (id = auth.uid() or public.get_my_role() = 'admin');
+drop policy if exists profiles_self_update on public.profiles;
+create policy profiles_self_update on public.profiles
+  for update to authenticated
+  using (id = auth.uid())
+  with check (id = auth.uid());
+
+-- ── students / parents / teachers / classes ─────────────────────────────────
+grant select on public.students, public.parents, public.teachers, public.classes
+  to authenticated;
+drop policy if exists students_scoped_select on public.students;
+create policy students_scoped_select on public.students
+  for select to authenticated
+  using (
+    user_id::text = auth.uid()::text
+    or parent_id::text = public.my_parent_id()
+    or public.get_my_role() in ('teacher', 'admin')
+  );
+drop policy if exists parents_scoped_select on public.parents;
+create policy parents_scoped_select on public.parents
+  for select to authenticated
+  using (user_id::text = auth.uid()::text or public.get_my_role() = 'admin');
+drop policy if exists teachers_authenticated_select on public.teachers;
+create policy teachers_authenticated_select on public.teachers
+  for select to authenticated using (true);
+drop policy if exists classes_scoped_select on public.classes;
+create policy classes_scoped_select on public.classes
+  for select to authenticated
+  using (
+    public.get_my_role() = 'admin'
+    or tutor_id::text = public.my_teacher_id()
+    or exists (
+      select 1
+      from unnest(classes.student_ids) student_id
+      where student_id::text = public.my_student_id()
+    )
+    or exists (
+      select 1 from public.students s
+      where s.parent_id::text = public.my_parent_id()
+        and exists (
+          select 1
+          from unnest(classes.student_ids) student_id
+          where student_id::text = s.id::text
+        )
+    )
+  );
+
+-- ── payments / attendance / homework / submissions / materials / notifications / app_exam_scores ──
+grant select on public.payments, public.attendance, public.homework,
+  public.submissions, public.materials, public.notifications,
+  public.app_exam_scores to authenticated;
+
+drop policy if exists payments_scoped_select on public.payments;
+create policy payments_scoped_select on public.payments
+  for select to authenticated
+  using (
+    student_id::text = public.my_student_id()
+    or public.parent_has_student(student_id::text)
+    or public.teaches_class(class_id::text)
+    or public.get_my_role() = 'admin'
+  );
+drop policy if exists attendance_scoped_select on public.attendance;
+create policy attendance_scoped_select on public.attendance
+  for select to authenticated
+  using (
+    student_id::text = public.my_student_id()
+    or public.parent_has_student(student_id::text)
+    or public.teaches_class(class_id::text)
+    or public.get_my_role() = 'admin'
+  );
+drop policy if exists homework_scoped_select on public.homework;
+create policy homework_scoped_select on public.homework
+  for select to authenticated
+  using (
+    public.enrolled_in_class(class_id::text)
+    or public.teaches_class(class_id::text)
+    or public.get_my_role() = 'admin'
+  );
+drop policy if exists submissions_scoped_select on public.submissions;
+create policy submissions_scoped_select on public.submissions
+  for select to authenticated
+  using (
+    student_id::text = public.my_student_id()
+    or public.get_my_role() = 'admin'
+    or exists (
+      select 1 from public.homework h
+      where h.id::text = submissions.homework_id::text
+        and public.teaches_class(h.class_id::text)
+    )
+  );
+grant insert, update on public.submissions to authenticated;
+drop policy if exists submissions_student_insert on public.submissions;
+create policy submissions_student_insert on public.submissions
+  for insert to authenticated
+  with check (
+    student_id::text = public.my_student_id()
+    and exists (
+      select 1 from public.homework h
+      where h.id::text = submissions.homework_id::text
+        and public.enrolled_in_class(h.class_id::text)
+    )
+  );
+drop policy if exists submissions_teacher_update on public.submissions;
+create policy submissions_teacher_update on public.submissions
+  for update to authenticated
+  using (
+    public.get_my_role() = 'admin'
+    or exists (
+      select 1 from public.homework h
+      where h.id::text = submissions.homework_id::text
+        and public.teaches_class(h.class_id::text)
+    )
+  )
+  with check (
+    public.get_my_role() = 'admin'
+    or exists (
+      select 1 from public.homework h
+      where h.id::text = submissions.homework_id::text
+        and public.teaches_class(h.class_id::text)
+    )
+  );
+drop policy if exists materials_scoped_select on public.materials;
+create policy materials_scoped_select on public.materials
+  for select to authenticated
+  using (
+    public.get_my_role() = 'admin'
+    or public.teaches_class(class_id::text)
+    or public.enrolled_in_class(class_id::text)
+    or (
+      target_class_ids is not null
+      and exists (
+        select 1 from unnest(target_class_ids) target_id
+        where public.enrolled_in_class(target_id::text)
+      )
+    )
+  );
+drop policy if exists notifications_role_select on public.notifications;
+create policy notifications_role_select on public.notifications
+  for select to authenticated
+  using (
+    public.get_my_role() = 'admin'
+    or target_role = 'all'
+    or target_role = public.get_my_role()
+  );
+drop policy if exists app_exam_scores_scoped_select on public.app_exam_scores;
+create policy app_exam_scores_scoped_select on public.app_exam_scores
+  for select to authenticated
+  using (
+    student_ref::text = public.my_student_id()
+    or public.teaches_class(class_id::text)
+    or public.get_my_role() = 'admin'
+  );
+
+-- enrollment_requests and purchase_transactions are API-only (service_role):
+-- no authenticated/anon grants or policies -> default deny.
+
+-- ── KV: curriculum (answer keys; never selectable by students/parents) ───────
+grant select, insert, update, delete on public.kv_curriculum to authenticated;
+drop policy if exists curriculum_teacher_admin_all on public.kv_curriculum;
+create policy curriculum_teacher_admin_all on public.kv_curriculum
+  for all to authenticated
+  using (public.get_my_role() = 'admin' or public.teaches_class(id::text))
+  with check (public.get_my_role() = 'admin' or public.teaches_class(id::text));
+
+-- ── KV: exam results / submissions registry ─────────────────────────────────
+grant select on public.kv_exam_results to authenticated;
+drop policy if exists exam_results_scoped_select on public.kv_exam_results;
+create policy exam_results_scoped_select on public.kv_exam_results
+  for select to authenticated
+  using (
+    id like '%\_' || public.my_student_id() escape '\'
+    or public.teaches_class(split_part(id, '_', 1))
+    or public.get_my_role() = 'admin'
+  );
+grant select on public.kv_exam_submissions to authenticated;
+drop policy if exists exam_registry_teacher_select on public.kv_exam_submissions;
+create policy exam_registry_teacher_select on public.kv_exam_submissions
+  for select to authenticated
+  using (
+    public.teaches_class(split_part(id, '_', 1))
+    or public.get_my_role() = 'admin'
+  );
+
+-- ── KV: class-scoped datasets ────────────────────────────────────────────────
+-- Students read rows for classes they are enrolled in; only the class
+-- teacher/admin may write.
+do $$
+declare table_name text;
+begin
+  foreach table_name in array array[
+    'kv_schedules', 'kv_online_links', 'kv_tuition',
+    'kv_student_packages', 'kv_session_notes', 'kv_class_extra_students'
+  ]
+  loop
+    execute format('grant select, insert, update, delete on public.%I to authenticated', table_name);
+    execute format('drop policy if exists %I on public.%I', table_name || '_scoped_select', table_name);
+    execute format(
+      'create policy %I on public.%I for select to authenticated using
+       (public.get_my_role() = ''admin'' or public.teaches_class(id)
+        or public.enrolled_in_class(id))',
+      table_name || '_scoped_select', table_name
+    );
+    execute format('drop policy if exists %I on public.%I', table_name || '_teacher_write', table_name);
+    execute format(
+      'create policy %I on public.%I for all to authenticated using
+       (public.get_my_role() = ''admin'' or public.teaches_class(id))
+       with check (public.get_my_role() = ''admin'' or public.teaches_class(id))',
+      table_name || '_teacher_write', table_name
+    );
+  end loop;
+end $$;
+
+-- ── KV: teacher settings ─────────────────────────────────────────────────────
+grant select, insert, update, delete on public.kv_teacher_settings to authenticated;
+drop policy if exists teacher_settings_read on public.kv_teacher_settings;
+create policy teacher_settings_read on public.kv_teacher_settings
+  for select to authenticated using (true);
+drop policy if exists teacher_settings_owner_write on public.kv_teacher_settings;
+create policy teacher_settings_owner_write on public.kv_teacher_settings
+  for all to authenticated
+  using (public.get_my_role() = 'admin' or id::text = public.my_teacher_id())
+  with check (public.get_my_role() = 'admin' or id::text = public.my_teacher_id());
+
+-- ── KV: remaining global tables (kv_exam_scores, kv_invoices, kv_managed_users,
+--        kv_student_accounts) stay default-deny. service_role is the only path.
+
+-- ── Per-row: course_reviews ──────────────────────────────────────────────────
+grant select, insert, update, delete on public.course_reviews to authenticated;
+drop policy if exists course_reviews_read on public.course_reviews;
+create policy course_reviews_read on public.course_reviews
+  for select to authenticated using (true);
+drop policy if exists course_reviews_owner_write on public.course_reviews;
+create policy course_reviews_owner_write on public.course_reviews
+  for all to authenticated
+  using (public.get_my_role() = 'admin' or student_id = public.my_student_id())
+  with check (public.get_my_role() = 'admin' or student_id = public.my_student_id());
+
+-- ── Per-row: student_comments ────────────────────────────────────────────────
+grant select, insert, update, delete on public.student_comments to authenticated;
+drop policy if exists student_comments_read on public.student_comments;
+create policy student_comments_read on public.student_comments
+  for select to authenticated using (
+    public.get_my_role() = 'admin'
+    or public.teaches_student(student_id)
+    or student_id = public.my_student_id()
+    or public.is_my_child(student_id)
+  );
+drop policy if exists student_comments_teacher_write on public.student_comments;
+create policy student_comments_teacher_write on public.student_comments
+  for all to authenticated
+  using (public.get_my_role() = 'admin' or public.teaches_student(student_id))
+  with check (public.get_my_role() = 'admin' or public.teaches_student(student_id));
+
+-- ── Per-row: schedule_notifications (+ per-user reads) ───────────────────────
+grant select, insert, update, delete on public.schedule_notifications to authenticated;
+drop policy if exists schedule_notifications_read on public.schedule_notifications;
+create policy schedule_notifications_read on public.schedule_notifications
+  for select to authenticated using (
+    public.get_my_role() = 'admin'
+    or public.teaches_class(class_id)
+    or public.enrolled_in_class(class_id)
+  );
+drop policy if exists schedule_notifications_teacher_write on public.schedule_notifications;
+create policy schedule_notifications_teacher_write on public.schedule_notifications
+  for all to authenticated
+  using (public.get_my_role() = 'admin' or public.teaches_class(class_id))
+  with check (public.get_my_role() = 'admin' or public.teaches_class(class_id));
+
+grant select, insert, update, delete on public.schedule_notification_reads to authenticated;
+drop policy if exists schedule_reads_owner on public.schedule_notification_reads;
+create policy schedule_reads_owner on public.schedule_notification_reads
+  for all to authenticated
+  using (user_id = auth.uid())
+  with check (user_id = auth.uid());
+
+-- ── Per-row: class_materials ─────────────────────────────────────────────────
+grant select, insert, update, delete on public.class_materials to authenticated;
+drop policy if exists class_materials_read on public.class_materials;
+create policy class_materials_read on public.class_materials
+  for select to authenticated using (
+    public.get_my_role() = 'admin'
+    or public.teaches_class(class_id)
+    or public.enrolled_in_class(class_id)
+  );
+drop policy if exists class_materials_teacher_write on public.class_materials;
+create policy class_materials_teacher_write on public.class_materials
+  for all to authenticated
+  using (public.get_my_role() = 'admin' or public.teaches_class(class_id))
+  with check (public.get_my_role() = 'admin' or public.teaches_class(class_id));
+drop policy if exists class_materials_student_download on public.class_materials;
+create policy class_materials_student_download on public.class_materials
+  for update to authenticated
+  using (public.enrolled_in_class(class_id))
+  with check (public.enrolled_in_class(class_id));
+
+-- ── Per-row: homework_attachments ────────────────────────────────────────────
+grant select, insert, update, delete on public.homework_attachments to authenticated;
+drop policy if exists homework_attachments_read on public.homework_attachments;
+create policy homework_attachments_read on public.homework_attachments
+  for select to authenticated using (true);
+drop policy if exists homework_attachments_teacher_write on public.homework_attachments;
+create policy homework_attachments_teacher_write on public.homework_attachments
+  for all to authenticated
+  using (public.get_my_role() in ('teacher', 'admin'))
+  with check (public.get_my_role() in ('teacher', 'admin'));
+
+-- ── Per-row: class_teacher_overrides ─────────────────────────────────────────
+grant select, insert, update, delete on public.class_teacher_overrides to authenticated;
+drop policy if exists class_overrides_read on public.class_teacher_overrides;
+create policy class_overrides_read on public.class_teacher_overrides
+  for select to authenticated using (true);
+drop policy if exists class_overrides_admin_write on public.class_teacher_overrides;
+create policy class_overrides_admin_write on public.class_teacher_overrides
+  for all to authenticated
+  using (public.get_my_role() = 'admin')
+  with check (public.get_my_role() = 'admin');
+
+-- ── Per-row: teacher_homework ────────────────────────────────────────────────
+grant select, insert, update, delete on public.teacher_homework to authenticated;
+drop policy if exists teacher_homework_read on public.teacher_homework;
+create policy teacher_homework_read on public.teacher_homework
+  for select to authenticated using (
+    public.get_my_role() = 'admin'
+    or public.teaches_class(class_id)
+    or public.enrolled_in_class(class_id)
+  );
+drop policy if exists teacher_homework_write on public.teacher_homework;
+create policy teacher_homework_write on public.teacher_homework
+  for all to authenticated
+  using (public.get_my_role() = 'admin' or public.teaches_class(class_id))
+  with check (public.get_my_role() = 'admin' or public.teaches_class(class_id));
+
+-- ── Per-row: teacher_extra_classes ───────────────────────────────────────────
+grant select, insert, update, delete on public.teacher_extra_classes to authenticated;
+drop policy if exists teacher_extra_classes_read on public.teacher_extra_classes;
+create policy teacher_extra_classes_read on public.teacher_extra_classes
+  for select to authenticated using (
+    public.get_my_role() = 'admin'
+    or tutor_id = public.my_teacher_id()
+    or public.my_student_id() = any (student_ids)
+  );
+drop policy if exists teacher_extra_classes_write on public.teacher_extra_classes;
+create policy teacher_extra_classes_write on public.teacher_extra_classes
+  for all to authenticated
+  using (public.get_my_role() = 'admin' or tutor_id = public.my_teacher_id())
+  with check (public.get_my_role() = 'admin' or tutor_id = public.my_teacher_id());
+
+-- ── Per-row: hw_submissions ──────────────────────────────────────────────────
+grant select, insert, update, delete on public.hw_submissions to authenticated;
+drop policy if exists hw_submissions_access on public.hw_submissions;
+create policy hw_submissions_access on public.hw_submissions
+  for all to authenticated
+  using (
+    public.get_my_role() = 'admin'
+    or student_id = public.my_student_id()
+    or (class_id is not null and public.teaches_class(class_id))
+  )
+  with check (
+    public.get_my_role() = 'admin'
+    or student_id = public.my_student_id()
+    or (class_id is not null and public.teaches_class(class_id))
+  );
+
+-- ── Per-row: class_attendance ────────────────────────────────────────────────
+grant select, insert, update, delete on public.class_attendance to authenticated;
+drop policy if exists class_attendance_read on public.class_attendance;
+create policy class_attendance_read on public.class_attendance
+  for select to authenticated using (
+    public.get_my_role() = 'admin'
+    or public.teaches_class(class_id)
+    or student_id = public.my_student_id()
+    or public.is_my_child(student_id)
+  );
+drop policy if exists class_attendance_write on public.class_attendance;
+create policy class_attendance_write on public.class_attendance
+  for all to authenticated
+  using (public.get_my_role() = 'admin' or public.teaches_class(class_id))
+  with check (public.get_my_role() = 'admin' or public.teaches_class(class_id));
+
+-- ── Per-row: teacher_materials ───────────────────────────────────────────────
+grant select, insert, update, delete on public.teacher_materials to authenticated;
+drop policy if exists teacher_materials_read on public.teacher_materials;
+create policy teacher_materials_read on public.teacher_materials
+  for select to authenticated using (
+    published
+    or public.get_my_role() = 'admin'
+    or teacher_id = public.my_teacher_id()
+  );
+drop policy if exists teacher_materials_write on public.teacher_materials;
+create policy teacher_materials_write on public.teacher_materials
+  for all to authenticated
+  using (public.get_my_role() = 'admin' or teacher_id = public.my_teacher_id())
+  with check (public.get_my_role() = 'admin' or teacher_id = public.my_teacher_id());
+
+-- ── Per-row: parent_messages ─────────────────────────────────────────────────
+grant select, insert, update, delete on public.parent_messages to authenticated;
+drop policy if exists parent_messages_owner on public.parent_messages;
+create policy parent_messages_owner on public.parent_messages
+  for all to authenticated
+  using (public.get_my_role() = 'admin' or parent_id = public.my_parent_id())
+  with check (public.get_my_role() = 'admin' or parent_id = public.my_parent_id());
+
+-- ── api_rate_limits: no direct client access (service_role via RPC only) ─────
+revoke all on public.api_rate_limits from anon, authenticated;
+
+
+-- ─────────────────────── 10. Storage buckets & policies ─────────────────────
+-- All three buckets are PRIVATE. These scoped policies come from the production
+-- security migration and SUPERSEDE the phase-1 open policies in
+-- storage_open_policies.sql and storage_policies_v2.sql.
+insert into storage.buckets (id, name, public) values
+  ('avatars', 'avatars', false),
+  ('homework-submissions', 'homework-submissions', false),
+  ('class-materials', 'class-materials', false)
+on conflict (id) do nothing;
+
+update storage.buckets
+set public = false
+where id in ('class-materials', 'homework-submissions', 'avatars');
+
+-- avatars: files live under a folder named for the owner's auth uid.
+drop policy if exists storage_avatar_owner_select on storage.objects;
+create policy storage_avatar_owner_select on storage.objects
+  for select to authenticated
+  using (
+    bucket_id = 'avatars'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  );
+drop policy if exists storage_avatar_owner_insert on storage.objects;
+create policy storage_avatar_owner_insert on storage.objects
+  for insert to authenticated
+  with check (
+    bucket_id = 'avatars'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  );
+drop policy if exists storage_avatar_owner_update on storage.objects;
+create policy storage_avatar_owner_update on storage.objects
+  for update to authenticated
+  using (
+    bucket_id = 'avatars'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  )
+  with check (
+    bucket_id = 'avatars'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  );
+drop policy if exists storage_avatar_owner_delete on storage.objects;
+create policy storage_avatar_owner_delete on storage.objects
+  for delete to authenticated
+  using (
+    bucket_id = 'avatars'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+-- class-materials / homework-submissions: first path segment is the class id.
+drop policy if exists storage_class_scoped_select on storage.objects;
+create policy storage_class_scoped_select on storage.objects
+  for select to authenticated
+  using (
+    bucket_id in ('class-materials', 'homework-submissions')
+    and (
+      public.get_my_role() = 'admin'
+      or public.teaches_class((storage.foldername(name))[1])
+      or public.enrolled_in_class((storage.foldername(name))[1])
+    )
+  );
+drop policy if exists storage_class_scoped_insert on storage.objects;
+create policy storage_class_scoped_insert on storage.objects
+  for insert to authenticated
+  with check (
+    (
+      bucket_id = 'class-materials'
+      and (
+        public.get_my_role() = 'admin'
+        or public.teaches_class((storage.foldername(name))[1])
+        or (
+          (storage.foldername(name))[2] = 'homework'
+          and public.enrolled_in_class((storage.foldername(name))[1])
+        )
+      )
+    )
+    or (
+      bucket_id = 'homework-submissions'
+      and (storage.foldername(name))[2] = 'submissions'
+      and (storage.foldername(name))[3] = public.my_student_id()
+      and public.enrolled_in_class((storage.foldername(name))[1])
+    )
+  );
+drop policy if exists storage_class_teacher_update on storage.objects;
+create policy storage_class_teacher_update on storage.objects
+  for update to authenticated
+  using (
+    bucket_id in ('class-materials', 'homework-submissions')
+    and (
+      public.get_my_role() = 'admin'
+      or public.teaches_class((storage.foldername(name))[1])
+    )
+  );
+drop policy if exists storage_class_teacher_delete on storage.objects;
+create policy storage_class_teacher_delete on storage.objects
+  for delete to authenticated
+  using (
+    bucket_id in ('class-materials', 'homework-submissions')
+    and (
+      public.get_my_role() = 'admin'
+      or public.teaches_class((storage.foldername(name))[1])
+    )
+  );
+
+-- ============================================================================
+-- End of canonical schema.
+-- ============================================================================

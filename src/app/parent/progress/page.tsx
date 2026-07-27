@@ -237,7 +237,7 @@ export default function ParentProgressPage() {
               <CardContent>
                 <div className="space-y-4">
                   <div className="bg-white/60 dark:bg-black/20 p-4 rounded-xl text-sm leading-relaxed text-foreground relative">
-                    <span className="text-4xl text-amber-300 absolute top-2 left-2 opacity-50 font-serif">"</span>
+                  <span className="text-4xl text-amber-300 absolute top-2 left-2 opacity-50 font-serif">&quot;</span>
                     <p className="relative z-10 pl-4">
                       {latestComment ? latestComment.text : "Chưa có nhận xét nào từ giáo viên."}
                     </p>

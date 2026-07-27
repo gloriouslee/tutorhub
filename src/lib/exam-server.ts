@@ -1,3 +1,5 @@
+import "server-only";
+
 // Server-only helpers for exam delivery + grading (dùng trong API routes).
 // KHÔNG import file này từ client — cần SUPABASE_SERVICE_ROLE_KEY.
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
@@ -77,6 +79,26 @@ export function checkExamAccess(lesson: CurriculumLesson): ExamAccess {
   const isOpen = status === "open" || (status === "draft" && !!opensAt && new Date(opensAt) <= new Date());
   if (!isOpen) return { ok: false, reason: "not_open_yet", opens_at: opensAt };
   return { ok: true };
+}
+
+export async function verifyStudentExamScope(
+  admin: SupabaseClient,
+  classId: string,
+  studentId: string,
+  lesson: CurriculumLesson,
+): Promise<boolean> {
+  const { data: classRow, error } = await admin
+    .from("classes")
+    .select("student_ids")
+    .eq("id", classId)
+    .maybeSingle();
+  if (error || !classRow) return false;
+  const studentIds = Array.isArray(classRow.student_ids)
+    ? classRow.student_ids.map(String)
+    : [];
+  if (!studentIds.includes(studentId)) return false;
+  const assigned = lesson.assigned_to;
+  return !assigned || assigned.length === 0 || assigned.includes(studentId);
 }
 
 // ── Sanitization: học sinh KHÔNG được nhận đáp án ────────────────────────────

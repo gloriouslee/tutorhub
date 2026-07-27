@@ -14,12 +14,13 @@ import {
   MOCK_CLASSES, MOCK_HOMEWORK, MOCK_ATTENDANCE,
   MOCK_EXAM_SCORES, MOCK_TEACHERS, ATTENDANCE_CHART_DATA,
 } from "@/lib/mock-data";
-import { getNotifications, getEnrollments, kvGet, getExamScoresByStudent, getCurriculum, getExamResult, isAssignedToStudent } from "@/lib/storage";
+import { getNotifications, getEnrollments, getTeacherHomework, getExamScoresByStudent, getCurriculum, getExamResult, isAssignedToStudent } from "@/lib/storage";
 import { getSubmissionsByStudent } from "@/lib/supabase/submissions";
 import Link from "next/link";
 import { formatDate } from "@/lib/utils";
 import { useStudentContext } from "@/hooks/useStudentContext";
 import { AreaChart, Area, Tooltip, ResponsiveContainer } from "recharts";
+import type { Class } from "@/types";
 
 interface HomeworkItem {
   id: string;
@@ -37,7 +38,7 @@ const DOW_VI: Record<string, string> = {
   Thursday: "Thứ Năm", Friday: "Thứ Sáu", Saturday: "Thứ Bảy", Sunday: "Chủ Nhật",
 };
 
-function buildWeekSessions(classes: typeof MOCK_CLASSES) {
+function buildWeekSessions(classes: Class[]) {
   const now      = new Date();
   const todayIdx = now.getDay();
   const curHour  = now.getHours() + now.getMinutes() / 60;
@@ -137,7 +138,7 @@ export default function StudentDashboard() {
       const classIds = myClasses.map(c => c.id);
       const [subs, allTeacherHw] = await Promise.all([
         getSubmissionsByStudent(studentId),
-        kvGet<HomeworkItem[]>("tutorhub_teacher_homework", []).catch(() => [] as HomeworkItem[]),
+        getTeacherHomework<HomeworkItem>().catch(() => [] as HomeworkItem[]),
       ]);
       const teacher = allTeacherHw.filter(h => classIds.includes(h.class_id) && isAssignedToStudent(h.assigned_to, studentId));
       setTeacherHw(teacher);

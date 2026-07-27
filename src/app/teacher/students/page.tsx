@@ -12,13 +12,15 @@ import {
   MOCK_STUDENTS, MOCK_CLASSES, MOCK_EXAM_SCORES,
   MOCK_ATTENDANCE, MOCK_HOMEWORK, MOCK_SUBMISSIONS,
 } from "@/lib/mock-data";
+import type { Class } from "@/types";
 import {
   getStudentComments, saveStudentComment,
   getStudentPackages, type StudentPackage,
   getExamScoresByStudent, saveExamScore, deleteExamScore, type StoredExamScore,
-  kvGet,
+  getAllTeacherAttendance, getHwSubmissions,
 } from "@/lib/storage";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { useTeacherContext } from "@/hooks/useTeacherContext";
 import {
   Search, GraduationCap, BookOpen, CheckSquare,
   Star, MessageSquare, X, ChevronDown, ChevronUp,
@@ -27,8 +29,6 @@ import {
 } from "lucide-react";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-const TEACHER_ID   = "t1";
-const TEACHER_NAME = "Thầy Hùng Toán";
 const PKG_LABELS: Record<string, string> = { online: "Online", advanced: "Nâng cao", offline: "Offline" };
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -179,7 +179,7 @@ function StudentDetailPanel({
   onBack,
 }: {
   student: (typeof MOCK_STUDENTS)[0];
-  studentClasses: typeof MOCK_CLASSES;
+  studentClasses: Class[];
   packagesMap: Record<string, Record<string, StudentPackage>>;
   savedAttendance: SavedAttendanceRecord[];
   onBack: () => void;
@@ -195,8 +195,8 @@ function StudentDetailPanel({
   const classNameMap = Object.fromEntries(studentClasses.map(c => [c.id, c.class_name]));
 
   useEffect(() => {
-    kvGet<Submission[] | null>("tutorhub_submissions", null)
-      .then(subs => { if (subs) setLsSubmissions(subs); })
+    getHwSubmissions<Submission>()
+      .then(subs => { if (subs.length) setLsSubmissions(subs); })
       .catch(() => {});
     try {
       const val = localStorage.getItem(`tutorhub_gpa_target_${student.id}`);
@@ -523,7 +523,7 @@ function StudentDetailPanel({
           )}
 
           {examScores.length === 0 ? (
-            <div className="py-12 text-center text-sm text-muted-foreground">Chưa có dữ liệu điểm. Nhấn "Thêm điểm kiểm tra" để nhập.</div>
+                <div className="py-12 text-center text-sm text-muted-foreground">Chưa có dữ liệu điểm. Nhấn &quot;Thêm điểm kiểm tra&quot; để nhập.</div>
           ) : (
             <>
               {/* Bar chart */}
@@ -702,7 +702,7 @@ function StudentDetailPanel({
                                 </p>
                               )}
                               {sub.feedback && (
-                                <p className="text-[11px] text-muted-foreground italic line-clamp-2">"{sub.feedback}"</p>
+                                  <p className="text-[11px] text-muted-foreground italic line-clamp-2">&quot;{sub.feedback}&quot;</p>
                               )}
                             </div>
                           )}
@@ -818,6 +818,7 @@ function CommentModal({
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function TeacherStudentsPage() {
+  const { teacherName, myClasses } = useTeacherContext();
   const [search,            setSearch]            = useState("");
   const [filterClassId,     setFilterClassId]     = useState("all");
   const [commentTarget,     setCommentTarget]     = useState<{ id: string; full_name: string } | null>(null);
@@ -826,11 +827,6 @@ export default function TeacherStudentsPage() {
   const [packagesMap,       setPackagesMap]       = useState<Record<string, Record<string, StudentPackage>>>({});
   const [savedAttendance,   setSavedAttendance]   = useState<SavedAttendanceRecord[]>([]);
 
-  const myClasses = useMemo(
-    () => MOCK_CLASSES.filter(c => c.tutor_id === TEACHER_ID),
-    []
-  );
-
   useEffect(() => {
     async function loadPackages() {
       const map: Record<string, Record<string, StudentPackage>> = {};
@@ -838,8 +834,8 @@ export default function TeacherStudentsPage() {
       setPackagesMap(map);
     }
     loadPackages();
-    kvGet<SavedAttendanceRecord[] | null>("tutorhub_teacher_attendance", null)
-      .then(recs => { if (recs) setSavedAttendance(recs); })
+    getAllTeacherAttendance()
+      .then(recs => { if (recs.length) setSavedAttendance(recs as unknown as SavedAttendanceRecord[]); })
       .catch(() => {});
   }, [myClasses]);
 
@@ -884,7 +880,7 @@ export default function TeacherStudentsPage() {
     : [];
 
   return (
-    <PortalLayout role="teacher" userName={TEACHER_NAME} pageTitle="Học viên">
+    <PortalLayout role="teacher" userName={teacherName || "Giáo viên"} pageTitle="Học viên">
       <div className="space-y-6 max-w-6xl mx-auto">
 
         {selectedStudent ? (
