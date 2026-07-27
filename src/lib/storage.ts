@@ -1220,29 +1220,46 @@ export interface CourseReview {
   created_at: string;
 }
 
-const REVIEWS_KEY = "tutorhub_course_reviews";
-
-async function getStoredReviews(): Promise<CourseReview[]> {
-  return kvGet<CourseReview[]>(REVIEWS_KEY, []);
-}
-
+// Per-row Supabase table `course_reviews` (RLS-scoped). Reads run under the
+// signed-in user's JWT; RLS makes ratings publicly readable and limits writes
+// to the authoring student.
 export async function getCourseReviews(courseId: string): Promise<CourseReview[]> {
-  return (await getStoredReviews()).filter(r => r.course_id === courseId);
+  const { data, error } = await supabase
+    .from("course_reviews")
+    .select("*")
+    .eq("course_id", courseId);
+  if (error) {
+    console.error("getCourseReviews:", error);
+    return [];
+  }
+  return (data ?? []) as CourseReview[];
 }
 
 export async function submitCourseReview(review: Omit<CourseReview, "id">): Promise<CourseReview> {
-  const all = await getStoredReviews();
-  // One review per student per course — upsert
-  const existing = all.findIndex(r => r.course_id === review.course_id && r.student_id === review.student_id);
-  const record: CourseReview = { ...review, id: existing >= 0 ? all[existing].id : crypto.randomUUID() };
-  if (existing >= 0) all[existing] = record; else all.push(record);
-  await kvSet(REVIEWS_KEY, all);
+  // One review per student per course — upsert on (course_id, student_id).
+  const { data: existing } = await supabase
+    .from("course_reviews")
+    .select("id")
+    .eq("course_id", review.course_id)
+    .eq("student_id", review.student_id)
+    .maybeSingle();
+  const record: CourseReview = { ...review, id: existing?.id ?? crypto.randomUUID() };
+  const { error } = await supabase
+    .from("course_reviews")
+    .upsert(record, { onConflict: "course_id,student_id" });
+  if (error) {
+    console.error("submitCourseReview:", error);
+    throw error;
+  }
   return record;
 }
 
 export async function deleteReview(reviewId: string): Promise<void> {
-  const updated = (await getStoredReviews()).filter(r => r.id !== reviewId);
-  await kvSet(REVIEWS_KEY, updated);
+  const { error } = await supabase.from("course_reviews").delete().eq("id", reviewId);
+  if (error) {
+    console.error("deleteReview:", error);
+    throw error;
+  }
 }
 
 export async function getCourseRating(courseId: string): Promise<{ rating: number; reviewCount: number }> {
