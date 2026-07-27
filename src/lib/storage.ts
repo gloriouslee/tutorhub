@@ -170,6 +170,10 @@ export async function kvDelete(key: string): Promise<void> {
 // bật — ngăn thảm họa "load lỗi → state là mock → save ghi đè cả bảng thật".
 const verifiedTables = new Set<string>();
 
+// Mock fallbacks are for local/demo only. In production a failed read must never
+// render fabricated records.
+const ALLOW_MOCK_FALLBACK = process.env.NODE_ENV !== "production";
+
 // Supabase-first getter: DB là nguồn dữ liệu chính; localStorage chỉ là cache
 // offline. Bảng rỗng là trạng thái hợp lệ (đã xóa hết) — chỉ fallback khi lỗi.
 async function getEntity<T>(
@@ -189,7 +193,9 @@ async function getEntity<T>(
   verifiedTables.delete(table);
   const local = readLocal<T>(key);
   if (local !== null) return local;
-  return fallback;
+  // Production: never surface fabricated MOCK data on a read failure — return
+  // empty so a transient/RLS error shows "no data" rather than fake records.
+  return ALLOW_MOCK_FALLBACK ? fallback : [];
 }
 
 // Supabase-first saver: upsert danh sách mới, mirror vào localStorage.

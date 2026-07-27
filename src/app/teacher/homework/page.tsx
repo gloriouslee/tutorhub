@@ -55,7 +55,8 @@ async function loadHw(seedIds: string[]): Promise<Homework[]> {
   try {
     const raw = await getTeacherHomework<Homework>();
     if (raw.length) return raw;
-    // First visit: seed from mock data filtered to teacher's classes
+    if (process.env.NODE_ENV === "production") return [];
+    // Demo only: seed from mock data filtered to teacher's classes
     return MOCK_HOMEWORK
       .filter(h => seedIds.includes(h.class_id))
       .map(h => ({ ...h, description: (h as any).description ?? "" }));

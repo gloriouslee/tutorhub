@@ -133,12 +133,13 @@ const SEED_COURSES: Course[] = [
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function loadCourses(): Promise<Course[]> {
-  if (typeof window === "undefined") return SEED_COURSES;
+  const seed = process.env.NODE_ENV === "production" ? [] : SEED_COURSES;
+  if (typeof window === "undefined") return seed;
   try {
     const raw = await getTeacherMaterials<Course>();
     if (raw.length) return raw;
   } catch {}
-  return SEED_COURSES;
+  return seed;
 }
 function saveCourses(courses: Course[], teacherId: string) {
   if (!teacherId) return;

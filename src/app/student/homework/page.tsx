@@ -65,7 +65,9 @@ export default function StudentHomeworkPage() {
   const kvHwIds = new Set(teacherHw.map(h => h.id));
   const myHomework: HomeworkItem[] = [
     ...teacherHw,
-    ...MOCK_HOMEWORK.filter(h => myClassIds.includes(h.class_id) && !kvHwIds.has(h.id)),
+    ...(process.env.NODE_ENV === "production"
+      ? []
+      : MOCK_HOMEWORK.filter(h => myClassIds.includes(h.class_id) && !kvHwIds.has(h.id))),
   ];
   const [submissions,  setSubmissions]  = useState<SubmissionRecord[]>([]);
   const [filterTab,    setFilterTab]    = useState<FilterTab>("all");

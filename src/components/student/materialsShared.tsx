@@ -255,6 +255,7 @@ export async function loadTeacherCourses(): Promise<TeacherCourse[]> {
       : null;
     if (raw && raw.length > 0) return raw;
   } catch {}
+  if (process.env.NODE_ENV === "production") return [];
   return [
     { id: "tc1", classId: "c1", packages: ["online", "advanced", "offline"] },
     { id: "tc2", packages: ["advanced", "offline"] },

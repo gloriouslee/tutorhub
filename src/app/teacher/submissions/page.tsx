@@ -37,8 +37,9 @@ const DEFAULT_SUBMISSIONS: Submission[] = [
 async function loadSubmissions(): Promise<Submission[]> {
   try {
     const raw = await getHwSubmissions<Submission>();
-    return raw.length > 0 ? raw : DEFAULT_SUBMISSIONS;
-  } catch { return DEFAULT_SUBMISSIONS; }
+    if (raw.length > 0) return raw;
+    return process.env.NODE_ENV === "production" ? [] : DEFAULT_SUBMISSIONS;
+  } catch { return process.env.NODE_ENV === "production" ? [] : DEFAULT_SUBMISSIONS; }
 }
 
 // Upsert the graded submission as its own per-row record.
@@ -89,7 +90,7 @@ function TeacherSubmissionsPageInner() {
 
   const myClassIds = useMemo(() => myClasses.map(c => c.id), [myClasses]);
   const mockMyHomework = useMemo<HomeworkItem[]>(
-    () => MOCK_HOMEWORK.filter(h => myClassIds.includes(h.class_id)),
+    () => process.env.NODE_ENV === "production" ? [] : MOCK_HOMEWORK.filter(h => myClassIds.includes(h.class_id)),
     [myClassIds]
   );
 
