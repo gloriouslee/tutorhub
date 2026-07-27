@@ -1,5 +1,4 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { randomBytes } from "node:crypto";
 import { getRequestIdentity, type UserRole } from "@/lib/api-auth";
 
 const PUBLIC_ROUTES = new Set(["/login", "/enroll", "/auth/callback"]);
@@ -36,15 +35,18 @@ function redirectWithCookies(
   return response;
 }
 
-function contentSecurityPolicy(nonce: string) {
+function contentSecurityPolicy() {
   return [
     "default-src 'self'",
-    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${
+    // Next.js prerenders pages statically, so a per-request nonce cannot be
+    // applied to its inline bootstrap scripts. Use a static policy that allows
+    // self + inline scripts (and eval in dev) instead of nonce/strict-dynamic.
+    `script-src 'self' 'unsafe-inline'${
       process.env.NODE_ENV === "development" ? " 'unsafe-eval'" : ""
     }`,
-    "style-src 'self' 'unsafe-inline'",
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "img-src 'self' data: blob: https:",
-    "font-src 'self' data:",
+    "font-src 'self' data: https://fonts.gstatic.com",
     "connect-src 'self' https://*.supabase.co wss://*.supabase.co",
     "media-src 'self' blob: https:",
     "object-src 'none'",
@@ -62,11 +64,8 @@ export async function proxy(request: NextRequest) {
 
   const requestHeaders = new Headers(request.headers);
   const requestId = request.headers.get("x-request-id") ?? crypto.randomUUID();
-  const nonce = randomBytes(16).toString("base64");
-  const csp = contentSecurityPolicy(nonce);
+  const csp = contentSecurityPolicy();
   requestHeaders.set("x-request-id", requestId);
-  requestHeaders.set("x-nonce", nonce);
-  requestHeaders.set("Content-Security-Policy", csp);
   const response = NextResponse.next({ request: { headers: requestHeaders } });
   response.headers.set("x-request-id", requestId);
   response.headers.set("Content-Security-Policy", csp);
