@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { SectionHeader } from "@/components/shared";
 import { MOCK_STUDENTS, MOCK_HOMEWORK, MOCK_CLASSES } from "@/lib/mock-data";
+import { useTeacherContext } from "@/hooks/useTeacherContext";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   Search, CheckCircle2, Clock, FileText, ChevronDown, ChevronUp,
@@ -50,9 +51,7 @@ async function updateSubmission(subId: string, patch: Partial<Submission>): Prom
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-const TEACHER_ID = "t1";
 const HW_KEY = "tutorhub_teacher_homework";
-const myClassIds = MOCK_CLASSES.filter(c => c.tutor_id === TEACHER_ID).map(c => c.id);
 
 interface HomeworkItem {
   id: string;
@@ -62,14 +61,12 @@ interface HomeworkItem {
   [key: string]: unknown;
 }
 
-const MOCK_MY_HOMEWORK: HomeworkItem[] = MOCK_HOMEWORK.filter(h => myClassIds.includes(h.class_id));
-
 // Merge mock homework with teacher-created homework from localStorage
-async function loadMyHomework(): Promise<HomeworkItem[]> {
+async function loadMyHomework(mockMyHomework: HomeworkItem[]): Promise<HomeworkItem[]> {
   let stored: HomeworkItem[] = [];
   try { stored = await kvGet<HomeworkItem[]>(HW_KEY, []); } catch {}
   const storedIds = new Set(stored.map(h => h.id));
-  return [...stored, ...MOCK_MY_HOMEWORK.filter(h => !storedIds.has(h.id))];
+  return [...stored, ...mockMyHomework.filter(h => !storedIds.has(h.id))];
 }
 
 function relativeTime(iso: string) {
@@ -93,9 +90,16 @@ function scoreColor(score: number) {
 function TeacherSubmissionsPageInner() {
   const searchParams = useSearchParams();
   const hwParam = searchParams.get("hw");
+  const { teacherId, teacherName, myClasses } = useTeacherContext();
+
+  const myClassIds = useMemo(() => myClasses.map(c => c.id), [myClasses]);
+  const mockMyHomework = useMemo<HomeworkItem[]>(
+    () => MOCK_HOMEWORK.filter(h => myClassIds.includes(h.class_id)),
+    [myClassIds]
+  );
 
   const [submissions, setSubmissions] = useState<Submission[]>([]);
-  const [myHomework,  setMyHomework]  = useState<HomeworkItem[]>(MOCK_MY_HOMEWORK);
+  const [myHomework,  setMyHomework]  = useState<HomeworkItem[]>([]);
   const [hwFilter,    setHwFilter]    = useState<string>(hwParam ?? "all");
   const [statusFilter, setStatusFilter] = useState<"all" | "graded" | "ungraded">("all");
   const [search,      setSearch]      = useState("");
@@ -106,8 +110,9 @@ function TeacherSubmissionsPageInner() {
   const [tfDragOver,    setTfDragOver]    = useState(false);
 
   useEffect(() => {
+    if (!teacherId) return;
     (async () => {
-      const hwList = await loadMyHomework();
+      const hwList = await loadMyHomework(mockMyHomework);
       setMyHomework(hwList);
       // Try Supabase first, fall back to localStorage seed
       const remote = await getSubmissionsByHomeworks(hwList.map(h => h.id));
@@ -124,7 +129,7 @@ function TeacherSubmissionsPageInner() {
         setSubmissions(await loadSubmissions());
       }
     })();
-  }, []);
+  }, [teacherId, mockMyHomework]);
 
   // Filtered list
   const displayed = useMemo(() => {
@@ -197,10 +202,11 @@ function TeacherSubmissionsPageInner() {
   }
 
   const hwForSub = (sub: Submission) => myHomework.find(h => h.id === sub.homework_id);
-  const classForHw = (classId: string) => MOCK_CLASSES.find(c => c.id === classId);
+  const classForHw = (classId: string) =>
+    myClasses.find(c => c.id === classId) ?? MOCK_CLASSES.find(c => c.id === classId);
 
   return (
-    <PortalLayout role="teacher" userName="Thầy Hùng Toán" pageTitle="Quản lý Bài nộp">
+    <PortalLayout role="teacher" userName={teacherName || "Giáo viên"} pageTitle="Quản lý Bài nộp">
       <div className="space-y-6">
         <SectionHeader
           title="Chấm bài & Phản hồi"

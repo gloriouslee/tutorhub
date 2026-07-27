@@ -12,6 +12,7 @@ import {
   MOCK_STUDENTS, MOCK_CLASSES, MOCK_EXAM_SCORES,
   MOCK_ATTENDANCE, MOCK_HOMEWORK, MOCK_SUBMISSIONS,
 } from "@/lib/mock-data";
+import type { Class } from "@/types";
 import {
   getStudentComments, saveStudentComment,
   getStudentPackages, type StudentPackage,
@@ -19,6 +20,7 @@ import {
   kvGet,
 } from "@/lib/storage";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { useTeacherContext } from "@/hooks/useTeacherContext";
 import {
   Search, GraduationCap, BookOpen, CheckSquare,
   Star, MessageSquare, X, ChevronDown, ChevronUp,
@@ -27,8 +29,6 @@ import {
 } from "lucide-react";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-const TEACHER_ID   = "t1";
-const TEACHER_NAME = "Thầy Hùng Toán";
 const PKG_LABELS: Record<string, string> = { online: "Online", advanced: "Nâng cao", offline: "Offline" };
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -179,7 +179,7 @@ function StudentDetailPanel({
   onBack,
 }: {
   student: (typeof MOCK_STUDENTS)[0];
-  studentClasses: typeof MOCK_CLASSES;
+  studentClasses: Class[];
   packagesMap: Record<string, Record<string, StudentPackage>>;
   savedAttendance: SavedAttendanceRecord[];
   onBack: () => void;
@@ -818,6 +818,7 @@ function CommentModal({
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function TeacherStudentsPage() {
+  const { teacherName, myClasses } = useTeacherContext();
   const [search,            setSearch]            = useState("");
   const [filterClassId,     setFilterClassId]     = useState("all");
   const [commentTarget,     setCommentTarget]     = useState<{ id: string; full_name: string } | null>(null);
@@ -825,11 +826,6 @@ export default function TeacherStudentsPage() {
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
   const [packagesMap,       setPackagesMap]       = useState<Record<string, Record<string, StudentPackage>>>({});
   const [savedAttendance,   setSavedAttendance]   = useState<SavedAttendanceRecord[]>([]);
-
-  const myClasses = useMemo(
-    () => MOCK_CLASSES.filter(c => c.tutor_id === TEACHER_ID),
-    []
-  );
 
   useEffect(() => {
     async function loadPackages() {
@@ -884,7 +880,7 @@ export default function TeacherStudentsPage() {
     : [];
 
   return (
-    <PortalLayout role="teacher" userName={TEACHER_NAME} pageTitle="Học viên">
+    <PortalLayout role="teacher" userName={teacherName || "Giáo viên"} pageTitle="Học viên">
       <div className="space-y-6 max-w-6xl mx-auto">
 
         {selectedStudent ? (

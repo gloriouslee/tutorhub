@@ -13,9 +13,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import { toLocalDateKey } from "@/lib/utils";
 import { kvGet } from "@/lib/storage";
-
-const TEACHER_ID = "t1";
-const TEACHER_NAME = "Thầy Hùng Toán";
+import { useTeacherContext } from "@/hooks/useTeacherContext";
 
 // Classes created locally by the teacher (no detail page in MOCK_CLASSES)
 function isTeacherCreated(id?: string) {
@@ -69,10 +67,11 @@ const ATTENDANCE_CHART_DATA = [
 
 export default function TeacherDashboard() {
   const router = useRouter();
+  const { teacherName, myClasses } = useTeacherContext();
   const [extraClasses, setExtraClasses] = useState<any[]>([]);
   const [homeworks, setHomeworks] = useState<any[]>([]);
 
-  const baseMockClasses = MOCK_CLASSES.filter(c => c.tutor_id === TEACHER_ID);
+  const baseMockClasses = myClasses;
 
   useEffect(() => {
     loadExtraClasses().then(setExtraClasses);
@@ -110,7 +109,7 @@ export default function TeacherDashboard() {
         <div className="absolute -right-8 -top-8 h-40 w-40 rounded-full bg-white/10 blur-2xl" />
         <div className="relative">
           <p className="text-white/70 text-sm font-medium">Chào mừng trở lại 👨‍🏫</p>
-          <h2 className="text-2xl font-bold mt-1">{TEACHER_NAME}</h2>
+          <h2 className="text-2xl font-bold mt-1">{teacherName || "Giáo viên"}</h2>
           <p className="text-white/60 text-sm mt-1">
             {allClasses.length} lớp đang dạy · {allStudentIds.length} học viên
           </p>

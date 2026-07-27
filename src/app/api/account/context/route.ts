@@ -29,6 +29,22 @@ export async function GET(req: NextRequest) {
     });
   }
 
+  if (identity.role === "teacher" && identity.teacherId) {
+    const { data: classes, error } = await admin
+      .from("classes")
+      .select("*")
+      .eq("tutor_id", identity.teacherId);
+    if (error) {
+      return NextResponse.json({ error: "context_unavailable" }, { status: 500 });
+    }
+    return NextResponse.json({
+      role: identity.role,
+      teacherId: identity.teacherId,
+      teacherName: identity.displayName,
+      classes: classes ?? [],
+    });
+  }
+
   if (identity.role === "parent" && identity.parentId) {
     const { data: children, error: childError } = await admin
       .from("students")

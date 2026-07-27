@@ -9,13 +9,12 @@ import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/componen
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SectionHeader } from "@/components/shared";
-import { MOCK_HOMEWORK, MOCK_CLASSES } from "@/lib/mock-data";
+import { MOCK_HOMEWORK } from "@/lib/mock-data";
+import { useTeacherContext } from "@/hooks/useTeacherContext";
 import { kvGet, kvUpdate, getCurriculum, getAllExamResults } from "@/lib/storage";
 import { FileText, Plus, Calendar, CheckCircle2, Clock, X, Trash2, Edit2, ArrowRight, BookOpen, NotebookPen, PenSquare, Download } from "lucide-react";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-const TEACHER_ID   = "t1";
-const TEACHER_NAME = "Thầy Hùng Toán";
 const HW_KEY       = "tutorhub_teacher_homework";
 const SUB_KEY      = "tutorhub_submissions";
 const CLS_KEY      = "tutorhub_teacher_classes";
@@ -133,6 +132,7 @@ function dueStatus(dueDate: string): { label: string; color: string; dot: string
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function TeacherHomeworkPage() {
   const router = useRouter();
+  const { teacherId, teacherName, myClasses: baseClasses } = useTeacherContext();
 
   const [myClasses,    setMyClasses]    = useState<{ id: string; class_name: string; student_ids?: string[] }[]>([]);
   const [homeworks,    setHomeworks]    = useState<Homework[]>([]);
@@ -150,10 +150,10 @@ export default function TeacherHomeworkPage() {
   const [fErr,   setFErr]   = useState("");
 
   useEffect(() => {
+    if (!teacherId) return;
     (async () => {
-      // Build full class list: MOCK_CLASSES (filtered to teacher) + localStorage extra classes
-      const baseClasses = MOCK_CLASSES.filter(c => c.tutor_id === TEACHER_ID);
-      const extra       = (await loadExtraClasses()).filter(c => c.tutor_id === TEACHER_ID);
+      // Build full class list: real teacher classes + localStorage extra classes
+      const extra = (await loadExtraClasses()).filter(c => c.tutor_id === teacherId);
       const all = [
         ...baseClasses.map(c => ({ id: c.id, class_name: c.class_name, student_ids: c.student_ids })),
         ...extra.map(c => ({ id: c.id, class_name: c.class_name, student_ids: c.student_ids })),
@@ -168,7 +168,7 @@ export default function TeacherHomeworkPage() {
       setHomeworks([...manual.filter(h => !currIds.has(h.id)), ...curriculum]);
       setSubmissions(await loadSubs());
     })();
-  }, []);
+  }, [teacherId, baseClasses]);
 
   function openCreate() {
     setEditTarget(null);
@@ -240,7 +240,7 @@ export default function TeacherHomeworkPage() {
   const overdueCount = homeworks.filter(h =>  isHwOverdue(h)).length;
 
   return (
-    <PortalLayout role="teacher" userName={TEACHER_NAME} pageTitle="Quản lý Bài tập">
+    <PortalLayout role="teacher" userName={teacherName || "Giáo viên"} pageTitle="Quản lý Bài tập">
       <div className="space-y-6 max-w-6xl mx-auto">
         <SectionHeader
           title="Bài tập đã giao"

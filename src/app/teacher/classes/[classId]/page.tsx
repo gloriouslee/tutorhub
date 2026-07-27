@@ -24,6 +24,7 @@ import {
 } from "@/lib/storage";
 import { toLocalDateKey } from "@/lib/utils";
 import { ClassSchedule } from "@/types";
+import { useTeacherContext } from "@/hooks/useTeacherContext";
 import {
   BookOpen, Users, ArrowLeft, FileText, Plus,
   Calendar, Presentation, StickyNote,
@@ -75,6 +76,7 @@ export default function TeacherClassDetailPage() {
   const params = useParams();
   const classId = params.classId as string;
   const router = useRouter();
+  const { teacherId, teacherName, myClasses } = useTeacherContext();
 
   // Tab hiện tại đồng bộ với URL (?tab=) để nút back của trình duyệt khôi phục đúng tab.
   // Đọc từ URL khi mount + khi back/forward (popstate); mặc định "overview" để khớp SSR.
@@ -196,7 +198,7 @@ export default function TeacherClassDetailPage() {
             student_ids: found.student_ids ?? [],
             schedule: found.schedule ?? [],
             color: found.color ?? "#6366f1",
-            tutor_id: found.tutor_id ?? "t1",
+            tutor_id: found.tutor_id ?? teacherId,
             zoom_link: found.zoom_link,
           } as unknown as (typeof MOCK_CLASSES)[number]);
         }
@@ -205,7 +207,7 @@ export default function TeacherClassDetailPage() {
       .catch(() => setExtraClassLoaded(true));
   }, [classId]);
 
-  const cls = MOCK_CLASSES.find(c => c.id === classId) ?? extraClass ?? undefined;
+  const cls = myClasses.find(c => c.id === classId) ?? MOCK_CLASSES.find(c => c.id === classId) ?? extraClass ?? undefined;
 
   useEffect(() => {
     if (!cls) return;
@@ -410,7 +412,7 @@ export default function TeacherClassDetailPage() {
 
   if (!cls) {
     return (
-      <PortalLayout role="teacher" userName="Thầy Hùng Toán" pageTitle="Lớp học">
+      <PortalLayout role="teacher" userName={teacherName || "Giáo viên"} pageTitle="Lớp học">
         {!extraClassLoaded ? (
           <div className="py-20 text-center text-sm text-muted-foreground">Đang tải lớp học…</div>
         ) : (
@@ -517,7 +519,7 @@ export default function TeacherClassDetailPage() {
   }
 
   return (
-    <PortalLayout role="teacher" userName="Thầy Hùng Toán" pageTitle={cls.class_name}>
+    <PortalLayout role="teacher" userName={teacherName || "Giáo viên"} pageTitle={cls.class_name}>
       <div className="space-y-6 max-w-6xl mx-auto">
         <Link href="/teacher/classes" className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-primary transition-colors">
           <ArrowLeft className="h-4 w-4" /> Quay lại danh sách lớp
@@ -572,13 +574,13 @@ export default function TeacherClassDetailPage() {
           {/* ── Overview ── */}
           {activeTab === "overview" && (
             <OverviewTab
-              description={cls.description}
+              description={cls.description ?? ""}
               scheduleForDisplay={scheduleForDisplay}
               lectures={lectures}
               materials={materials}
               notes={notes}
               classStudentsCount={classStudents.length}
-              maxStudents={cls.max_students}
+              maxStudents={cls.max_students ?? 0}
               onlineLink={onlineLink}
               onEditSchedule={() => setActiveTab("schedule")}
               onQuickAdd={type => {

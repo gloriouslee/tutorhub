@@ -5,18 +5,17 @@ import PortalLayout from "@/components/layout/PortalLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { AttendanceBadge, LearningModeBadge, SectionHeader } from "@/components/shared";
-import { MOCK_STUDENTS, MOCK_CLASSES, MOCK_ATTENDANCE } from "@/lib/mock-data";
+import { MOCK_STUDENTS, MOCK_ATTENDANCE } from "@/lib/mock-data";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { formatDate, toLocalDateKey } from "@/lib/utils";
 import { kvGet, kvSet } from "@/lib/storage";
+import { useTeacherContext } from "@/hooks/useTeacherContext";
 import {
   CheckSquare, Users, UserCheck, UserX, Clock,
   CalendarDays, ChevronLeft, ChevronRight, Save,
 } from "lucide-react";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-const TEACHER_ID   = "t1";
-const TEACHER_NAME = "Thầy Hùng Toán";
 const LS_KEY       = "tutorhub_teacher_attendance";
 
 type Status = "present" | "absent" | "late" | "excused";
@@ -61,17 +60,19 @@ async function loadExtraClasses(): Promise<ExtraClass[]> {
 }
 
 export default function TeacherAttendancePage() {
+  const { teacherId, teacherName, myClasses, ready } = useTeacherContext();
   const [extraClasses, setExtraClasses] = useState<ExtraClass[]>([]);
   useEffect(() => {
-    loadExtraClasses().then(list => setExtraClasses(list.filter(c => c.tutor_id === TEACHER_ID)));
-  }, []);
+    if (!teacherId) return;
+    loadExtraClasses().then(list => setExtraClasses(list.filter(c => c.tutor_id === teacherId)));
+  }, [teacherId]);
 
   const teacherClasses = useMemo(
     () => [
-      ...MOCK_CLASSES.filter(c => c.tutor_id === TEACHER_ID),
+      ...myClasses,
       ...extraClasses,
     ],
-    [extraClasses]
+    [myClasses, extraClasses]
   );
 
   const [selectedClassId, setSelectedClassId] = useState(teacherClasses[0]?.id ?? "");
@@ -160,16 +161,24 @@ export default function TeacherAttendancePage() {
     setTimeout(() => setSaveFlash(false), 2000);
   }
 
+  if (!ready) {
+    return (
+      <PortalLayout role="teacher" userName={teacherName || "Giáo viên"} pageTitle="Điểm danh">
+        <p className="text-muted-foreground text-sm">Đang tải...</p>
+      </PortalLayout>
+    );
+  }
+
   if (teacherClasses.length === 0) {
     return (
-      <PortalLayout role="teacher" userName={TEACHER_NAME} pageTitle="Điểm danh">
+      <PortalLayout role="teacher" userName={teacherName || "Giáo viên"} pageTitle="Điểm danh">
         <p className="text-muted-foreground text-sm">Bạn chưa có lớp nào.</p>
       </PortalLayout>
     );
   }
 
   return (
-    <PortalLayout role="teacher" userName={TEACHER_NAME} pageTitle="Điểm danh">
+    <PortalLayout role="teacher" userName={teacherName || "Giáo viên"} pageTitle="Điểm danh">
       <div className="space-y-6 max-w-5xl mx-auto">
         <SectionHeader
           title="Điểm danh học viên"
