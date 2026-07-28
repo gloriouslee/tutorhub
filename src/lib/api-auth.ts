@@ -38,9 +38,15 @@ function createRequestClient(req: NextRequest, response?: NextResponse) {
         return req.cookies.getAll();
       },
       setAll(cookies) {
+        // Honour the "remember me" preference: when off (th_remember=0), rewrite
+        // refreshed auth cookies as session cookies so they clear on browser close.
+        const sessionOnly = req.cookies.get("th_remember")?.value === "0";
         cookies.forEach(({ name, value, options }) => {
+          const opts = sessionOnly
+            ? { ...options, maxAge: undefined, expires: undefined }
+            : options;
           req.cookies.set(name, value);
-          response?.cookies.set(name, value, options);
+          response?.cookies.set(name, value, opts);
         });
       },
     },
@@ -60,19 +66,51 @@ export async function getRequestIdentity(
   const supabase = createRequestClient(req, response);
   if (!supabase) return null;
 
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser();
-  if (userError || !user) return null;
+  const { data: claimsData, error: claimsError } =
+    await supabase.auth.getClaims();
+  if (claimsError || !claimsData?.claims?.sub) return null;
+
+  const claims = claimsData.claims;
+  const userId = claims.sub;
+  const email = typeof claims.email === "string" ? claims.email : null;
+  const metadataRole = claims.app_metadata?.role;
+
+  const loadRoleEntity = async (role: UserRole) => {
+    if (role === "admin") return null;
+    const table =
+      role === "student"
+        ? "students"
+        : role === "teacher"
+          ? "teachers"
+          : "parents";
+    const { data } = await supabase
+      .from(table)
+      .select("id, full_name")
+      .eq("user_id", userId)
+      .maybeSingle();
+    return data
+      ? {
+          id: String(data.id),
+          fullName: String(data.full_name ?? email?.split("@")[0] ?? "User"),
+        }
+      : null;
+  };
+
+  // New accounts carry a verified role in app_metadata. Start the matching
+  // entity lookup in parallel with the profile lookup to avoid a second RTT.
+  const metadataEntityPromise = isRole(metadataRole)
+    ? loadRoleEntity(metadataRole)
+    : Promise.resolve(null);
+  const [profileResult, metadataEntity] = await Promise.all([
+    supabase
+      .from("profiles")
+      .select("role, must_reset_password")
+      .eq("id", userId)
+      .maybeSingle(),
+    metadataEntityPromise,
+  ]);
 
   let profile: { role?: unknown; must_reset_password?: unknown } | null = null;
-  const profileResult = await supabase
-    .from("profiles")
-    .select("role, must_reset_password")
-    .eq("id", user.id)
-    .maybeSingle();
-
   if (!profileResult.error) {
     profile = profileResult.data;
   } else {
@@ -80,52 +118,32 @@ export async function getRequestIdentity(
     const legacyProfile = await supabase
       .from("profiles")
       .select("role")
-      .eq("id", user.id)
+      .eq("id", userId)
       .maybeSingle();
     profile = legacyProfile.data;
   }
 
-  const roleCandidate = profile?.role ?? user.app_metadata?.role;
+  const roleCandidate = profile?.role ?? metadataRole;
   if (!isRole(roleCandidate)) return null;
 
+  const roleEntity =
+    roleCandidate === metadataRole
+      ? metadataEntity
+      : await loadRoleEntity(roleCandidate);
   const identity: RequestIdentity = {
-    userId: user.id,
-    email: user.email ?? null,
+    userId,
+    email,
     role: roleCandidate,
-    displayName: user.email?.split("@")[0] ?? "User",
+    displayName: roleEntity?.fullName ?? email?.split("@")[0] ?? "User",
     mustResetPassword: profile?.must_reset_password === true,
   };
 
   if (identity.role === "student") {
-    const { data } = await supabase
-      .from("students")
-      .select("id, full_name")
-      .eq("user_id", user.id)
-      .maybeSingle();
-    if (data?.id) {
-      identity.studentId = String(data.id);
-      identity.displayName = String(data.full_name ?? identity.displayName);
-    }
+    identity.studentId = roleEntity?.id;
   } else if (identity.role === "teacher") {
-    const { data } = await supabase
-      .from("teachers")
-      .select("id, full_name")
-      .eq("user_id", user.id)
-      .maybeSingle();
-    if (data?.id) {
-      identity.teacherId = String(data.id);
-      identity.displayName = String(data.full_name ?? identity.displayName);
-    }
+    identity.teacherId = roleEntity?.id;
   } else if (identity.role === "parent") {
-    const { data } = await supabase
-      .from("parents")
-      .select("id, full_name")
-      .eq("user_id", user.id)
-      .maybeSingle();
-    if (data?.id) {
-      identity.parentId = String(data.id);
-      identity.displayName = String(data.full_name ?? identity.displayName);
-    }
+    identity.parentId = roleEntity?.id;
   }
 
   return identity;

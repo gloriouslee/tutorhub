@@ -22,6 +22,7 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPass, setShowPass] = useState(false);
+  const [remember, setRemember] = useState(true);
   const [loginLoading, setLoginLoading] = useState(false);
   const [loginError, setLoginError] = useState("");
   const [loginNotice, setLoginNotice] = useState("");
@@ -33,6 +34,9 @@ export default function LoginPage() {
     setLoginLoading(true);
 
     try {
+      // Ghi nhớ đăng nhập: đặt preference (cả client + server đọc để quyết định
+      // cookie phiên hay lâu dài) TRƯỚC khi tạo client + đăng nhập.
+      document.cookie = `th_remember=${remember ? "1" : "0"}; path=/; max-age=${60 * 60 * 24 * 365}; samesite=lax`;
       const supabase = createClient();
       const { error } = await supabase.auth.signInWithPassword({
         email: email.trim().toLowerCase(),
@@ -188,6 +192,16 @@ export default function LoginPage() {
                 className="h-12"
               />
             </div>
+
+            <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={remember}
+                onChange={(e) => setRemember(e.target.checked)}
+                className="h-4 w-4 rounded border-input text-primary focus:ring-primary"
+              />
+              Ghi nhớ đăng nhập trên thiết bị này
+            </label>
 
             {loginError && (
               <div className="text-sm text-red-500 bg-red-50 dark:bg-red-900/20 px-4 py-3 rounded-xl border border-red-200 dark:border-red-800 animate-in slide-in-from-top-2">
