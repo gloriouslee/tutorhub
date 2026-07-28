@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -32,21 +33,7 @@ import {
   Calendar, Presentation, StickyNote,
   CalendarDays, CheckSquare, Map, Wallet,
 } from "lucide-react";
-import CurriculumTab from "@/components/teacher/CurriculumTab";
-import TuitionTab from "@/components/teacher/TuitionTab";
 import OverviewTab from "@/components/teacher/OverviewTab";
-import SessionsTab from "@/components/teacher/SessionsTab";
-import HomeworkTab from "@/components/teacher/HomeworkTab";
-import ScheduleTab from "@/components/teacher/ScheduleTab";
-import LecturesTab from "@/components/teacher/LecturesTab";
-import MaterialsTab from "@/components/teacher/MaterialsTab";
-import NotesTab from "@/components/teacher/NotesTab";
-import StudentsTab from "@/components/teacher/StudentsTab";
-import AddStudentModal from "@/components/teacher/AddStudentModal";
-import HomeworkModal from "@/components/teacher/HomeworkModal";
-import SessionNotesPanel from "@/components/teacher/SessionNotesPanel";
-import UploadModal from "@/components/teacher/UploadModal";
-import FeedbackModal from "@/components/teacher/FeedbackModal";
 import {
   generateSessions,
   type Homework,
@@ -54,6 +41,49 @@ import {
   type AttendanceStatus,
   type SavedAttendanceRecord,
 } from "@/components/teacher/classDetail.types";
+
+function DeferredPanelFallback() {
+  return (
+    <div className="space-y-3 p-6" aria-label="Đang tải nội dung">
+      <div className="h-6 w-40 animate-pulse rounded-lg bg-muted" />
+      <div className="h-28 animate-pulse rounded-2xl bg-muted/70" />
+      <div className="h-28 animate-pulse rounded-2xl bg-muted/50" />
+    </div>
+  );
+}
+
+const CurriculumTab = dynamic(() => import("@/components/teacher/CurriculumTab"), {
+  loading: DeferredPanelFallback,
+});
+const TuitionTab = dynamic(() => import("@/components/teacher/TuitionTab"), {
+  loading: DeferredPanelFallback,
+});
+const SessionsTab = dynamic(() => import("@/components/teacher/SessionsTab"), {
+  loading: DeferredPanelFallback,
+});
+const HomeworkTab = dynamic(() => import("@/components/teacher/HomeworkTab"), {
+  loading: DeferredPanelFallback,
+});
+const ScheduleTab = dynamic(() => import("@/components/teacher/ScheduleTab"), {
+  loading: DeferredPanelFallback,
+});
+const LecturesTab = dynamic(() => import("@/components/teacher/LecturesTab"), {
+  loading: DeferredPanelFallback,
+});
+const MaterialsTab = dynamic(() => import("@/components/teacher/MaterialsTab"), {
+  loading: DeferredPanelFallback,
+});
+const NotesTab = dynamic(() => import("@/components/teacher/NotesTab"), {
+  loading: DeferredPanelFallback,
+});
+const StudentsTab = dynamic(() => import("@/components/teacher/StudentsTab"), {
+  loading: DeferredPanelFallback,
+});
+const AddStudentModal = dynamic(() => import("@/components/teacher/AddStudentModal"));
+const HomeworkModal = dynamic(() => import("@/components/teacher/HomeworkModal"));
+const SessionNotesPanel = dynamic(() => import("@/components/teacher/SessionNotesPanel"));
+const UploadModal = dynamic(() => import("@/components/teacher/UploadModal"));
+const FeedbackModal = dynamic(() => import("@/components/teacher/FeedbackModal"));
 
 type TabKey = "overview" | "curriculum" | "sessions" | "homework" | "schedule" | "lectures" | "materials" | "notes" | "students" | "tuition";
 

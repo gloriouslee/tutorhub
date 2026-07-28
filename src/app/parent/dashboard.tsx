@@ -208,7 +208,7 @@ export default function ParentDashboard() {
               <CardHeader className="pb-3"><CardTitle className="text-sm">Lịch sử điểm danh</CardTitle></CardHeader>
               <CardContent>
                 {attendanceChartData.length > 0 ? (
-                  <ResponsiveContainer width="100%" height={160}>
+                  <ResponsiveContainer width="100%" height={160} minWidth={0} minHeight={0} initialDimension={{ width: 800, height: 160 }}>
                     <BarChart data={attendanceChartData} barSize={8}>
                       <XAxis dataKey="month" tick={{ fontSize: 10, fill: "rgb(var(--muted-foreground))" }} axisLine={false} tickLine={false} />
                       <YAxis hide />

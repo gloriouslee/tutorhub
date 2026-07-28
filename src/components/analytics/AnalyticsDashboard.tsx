@@ -168,7 +168,7 @@ export default function AnalyticsDashboard({
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <ChartCard title="Xu hướng doanh thu" span badge={<span className="text-xs text-emerald-600 bg-emerald-50 dark:bg-emerald-950/20 px-2 py-0.5 rounded-lg">Tổng {formatCurrency(kpis.totalRevenue)}</span>}>
           {revTrend.some(d => d.doanhThu > 0) ? (
-            <ResponsiveContainer width="100%" height={220}>
+            <ResponsiveContainer width="100%" height={220} minWidth={0} minHeight={0} initialDimension={{ width: 800, height: 220 }}>
               <BarChart data={revTrend} barSize={26}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgb(var(--border))" vertical={false} />
                 <XAxis dataKey="month" tick={AXIS} axisLine={false} tickLine={false} />
@@ -182,7 +182,7 @@ export default function AnalyticsDashboard({
 
         <ChartCard title="Học viên theo hình thức">
           {modeDist.length > 0 ? (
-            <ResponsiveContainer width="100%" height={220}>
+            <ResponsiveContainer width="100%" height={220} minWidth={0} minHeight={0} initialDimension={{ width: 800, height: 220 }}>
               <PieChart>
                 <Pie data={modeDist} cx="50%" cy="50%" innerRadius={45} outerRadius={70} paddingAngle={4} dataKey="value">
                   {modeDist.map((e, i) => <Cell key={i} fill={e.color} />)}
@@ -200,7 +200,7 @@ export default function AnalyticsDashboard({
         {showTeacherBreakdown && (
           <ChartCard title="Doanh thu theo giáo viên">
             {byTeacher.length > 0 ? (
-              <ResponsiveContainer width="100%" height={240}>
+              <ResponsiveContainer width="100%" height={240} minWidth={0} minHeight={0} initialDimension={{ width: 800, height: 240 }}>
                 <BarChart data={byTeacher} layout="vertical" barSize={18} margin={{ left: 10 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgb(var(--border))" horizontal={false} />
                   <XAxis type="number" tick={AXIS} axisLine={false} tickLine={false} tickFormatter={trVND} />
@@ -217,7 +217,7 @@ export default function AnalyticsDashboard({
 
         <ChartCard title="Doanh thu theo lớp">
           {byClass.length > 0 ? (
-            <ResponsiveContainer width="100%" height={240}>
+            <ResponsiveContainer width="100%" height={240} minWidth={0} minHeight={0} initialDimension={{ width: 800, height: 240 }}>
               <BarChart data={byClass} layout="vertical" barSize={18} margin={{ left: 10 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgb(var(--border))" horizontal={false} />
                 <XAxis type="number" tick={AXIS} axisLine={false} tickLine={false} tickFormatter={trVND} />
@@ -236,7 +236,7 @@ export default function AnalyticsDashboard({
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <ChartCard title="Tăng trưởng học viên" span>
           {growth.some(d => d.luyKe > 0) ? (
-            <ResponsiveContainer width="100%" height={220}>
+            <ResponsiveContainer width="100%" height={220} minWidth={0} minHeight={0} initialDimension={{ width: 800, height: 220 }}>
               <AreaChart data={growth}>
                 <defs>
                   <linearGradient id="gGrowth" x1="0" y1="0" x2="0" y2="1">
@@ -257,7 +257,7 @@ export default function AnalyticsDashboard({
 
         <ChartCard title="Sĩ số theo lớp">
           {enroll.length > 0 ? (
-            <ResponsiveContainer width="100%" height={220}>
+            <ResponsiveContainer width="100%" height={220} minWidth={0} minHeight={0} initialDimension={{ width: 800, height: 220 }}>
               <BarChart data={enroll} barSize={22}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgb(var(--border))" vertical={false} />
                 <XAxis dataKey="name" tick={{ ...AXIS, fontSize: 9 }} axisLine={false} tickLine={false} interval={0} angle={-12} textAnchor="end" height={50} />
@@ -276,7 +276,7 @@ export default function AnalyticsDashboard({
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <ChartCard title="Điểm trung bình theo lớp" span>
           {examPerf.length > 0 ? (
-            <ResponsiveContainer width="100%" height={220}>
+            <ResponsiveContainer width="100%" height={220} minWidth={0} minHeight={0} initialDimension={{ width: 800, height: 220 }}>
               <BarChart data={examPerf} barSize={26}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgb(var(--border))" vertical={false} />
                 <XAxis dataKey="name" tick={{ ...AXIS, fontSize: 9 }} axisLine={false} tickLine={false} interval={0} angle={-12} textAnchor="end" height={50} />
@@ -312,7 +312,7 @@ export default function AnalyticsDashboard({
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <ChartCard title="Xu hướng điểm danh (%)" span>
           {attTrend.some(d => d.coMat > 0 || d.vangMat > 0) ? (
-            <ResponsiveContainer width="100%" height={220}>
+            <ResponsiveContainer width="100%" height={220} minWidth={0} minHeight={0} initialDimension={{ width: 800, height: 220 }}>
               <LineChart data={attTrend}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgb(var(--border))" />
                 <XAxis dataKey="month" tick={AXIS} axisLine={false} tickLine={false} />
@@ -328,7 +328,7 @@ export default function AnalyticsDashboard({
 
         <ChartCard title="Chuyên cần theo lớp (%)">
           {attByClass.length > 0 ? (
-            <ResponsiveContainer width="100%" height={220}>
+            <ResponsiveContainer width="100%" height={220} minWidth={0} minHeight={0} initialDimension={{ width: 800, height: 220 }}>
               <BarChart data={attByClass} layout="vertical" barSize={16} margin={{ left: 10 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgb(var(--border))" horizontal={false} />
                 <XAxis type="number" domain={[0, 100]} tick={AXIS} axisLine={false} tickLine={false} tickFormatter={v => `${v}%`} />

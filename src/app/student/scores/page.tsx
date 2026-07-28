@@ -372,7 +372,7 @@ export default function StudentScoresPage() {
               <CardContent className="p-2">
                 {radarData.length >= 3 ? (
                   <div className="h-[280px]">
-                    <ResponsiveContainer width="100%" height="100%">
+                    <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0} initialDimension={{ width: 800, height: 280 }}>
                       <RadarChart cx="50%" cy="50%" outerRadius="65%" data={radarData}>
                         <PolarGrid stroke="hsl(var(--border))" />
                         <PolarAngleAxis dataKey="subject" tick={{ fill: "hsl(var(--foreground))", fontSize: 11, fontWeight: 500 }} />

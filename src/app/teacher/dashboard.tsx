@@ -265,7 +265,7 @@ export default function TeacherDashboard() {
         <Card>
           <CardHeader><CardTitle className="text-sm">Biểu đồ chuyên cần</CardTitle></CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={180}>
+            <ResponsiveContainer width="100%" height={180} minWidth={0} minHeight={0} initialDimension={{ width: 800, height: 180 }}>
               <LineChart data={ATTENDANCE_CHART_DATA}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.06)" />
                 <XAxis dataKey="month" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />

@@ -22,7 +22,7 @@ import {
   ExternalLink, Check, Map, CalendarDays, UserCheck, UserX, Timer, Minus,
   ClipboardList, ChevronDown, Send, XCircle, CheckSquare, NotebookPen, PenSquare, Search,
 } from "lucide-react";
-import { formatDate, toLocalDateKey } from "@/lib/utils";
+import { formatDate, mapWithConcurrency, toLocalDateKey } from "@/lib/utils";
 import { useStudentContext } from "@/hooks/useStudentContext";
 
 type AttendanceStatus = "present" | "absent" | "late" | "excused";
@@ -296,7 +296,7 @@ export default function StudentClassDetailPage() {
     getCurriculum(classId).then(async chapters => {
       const today = new Date().toISOString().slice(0, 10);
       const byDate: Record<string, CurriculumSession> = {};
-      const currHws: HomeworkItem[] = [];
+      const currHomeworkLoaders: Array<() => Promise<HomeworkItem>> = [];
       const lectureCards: LectureCard[] = [];
       const matCards: StoredClassMaterial[] = [];
       // Tra tiêu đề bài tập (để hiển thị "Chữa cho: …" trên video chữa bài)
@@ -310,23 +310,30 @@ export default function StudentClassDetailPage() {
             if (!isLessonVisibleToStudent(lesson, studentId)) continue;
             const created = s.date ?? today;
             if (lesson.type === "homework") {
-              currHws.push({
+              currHomeworkLoaders.push(async () => ({
                 id: lesson.id, class_id: classId, title: lesson.title,
                 description: (lesson as any).description,
                 due_date: (lesson as any).due_date ?? s.date ?? today,
                 created_at: created, kind: "file",
-              });
+              }));
             } else if (lesson.type === "exam") {
-              const result = await getExamResult(classId, lesson.id, studentId).catch(() => null);
-              const manual = result ? Object.values(result.manual_scores ?? {}).reduce((a, b) => a + b, 0) : 0;
-              currHws.push({
-                id: lesson.id, class_id: classId, title: lesson.title,
-                description: (lesson as any).description,
-                due_date: (lesson as any).exam_opens_at?.slice(0, 10) ?? s.date ?? today,
-                created_at: created, kind: "exam",
-                exam_done: !!result,
-                exam_score: result ? Math.round((result.score + manual) * 100) / 100 : undefined,
-                exam_total: result?.total,
+              currHomeworkLoaders.push(async () => {
+                const result = await getExamResult(classId, lesson.id, studentId).catch(() => null);
+                const manual = result
+                  ? Object.values(result.manual_scores ?? {}).reduce((a, b) => a + b, 0)
+                  : 0;
+                return {
+                  id: lesson.id,
+                  class_id: classId,
+                  title: lesson.title,
+                  description: (lesson as any).description,
+                  due_date: (lesson as any).exam_opens_at?.slice(0, 10) ?? s.date ?? today,
+                  created_at: created,
+                  kind: "exam" as const,
+                  exam_done: !!result,
+                  exam_score: result ? Math.round((result.score + manual) * 100) / 100 : undefined,
+                  exam_total: result?.total,
+                };
               });
             } else if (lesson.type === "lecture" || lesson.type === "solution") {
               lectureCards.push({
@@ -352,6 +359,11 @@ export default function StudentClassDetailPage() {
           }
         }
       }
+      const currHws = await mapWithConcurrency(
+        currHomeworkLoaders,
+        8,
+        (loadHomework) => loadHomework(),
+      );
       setCurriculumByDate(byDate);
       setCurriculumLectures(lectureCards);
       setCurriculumMaterials(matCards);

@@ -17,7 +17,7 @@ import {
 import { getNotifications, getEnrollments, getTeacherHomework, getExamScoresByStudent, getCurriculum, getExamResult, isAssignedToStudent, isLessonVisibleToStudent } from "@/lib/storage";
 import { getSubmissionsByStudent } from "@/lib/supabase/submissions";
 import Link from "next/link";
-import { formatDate } from "@/lib/utils";
+import { formatDate, mapWithConcurrency } from "@/lib/utils";
 import { useStudentContext } from "@/hooks/useStudentContext";
 import { AreaChart, Area, Tooltip, ResponsiveContainer } from "recharts";
 import type { Class } from "@/types";
@@ -82,25 +82,51 @@ export default function StudentDashboard() {
   useEffect(() => {
     if (!ready) return;
 
+    const curriculaPromise = Promise.all(
+      myClasses.map(async (cls) => ({
+        classId: cls.id,
+        chapters: await getCurriculum(cls.id).catch(() => []),
+      })),
+    );
+    const examResultsPromise = curriculaPromise.then(async (curricula) => {
+      const exams = curricula.flatMap(({ classId, chapters }) =>
+        chapters
+          .flatMap(ch => ch.sessions)
+          .flatMap(session => session.lessons)
+          .filter(lesson => lesson.type === "exam")
+          .map(lesson => ({ classId, lesson })),
+      );
+      const results = await mapWithConcurrency(
+        exams,
+        8,
+        ({ classId, lesson }) =>
+          getExamResult(classId, lesson.id, studentId).catch(() => null),
+      );
+      return { exams, results };
+    });
+
     // Scores — gộp điểm mock (demo) + điểm lưu tay + bài thi online đã làm,
     // giống trang /student/scores để học sinh thật cũng có điểm TB.
     (async () => {
       const mock = MOCK_EXAM_SCORES.filter(e => e.student_id === studentId)
         .map(e => ({ id: e.id, score: e.score, max_score: e.max_score }));
-      const stored = (await getExamScoresByStudent(studentId))
+      const [storedScores, { exams, results }] = await Promise.all([
+        getExamScoresByStudent(studentId),
+        examResultsPromise,
+      ]);
+      const stored = storedScores
         .map(e => ({ id: e.id, score: e.score, max_score: e.max_score }));
       const taken: { id: string; score: number; max_score: number }[] = [];
-      for (const cls of myClasses) {
-        const chapters = await getCurriculum(cls.id);
-        const examLessons = chapters.flatMap(ch => ch.sessions).flatMap(s => s.lessons).filter(l => l.type === "exam");
-        const results = await Promise.all(examLessons.map(l => getExamResult(cls.id, l.id, studentId)));
-        examLessons.forEach((lesson, i) => {
-          const rec = results[i];
-          if (!rec) return;
-          const manualSum = Object.values(rec.manual_scores ?? {}).reduce((a, b) => a + b, 0);
-          taken.push({ id: `tutorhub_exam_result_${cls.id}_${lesson.id}_${studentId}`, score: rec.score + manualSum, max_score: rec.total });
+      exams.forEach(({ classId, lesson }, index) => {
+        const rec = results[index];
+        if (!rec) return;
+        const manualSum = Object.values(rec.manual_scores ?? {}).reduce((a, b) => a + b, 0);
+        taken.push({
+          id: `tutorhub_exam_result_${classId}_${lesson.id}_${studentId}`,
+          score: rec.score + manualSum,
+          max_score: rec.total,
         });
-      }
+      });
       const seen = new Set<string>();
       const merged = [...mock, ...stored, ...taken].filter(e => {
         if (seen.has(e.id)) return false; seen.add(e.id); return true;
@@ -137,25 +163,45 @@ export default function StudentDashboard() {
     // Submissions + teacher-created homework (kv wins on id collision)
     (async () => {
       const classIds = myClasses.map(c => c.id);
-      const [subs, allTeacherHw] = await Promise.all([
+      const [subs, allTeacherHw, curricula, { exams, results }] = await Promise.all([
         getSubmissionsByStudent(studentId),
         getTeacherHomework<HomeworkItem>().catch(() => [] as HomeworkItem[]),
+        curriculaPromise,
+        examResultsPromise,
       ]);
+      const examResultByKey = new Map(
+        exams.map((exam, index) => [
+          `${exam.classId}:${exam.lesson.id}`,
+          results[index],
+        ] as const),
+      );
       const teacher = allTeacherHw.filter(h => classIds.includes(h.class_id) && isAssignedToStudent(h.assigned_to, studentId));
       // Bài tập / bài thi từ lộ trình (curriculum) — giống trang /student/homework.
       const today = new Date().toISOString().slice(0, 10);
       const currItems: HomeworkItem[] = [];
-      for (const cid of classIds) {
-        const chapters = await getCurriculum(cid).catch(() => []);
+      for (const { classId, chapters } of curricula) {
         for (const ch of chapters) {
           for (const s of ch.sessions) {
             for (const lesson of s.lessons) {
               if (!isLessonVisibleToStudent(lesson, studentId)) continue;
               if (lesson.type === "homework") {
-                currItems.push({ id: lesson.id, class_id: cid, title: lesson.title, due_date: (lesson as any).due_date ?? s.date ?? today, created_at: s.date });
+                currItems.push({
+                  id: lesson.id,
+                  class_id: classId,
+                  title: lesson.title,
+                  due_date: (lesson as any).due_date ?? s.date ?? today,
+                  created_at: s.date,
+                });
               } else if (lesson.type === "exam") {
-                const r = await getExamResult(cid, lesson.id, studentId).catch(() => null);
-                currItems.push({ id: lesson.id, class_id: cid, title: lesson.title, due_date: (lesson as any).exam_opens_at?.slice(0, 10) ?? s.date ?? today, created_at: s.date, exam_done: !!r });
+                const result = examResultByKey.get(`${classId}:${lesson.id}`);
+                currItems.push({
+                  id: lesson.id,
+                  class_id: classId,
+                  title: lesson.title,
+                  due_date: (lesson as any).exam_opens_at?.slice(0, 10) ?? s.date ?? today,
+                  created_at: s.date,
+                  exam_done: !!result,
+                });
               }
             }
           }
@@ -445,7 +491,7 @@ export default function StudentDashboard() {
                   )}
                 </div>
                 <div className="h-[140px] -mx-6 -mb-6">
-                  <ResponsiveContainer width="100%" height="100%">
+                  <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0} initialDimension={{ width: 800, height: 140 }}>
                     <AreaChart data={ATTENDANCE_CHART_DATA} margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>
                       <defs>
                         <linearGradient id="colorPresent" x1="0" y1="0" x2="0" y2="1">

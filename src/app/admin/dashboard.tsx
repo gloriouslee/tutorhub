@@ -94,7 +94,7 @@ export default function AdminDashboard() {
         <Card className="md:col-span-2 border border-border">
           <CardHeader><CardTitle className="text-sm">Xu hướng doanh thu</CardTitle></CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={200}>
+            <ResponsiveContainer width="100%" height={200} minWidth={0} minHeight={0} initialDimension={{ width: 800, height: 200 }}>
               <BarChart data={revenueChartData} barSize={22}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgb(var(--border))" vertical={false} />
                 <XAxis dataKey="month" tick={AXIS} axisLine={false} tickLine={false} />
@@ -110,7 +110,7 @@ export default function AdminDashboard() {
         <Card className="border border-border">
           <CardHeader><CardTitle className="text-sm">Học viên theo hình thức</CardTitle></CardHeader>
           <CardContent className="flex items-center justify-center">
-            <ResponsiveContainer width="100%" height={200}>
+            <ResponsiveContainer width="100%" height={200} minWidth={0} minHeight={0} initialDimension={{ width: 800, height: 200 }}>
               <PieChart>
                 <Pie data={pieData} cx="50%" cy="45%" innerRadius={50} outerRadius={75} paddingAngle={4} dataKey="value">
                   {pieData.map((entry, i) => <Cell key={i} fill={entry.color} />)}
@@ -195,7 +195,7 @@ export default function AdminDashboard() {
         <Card className="border border-border">
           <CardHeader><CardTitle className="text-sm">Xu hướng Điểm danh (%)</CardTitle></CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={180}>
+            <ResponsiveContainer width="100%" height={180} minWidth={0} minHeight={0} initialDimension={{ width: 800, height: 180 }}>
               <LineChart data={attendanceChartData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgb(var(--border))" />
                 <XAxis dataKey="month" tick={AXIS} axisLine={false} tickLine={false} />

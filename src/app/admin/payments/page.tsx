@@ -221,7 +221,7 @@ export default function AdminPaymentsPage() {
         <Card>
           <CardHeader><CardTitle className="text-sm">Doanh thu theo tháng</CardTitle></CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={200}>
+            <ResponsiveContainer width="100%" height={200} minWidth={0} minHeight={0} initialDimension={{ width: 800, height: 200 }}>
               <BarChart data={monthlyData} barSize={36}>
                 <XAxis dataKey="month" tick={{ fontSize: 11, fill: "rgb(var(--muted-foreground))" }} axisLine={false} tickLine={false} />
                 <YAxis tick={{ fontSize: 11, fill: "rgb(var(--muted-foreground))" }} axisLine={false} tickLine={false} tickFormatter={v => `${(v / 1000000).toFixed(0)}tr`} />

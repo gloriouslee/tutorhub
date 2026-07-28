@@ -396,6 +396,11 @@ create index if not exists idx_payments_student   on public.payments (student_id
 create index if not exists idx_attendance_student on public.attendance (student_id);
 create index if not exists idx_attendance_class   on public.attendance (class_id, attendance_date);
 create index if not exists idx_submissions_hw     on public.submissions (homework_id);
+create index if not exists parents_user_id_idx on public.parents (user_id) where user_id is not null;
+create index if not exists teachers_user_id_idx on public.teachers (user_id) where user_id is not null;
+create index if not exists students_user_id_idx on public.students (user_id) where user_id is not null;
+create index if not exists classes_tutor_id_idx on public.classes (tutor_id) where tutor_id is not null;
+create index if not exists classes_student_ids_gin_idx on public.classes using gin (student_ids);
 
 
 -- ─────────────────────────── 4. Domain tables ──────────────────────────────
