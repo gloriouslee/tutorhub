@@ -256,6 +256,32 @@ export async function saveClasses(classes: Class[]): Promise<void> {
   return saveEntity(ENTITY_KEYS.classes, "classes", classes);
 }
 
+// Targeted single-class write/delete (admin + owning teacher via RLS). Avoids the
+// destructive full-table replace that could drop classes created by others.
+export async function upsertClass(cls: Class): Promise<void> {
+  const { error } = await supabase.from("classes").upsert({
+    id: cls.id,
+    class_name: cls.class_name,
+    subject: cls.subject,
+    grade: typeof cls.grade === "number" ? cls.grade : (cls.grade != null && /^[0-9]+$/.test(String(cls.grade)) ? Number(cls.grade) : null),
+    learning_mode: cls.learning_mode,
+    tutor_id: cls.tutor_id,
+    classroom: cls.classroom ?? null,
+    zoom_link: cls.zoom_link ?? null,
+    schedule: cls.schedule ?? [],
+    student_ids: cls.student_ids ?? [],
+    description: cls.description ?? null,
+    max_students: cls.max_students ?? 15,
+    color: cls.color ?? "#6366f1",
+  }, { onConflict: "id" });
+  if (error) { console.error("upsertClass:", error); throw error; }
+}
+
+export async function deleteClass(id: string): Promise<void> {
+  const { error } = await supabase.from("classes").delete().eq("id", id);
+  if (error) { console.error("deleteClass:", error); throw error; }
+}
+
 export async function getPayments(): Promise<Payment[]> {
   return getEntity(
     ENTITY_KEYS.payments,

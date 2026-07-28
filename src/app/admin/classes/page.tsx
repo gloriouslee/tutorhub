@@ -10,7 +10,7 @@ import { Search, Plus, X, Edit, Trash2, Calendar, MapPin, Video, User } from "lu
 import { Input } from "@/components/ui/input";
 import { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
-import { getClasses, saveClasses, getTeachers, getStudents, setClassTeacherOverride } from "@/lib/storage";
+import { getClasses, upsertClass, deleteClass, getTeachers, getStudents, setClassTeacherOverride } from "@/lib/storage";
 import { Class, Teacher, Student } from "@/types";
 
 const DAY_VI: Record<string, string> = {
@@ -107,7 +107,7 @@ function AdminClassesPageInner() {
     if (confirm("Xác nhận xóa lớp học này?")) {
       const updated = classes.filter(c => c.id !== id);
       setClasses(updated);
-      await saveClasses(updated);
+      await deleteClass(id);
     }
   };
 
@@ -143,7 +143,8 @@ function AdminClassesPageInner() {
           : c
       );
       setClasses(updated);
-      await saveClasses(updated);
+      const edited = updated.find(c => c.id === editingClass.id);
+      if (edited) await upsertClass(edited);
       // Persist teacher assignment so teacher portal picks it up
       await setClassTeacherOverride(editingClass.id, formData.tutor_id);
     } else {
@@ -166,7 +167,7 @@ function AdminClassesPageInner() {
       };
       const updated = [...classes, newClass];
       setClasses(updated);
-      await saveClasses(updated);
+      await upsertClass(newClass);
     }
     setIsModalOpen(false);
   };

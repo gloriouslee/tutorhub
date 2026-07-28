@@ -26,7 +26,11 @@ export default function ParentPaymentsPage() {
   const [receiptFile,  setReceiptFile]  = useState<File | null>(null);
   const [submitting,   setSubmitting]   = useState(false);
   const [teacherQR,    setTeacherQR]    = useState<TeacherSettings>({});
-  useEffect(() => { getTeacherSettings("t1").then(setTeacherQR); }, []);
+  useEffect(() => {
+    const tid = children.flatMap(ch => (ch as { classes?: { tutor_id?: string }[] }).classes ?? []).find(c => c.tutor_id)?.tutor_id;
+    if (tid) getTeacherSettings(tid).then(setTeacherQR);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [children]);
 
   const load = async () => setInvoices((await getInvoices()).filter(inv => childIds.includes(inv.child_id)));
   // eslint-disable-next-line react-hooks/exhaustive-deps

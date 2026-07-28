@@ -54,7 +54,7 @@ type ModalTarget =
 
 // ── Inner component ───────────────────────────────────────────────────────────
 function PaymentsContent() {
-  const { studentId, studentName } = useStudentContext();
+  const { studentId, studentName, myClasses } = useStudentContext();
   const STUDENT = { id: studentId, name: studentName, email: "" };
   const params   = useSearchParams();
   const pkgParam = params.get("pkg");
@@ -64,9 +64,13 @@ function PaymentsContent() {
   const [modalTarget,    setModalTarget]     = useState<ModalTarget | null>(null);
   const [receiptFile,    setReceiptFile]     = useState<File | null>(null);
   const [submitting,     setSubmitting]      = useState(false);
-  // QR + thông tin ngân hàng do giáo viên cấu hình (Cài đặt). Demo: 1 giáo viên "t1".
+  // QR + thông tin ngân hàng do giáo viên của học sinh cấu hình (Cài đặt).
   const [teacherQR,      setTeacherQR]       = useState<TeacherSettings>({});
-  useEffect(() => { getTeacherSettings("t1").then(setTeacherQR); }, []);
+  useEffect(() => {
+    const tid = myClasses.find(c => c.tutor_id)?.tutor_id;
+    if (tid) getTeacherSettings(tid).then(setTeacherQR);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [myClasses.map(c => c.id).join(",")]);
 
   useEffect(() => {
     getInvoices().then(list => setInvoices(list.filter(inv => inv.child_id === STUDENT.id)));

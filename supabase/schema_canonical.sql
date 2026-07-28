@@ -1343,7 +1343,22 @@ end $$;
 grant select, insert, update, delete on public.kv_teacher_settings to authenticated;
 drop policy if exists teacher_settings_read on public.kv_teacher_settings;
 create policy teacher_settings_read on public.kv_teacher_settings
-  for select to authenticated using (true);
+  for select to authenticated using (
+    public.get_my_role() = 'admin'
+    or id::text = public.my_teacher_id()
+    or exists (
+      select 1 from public.classes c
+      where c.tutor_id::text = id::text
+        and (
+          public.my_student_id() = any (c.student_ids)
+          or exists (
+            select 1 from public.students s
+            where s.parent_id::text = public.my_parent_id()
+              and s.id::text = any (c.student_ids)
+          )
+        )
+    )
+  );
 drop policy if exists teacher_settings_owner_write on public.kv_teacher_settings;
 create policy teacher_settings_owner_write on public.kv_teacher_settings
   for all to authenticated
