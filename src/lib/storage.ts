@@ -43,8 +43,12 @@ function writeLocal<T>(key: string, items: T[]): void {
 // nên call site không cần biết chi tiết. localStorage vẫn là cache offline.
 
 // [prefix key cũ, tên bảng] — prefix dài/cụ thể phải đứng trước prefix ngắn
+// NOTE: datasets migrated to per-row tables (student_comments, course_reviews,
+// class_materials, homework_attachments, class_teacher_overrides, teacher_homework,
+// teacher classes→classes, teacher_attendance, teacher_materials, submissions,
+// parent_messages, schedule_notifications) are accessed via their own wrappers,
+// NOT through this KV routing map — their old kv_* tables no longer exist.
 const KV_PREFIX_ROUTES: Array<[string, string]> = [
-  ["tutorhub_schedule_notifications", "kv_schedule_notifications"],
   ["tutorhub_curriculum_",            "kv_curriculum"],
   ["tutorhub_schedule_",              "kv_schedules"],
   ["tutorhub_online_link_",           "kv_online_links"],
@@ -52,24 +56,13 @@ const KV_PREFIX_ROUTES: Array<[string, string]> = [
   ["tutorhub_student_packages_",      "kv_student_packages"],
   ["tutorhub_session_notes_",         "kv_session_notes"],
   ["tutorhub_class_extra_students_",  "kv_class_extra_students"],
-  ["tutorhub_comments_",              "kv_student_comments"],
   ["tutorhub_exam_result_",           "kv_exam_results"],
   ["tutorhub_exam_submissions_",      "kv_exam_submissions"],
   ["tutorhub_exam_scores",            "kv_exam_scores"],
-  ["tutorhub_course_reviews",         "kv_course_reviews"],
   ["tutorhub_invoices",               "kv_invoices"],
   ["tutorhub_managed_users",          "kv_managed_users"],
   ["tutorhub_student_accounts",       "kv_student_accounts"],
-  ["tutorhub_homework_attachments",   "kv_homework_attachments"],
-  ["tutorhub_class_materials",        "kv_class_materials"],
-  ["tutorhub_class_teacher_overrides","kv_class_overrides"],
   ["tutorhub_teacher_settings_",      "kv_teacher_settings"],
-  ["tutorhub_teacher_homework",       "kv_teacher_homework"],
-  ["tutorhub_teacher_classes",        "kv_teacher_classes"],
-  ["tutorhub_teacher_attendance",     "kv_teacher_attendance"],
-  ["tutorhub_teacher_materials",      "kv_teacher_materials"],
-  ["tutorhub_submissions",            "kv_submissions"],
-  ["tutorhub_parent_messages",        "kv_parent_messages"],
 ];
 
 // key cũ → { bảng, id } (id = phần sau prefix, hoặc 'global' nếu không có)

@@ -1164,7 +1164,8 @@ export default function StudentClassDetailPage() {
                               size="sm"
                               variant="outline"
                               className="flex-1 text-xs h-8"
-                              onClick={() => mat.file_url && window.open(mat.file_url, "_blank", "noopener,noreferrer")}
+                              disabled={!mat.file_url || mat.file_url.startsWith("/uploads/")}
+                              onClick={() => mat.file_url && !mat.file_url.startsWith("/uploads/") && window.open(mat.file_url, "_blank", "noopener,noreferrer")}
                             >
                               <Eye className="h-3 w-3 mr-1.5" />Xem
                             </Button>
@@ -1172,8 +1173,9 @@ export default function StudentClassDetailPage() {
                               size="sm"
                               variant="gradient"
                               className="flex-1 text-xs h-8"
+                              disabled={!mat.file_url || mat.file_url.startsWith("/uploads/")}
                               onClick={() => {
-                                if (!mat.file_url) return;
+                                if (!mat.file_url || mat.file_url.startsWith("/uploads/")) return;
                                 if (mat.id.startsWith("mat_")) void incrementMaterialDownload(mat.id);
                                 const a = document.createElement("a");
                                 a.href = mat.file_url;

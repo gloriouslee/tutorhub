@@ -103,23 +103,33 @@ export async function PUT(
   }
 
   if (actor.role === "teacher" && entity === "notifications") {
+    // A teacher may only write notifications scoped to a class they own. This
+    // prevents overwriting other users' notifications (by id) or injecting into
+    // classes they don't teach. Rows for other classes are ignored, not written.
+    const { data: owned } = await admin
+      .from("classes")
+      .select("id")
+      .eq("tutor_id", actor.teacherId ?? "");
+    const ownedSet = new Set((owned ?? []).map((c) => String(c.id)));
     const safeItems = items.filter(
       (item) =>
         item.target_role !== "admin" &&
         typeof item.title === "string" &&
         item.title.length <= 200 &&
         typeof item.content === "string" &&
-        item.content.length <= 5_000,
+        item.content.length <= 5_000 &&
+        typeof item.target_class_id === "string" &&
+        ownedSet.has(item.target_class_id),
     );
-    if (safeItems.length !== items.length) {
-      return NextResponse.json({ error: "invalid_notification" }, { status: 400 });
+    if (safeItems.length === 0) {
+      return NextResponse.json({ success: true, written: 0 });
     }
     for (const item of safeItems) item.sent_by = actor.userId;
     const { error } = await admin.from("notifications").upsert(safeItems);
     if (error) {
       return NextResponse.json({ error: "notification_save_failed" }, { status: 500 });
     }
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, written: safeItems.length });
   }
 
   return NextResponse.json({ error: "forbidden" }, { status: 403 });
