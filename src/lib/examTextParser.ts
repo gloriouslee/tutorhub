@@ -223,7 +223,9 @@ export const MATH_TOKEN_RE = /\[m:(\d+)\]/g;
 
 /** Chỉ cho phép http(s) và data:image — tránh javascript:, file:… */
 function sanitizeImgUrl(url: string): string | null {
-  return /^(https?:\/\/|data:image\/)/i.test(url) ? url : null;
+  // Accept http(s), data:image, and same-origin relative paths ("/api/files?…"
+  // for uploaded files). Reject everything else (e.g. javascript:).
+  return /^(https?:\/\/|data:image\/|\/)/i.test(url) ? url : null;
 }
 
 function imgTag(url: string): string {

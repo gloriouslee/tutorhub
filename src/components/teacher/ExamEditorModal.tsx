@@ -70,7 +70,7 @@ function FormatGuide({ open, onToggle }: { open: boolean; onToggle: () => void }
 function fieldToHtml(text: string, registry: ExamAssetRegistry): string {
   const resolved = resolveRegistryTokens(text || "", registry);
   const esc = resolved.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  const withImgs = esc.replace(/\[img:(https?:\/\/[^\]\s]+|data:image\/[^\]\s]+)\]/g,
+  const withImgs = esc.replace(/\[img:(https?:\/\/[^\]\s]+|data:image\/[^\]\s]+|\/[^\]\s]+)\]/g,
     (_, url) => `<img src="${url.replace(/"/g, "&quot;")}" alt="hình" class="inline-block max-h-48 rounded-lg my-1" />`);
   return renderMathInHtml(withImgs).replace(/\n/g, "<br/>");
 }
