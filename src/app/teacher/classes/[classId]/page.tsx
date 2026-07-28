@@ -379,7 +379,7 @@ export default function TeacherClassDetailPage() {
     if (!cls) return;
     (async () => {
       try {
-        const all = await getTeacherHomework<Homework>();
+        const all = await getTeacherHomework<Homework>([classId]);
         const forClass = all.filter(h => h.class_id === classId && h.source !== "curriculum");
         const base: Homework[] = forClass.length > 0
           ? forClass
@@ -407,7 +407,9 @@ export default function TeacherClassDetailPage() {
       }
 
       try {
-        const rawSub = await getHwSubmissions<Submission>();
+        const rawSub = await getHwSubmissions<Submission>({
+          classIds: [classId],
+        });
         const subFallback = process.env.NODE_ENV === "production" ? [] : (MOCK_SUBMISSIONS as any[]);
         setSubmissions(rawSub.length ? rawSub : subFallback);
       } catch {
@@ -418,10 +420,10 @@ export default function TeacherClassDetailPage() {
 
   // Load attendance from localStorage
   useEffect(() => {
-    getAllTeacherAttendance()
+    getAllTeacherAttendance({ classIds: [classId] })
       .then(recs => setSavedAttendanceRecords(recs as SavedAttendanceRecord[]))
       .catch(() => setSavedAttendanceRecords([]));
-  }, []);
+  }, [classId]);
 
   // Load extra students from localStorage
   useEffect(() => {

@@ -34,9 +34,9 @@ const DEFAULT_SUBMISSIONS: Submission[] = [
   { id: "sub6", homework_id: "h4", student_id: "s4", student_name: "Phạm Thảo My",     status: "submitted", submitted_at: "2026-06-30T09:00:00Z", file_name: "phamthaomy_tracnghiem.pdf" },
 ];
 
-async function loadSubmissions(): Promise<Submission[]> {
+async function loadSubmissions(classIds: string[]): Promise<Submission[]> {
   try {
-    const raw = await getHwSubmissions<Submission>();
+    const raw = await getHwSubmissions<Submission>({ classIds });
     if (raw.length > 0) return raw;
     return process.env.NODE_ENV === "production" ? [] : DEFAULT_SUBMISSIONS;
   } catch { return process.env.NODE_ENV === "production" ? [] : DEFAULT_SUBMISSIONS; }
@@ -58,9 +58,12 @@ interface HomeworkItem {
 }
 
 // Merge mock homework with teacher-created homework from localStorage
-async function loadMyHomework(mockMyHomework: HomeworkItem[]): Promise<HomeworkItem[]> {
+async function loadMyHomework(
+  mockMyHomework: HomeworkItem[],
+  classIds: string[],
+): Promise<HomeworkItem[]> {
   let stored: HomeworkItem[] = [];
-  try { stored = await getTeacherHomework<HomeworkItem>(); } catch {}
+  try { stored = await getTeacherHomework<HomeworkItem>(classIds); } catch {}
   const storedIds = new Set(stored.map(h => h.id));
   return [...stored, ...mockMyHomework.filter(h => !storedIds.has(h.id))];
 }
@@ -108,7 +111,7 @@ function TeacherSubmissionsPageInner() {
   useEffect(() => {
     if (!teacherId) return;
     (async () => {
-      const hwList = await loadMyHomework(mockMyHomework);
+      const hwList = await loadMyHomework(mockMyHomework, myClassIds);
       setMyHomework(hwList);
       // Try Supabase first, fall back to localStorage seed
       const remote = await getSubmissionsByHomeworks(hwList.map(h => h.id));
@@ -122,10 +125,10 @@ function TeacherSubmissionsPageInner() {
         })) as Submission[];
         setSubmissions(enriched);
       } else {
-        setSubmissions(await loadSubmissions());
+        setSubmissions(await loadSubmissions(myClassIds));
       }
     })();
-  }, [teacherId, mockMyHomework]);
+  }, [teacherId, mockMyHomework, myClassIds]);
 
   // Filtered list
   const displayed = useMemo(() => {

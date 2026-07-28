@@ -3,11 +3,7 @@
 // Tất cả hàm aggregation đều thuần (pure) để dễ test và tái dùng cho cả 2 view;
 // view giáo viên truyền `classIds` để lọc về đúng lớp mình dạy.
 
-import {
-  getClasses, getStudents, getTeachers, getInvoicesRaw,
-  getAllTeacherAttendance, getClassTuition, getClassTeacherOverrides, getAllExamScores,
-  type TuitionInvoice, type StoredExamScore,
-} from "@/lib/storage";
+import type { TuitionInvoice, StoredExamScore } from "@/lib/storage";
 import type { Class, Student, Teacher, Attendance } from "@/types";
 
 const MONTHS_VI = ["Th.1", "Th.2", "Th.3", "Th.4", "Th.5", "Th.6", "Th.7", "Th.8", "Th.9", "Th.10", "Th.11", "Th.12"];
@@ -51,6 +47,16 @@ export function lastNMonths(n: number, now = new Date()): { year: number; month:
 
 // ── Nạp toàn bộ dữ liệu thô ────────────────────────────────────────────────────
 export async function loadAnalyticsData(): Promise<AnalyticsData> {
+  const {
+    getClasses,
+    getStudents,
+    getTeachers,
+    getInvoicesRaw,
+    getAllTeacherAttendance,
+    getClassTuition,
+    getClassTeacherOverrides,
+    getAllExamScores,
+  } = await import("@/lib/storage");
   const [classes, students, teachers, invoices, teacherAtt, overrides, storedScores] = await Promise.all([
     getClasses(),
     getStudents(),

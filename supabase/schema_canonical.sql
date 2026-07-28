@@ -602,6 +602,7 @@ create table if not exists public.hw_submissions (
 );
 create index if not exists hw_submissions_hw_idx      on public.hw_submissions (homework_id);
 create index if not exists hw_submissions_student_idx on public.hw_submissions (student_id);
+create index if not exists hw_submissions_class_idx on public.hw_submissions (class_id) where class_id is not null;
 
 create table if not exists public.class_attendance (
   class_id        text not null,
@@ -610,6 +611,7 @@ create table if not exists public.class_attendance (
   data            jsonb not null,
   primary key (class_id, student_id, attendance_date)
 );
+create index if not exists class_attendance_student_date_idx on public.class_attendance (student_id, attendance_date desc);
 
 create table if not exists public.teacher_materials (
   id         text primary key,

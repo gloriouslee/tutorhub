@@ -165,7 +165,7 @@ export default function StudentDashboard() {
       const classIds = myClasses.map(c => c.id);
       const [subs, allTeacherHw, curricula, { exams, results }] = await Promise.all([
         getSubmissionsByStudent(studentId),
-        getTeacherHomework<HomeworkItem>().catch(() => [] as HomeworkItem[]),
+        getTeacherHomework<HomeworkItem>(classIds).catch(() => [] as HomeworkItem[]),
         curriculaPromise,
         examResultsPromise,
       ]);

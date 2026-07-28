@@ -507,7 +507,7 @@ export default function TuitionTab({ classId, className, students }: Props) {
   const reload = useCallback(() => {
     getClassTuition(classId).then(setConfig);
     getInvoices().then(list => setInvoices(list.filter(inv => inv.class_id === classId)));
-    getAllTeacherAttendance().then(list => setAttendance(list.filter(a => a.class_id === classId)));
+    getAllTeacherAttendance({ classIds: [classId] }).then(setAttendance);
   }, [classId]);
   useEffect(() => { reload(); }, [reload]);
 

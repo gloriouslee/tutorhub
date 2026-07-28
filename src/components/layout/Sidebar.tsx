@@ -131,7 +131,7 @@ async function computeBadges(
     ]);
     // Bài tập "Chưa nộp" — cùng nguồn với trang bài tập: homework giáo viên tạo
     // (kv) + mock nền theo lớp thật của học sinh, trừ bài đã nộp (Supabase → kv).
-    const teacherHw = (await getTeacherHomework<{ id: string; class_id: string }>())
+    const teacherHw = (await getTeacherHomework<{ id: string; class_id: string }>(myClassIds))
       .filter(h => myClassIds.includes(h.class_id));
     const kvHwIds = new Set(teacherHw.map(h => h.id));
     const myHw = [
@@ -140,7 +140,9 @@ async function computeBadges(
     ];
     let subs = await getSubmissionsByStudent(sid).catch(() => []);
     if (subs.length === 0) {
-      const local = await getHwSubmissions<{ homework_id: string; student_id: string }>();
+      const local = await getHwSubmissions<{ homework_id: string; student_id: string }>({
+        studentIds: [sid],
+      });
       subs = local.filter(s => s.student_id === sid) as typeof subs;
     }
     const submittedIds = new Set(subs.map(s => s.homework_id));

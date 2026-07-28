@@ -27,8 +27,12 @@ interface SavedRecord {
   saved_at: string;
 }
 
-async function loadSaved(): Promise<SavedRecord[]> {
-  try { return await getAllTeacherAttendance(); } catch { return []; }
+async function loadSaved(classIds: string[]): Promise<SavedRecord[]> {
+  try {
+    return await getAllTeacherAttendance({ classIds });
+  } catch {
+    return [];
+  }
 }
 async function persistSaved(records: SavedRecord[]) {
   await saveClassAttendance(records);
@@ -72,6 +76,11 @@ export default function TeacherAttendancePage() {
     ],
     [myClasses, extraClasses]
   );
+  const teacherClassIds = useMemo(
+    () => teacherClasses.map(c => c.id),
+    [teacherClasses],
+  );
+  const teacherClassKey = teacherClassIds.join(",");
 
   const [selectedClassId, setSelectedClassId] = useState(teacherClasses[0]?.id ?? "");
   const [date,            setDate]            = useState(today());
@@ -83,8 +92,9 @@ export default function TeacherAttendancePage() {
 
   // Load saved records from localStorage
   useEffect(() => {
-    loadSaved().then(setSavedRecords);
-  }, []);
+    loadSaved(teacherClassIds).then(setSavedRecords);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [teacherClassKey]);
 
   // When class or date changes, pre-fill marks from saved/mock data
   useEffect(() => {

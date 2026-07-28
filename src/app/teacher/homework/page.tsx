@@ -53,7 +53,7 @@ async function loadExtraClasses(): Promise<ExtraClass[]> {
 
 async function loadHw(seedIds: string[]): Promise<Homework[]> {
   try {
-    const raw = await getTeacherHomework<Homework>();
+    const raw = await getTeacherHomework<Homework>(seedIds);
     if (raw.length) return raw;
     if (process.env.NODE_ENV === "production") return [];
     // Demo only: seed from mock data filtered to teacher's classes
@@ -75,8 +75,12 @@ async function removeHw(id: string, fallback: Homework[]): Promise<Homework[]> {
   return fallback.filter(h => h.id !== id);
 }
 
-async function loadSubs(): Promise<Submission[]> {
-  try { return await getHwSubmissions<Submission>(); } catch { return []; }
+async function loadSubs(classIds: string[]): Promise<Submission[]> {
+  try {
+    return await getHwSubmissions<Submission>({ classIds });
+  } catch {
+    return [];
+  }
 }
 
 // Bài tập từ lộ trình (nộp file + làm câu hỏi) cho các lớp của giáo viên.
@@ -164,7 +168,7 @@ export default function TeacherHomeworkPage() {
       const curriculum = await loadCurriculumHw(all);
       const currIds = new Set(curriculum.map(h => h.id));
       setHomeworks([...manual.filter(h => !currIds.has(h.id)), ...curriculum]);
-      setSubmissions(await loadSubs());
+      setSubmissions(await loadSubs(allIds));
     })();
   }, [teacherId, baseClasses]);
 

@@ -49,7 +49,7 @@ async function loadExtraClasses() {
 // Load homework from localStorage (seeded from mock if empty)
 async function loadHomework(classIds: string[]) {
   try {
-    const all = await getTeacherHomework<any>();
+    const all = await getTeacherHomework<any>(classIds);
     const forClasses = all.filter((h: any) => classIds.includes(h.class_id));
     if (forClasses.length > 0) return forClasses;
   } catch {}

@@ -4,11 +4,25 @@ import PortalLayout from "@/components/layout/PortalLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { SectionHeader } from "@/components/shared";
-import AnalyticsDashboard from "@/components/analytics/AnalyticsDashboard";
 import { Download, Sparkles, CheckCircle2, Loader2 } from "lucide-react";
 import { useState, useEffect } from "react";
-import { loadAnalyticsData, revenueByClass, revenueByTeacher, type AnalyticsData } from "@/lib/analytics";
-import { formatCurrency } from "@/lib/utils";
+import dynamic from "next/dynamic";
+import type { AnalyticsData } from "@/lib/analytics";
+
+const AnalyticsDashboard = dynamic(
+  () => import("@/components/analytics/AnalyticsDashboard"),
+  {
+    loading: () => (
+      <div className="space-y-4" aria-label="Đang tải biểu đồ">
+        <div className="h-28 animate-pulse rounded-2xl bg-muted/60" />
+        <div className="grid gap-4 lg:grid-cols-2">
+          <div className="h-64 animate-pulse rounded-2xl bg-muted/60" />
+          <div className="h-64 animate-pulse rounded-2xl bg-muted/40" />
+        </div>
+      </div>
+    ),
+  },
+);
 
 export default function AdminReportsPage() {
   const [data, setData] = useState<AnalyticsData | null>(null);
@@ -17,15 +31,26 @@ export default function AdminReportsPage() {
   const [reportType, setReportType] = useState("revenue_class");
   const [reportFormat, setReportFormat] = useState("csv");
 
-  useEffect(() => { loadAnalyticsData().then(setData); }, []);
+  useEffect(() => {
+    let cancelled = false;
+    import("@/lib/analytics")
+      .then(({ loadAnalyticsData }) => loadAnalyticsData())
+      .then((result) => {
+        if (!cancelled) setData(result);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const csvEscape = (v: any) => {
     const s = String(v ?? "");
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
 
-  const buildReportRows = (): (string | number)[][] => {
+  const buildReportRows = async (): Promise<(string | number)[][]> => {
     if (!data) return [];
+    const { revenueByClass, revenueByTeacher } = await import("@/lib/analytics");
     const teacherName = (id?: string) => data.teachers.find(t => t.id === id)?.full_name ?? id ?? "—";
     switch (reportType) {
       case "revenue_class":
@@ -73,12 +98,12 @@ export default function AdminReportsPage() {
     }
   };
 
-  const handleExport = (e: React.FormEvent) => {
+  const handleExport = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsExporting(true);
     setExportSuccess(false);
     try {
-      const rows = buildReportRows();
+      const rows = await buildReportRows();
       const dateKey = new Date().toISOString().split("T")[0];
       const fileName = `tutorhub_baocao_${reportType}_${dateKey}`;
       let blob: Blob;

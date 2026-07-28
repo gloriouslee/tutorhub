@@ -195,7 +195,7 @@ function StudentDetailPanel({
   const classNameMap = Object.fromEntries(studentClasses.map(c => [c.id, c.class_name]));
 
   useEffect(() => {
-    getHwSubmissions<Submission>()
+    getHwSubmissions<Submission>({ studentIds: [student.id] })
       .then(subs => { if (subs.length) setLsSubmissions(subs); })
       .catch(() => {});
     try {
@@ -834,7 +834,7 @@ export default function TeacherStudentsPage() {
       setPackagesMap(map);
     }
     loadPackages();
-    getAllTeacherAttendance()
+    getAllTeacherAttendance({ classIds: myClasses.map(c => c.id) })
       .then(recs => { if (recs.length) setSavedAttendance(recs as unknown as SavedAttendanceRecord[]); })
       .catch(() => {});
   }, [myClasses]);

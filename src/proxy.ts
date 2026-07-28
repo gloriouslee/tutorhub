@@ -13,6 +13,12 @@ function isPublicRoute(pathname: string) {
   return PUBLIC_ROUTES.has(pathname);
 }
 
+function hasSupabaseAuthCookie(request: NextRequest) {
+  return request.cookies.getAll().some(({ name }) =>
+    /^sb-.+-auth-token(?:\.\d+)?$/.test(name),
+  );
+}
+
 function roleForPath(pathname: string): UserRole | null {
   for (const role of Object.keys(ROLE_HOME) as UserRole[]) {
     const prefix = ROLE_HOME[role];
@@ -81,10 +87,23 @@ export async function proxy(request: NextRequest) {
       },
     });
   }
-  const identity = await getRequestIdentity(request, response);
 
-  // Route Handlers perform their own authorization and must return JSON errors.
+  // Route Handlers are the authorization boundary for APIs. Resolving the full
+  // identity here as well would repeat the same Supabase calls in every handler.
   if (pathname.startsWith("/api/")) return response;
+
+  // These routes never need a role lookup. The callback validates its own code,
+  // while enrollment is intentionally public.
+  if (pathname === "/enroll" || pathname === "/auth/callback") return response;
+
+  // No session cookie means there is nothing for Supabase to validate. Keep the
+  // login page fast and redirect protected pages without a network round trip.
+  if (!hasSupabaseAuthCookie(request)) {
+    if (pathname === "/login") return response;
+    return redirectWithCookies(request, "/login", response);
+  }
+
+  const identity = await getRequestIdentity(request, response);
 
   if (!identity) {
     if (isPublicRoute(pathname)) return response;

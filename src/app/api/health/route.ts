@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { logEvent } from "@/lib/logger";
 
 export const dynamic = "force-dynamic";
+const DATABASE_HEALTH_TIMEOUT_MS = 1_500;
 
 export async function GET() {
   const startedAt = Date.now();
@@ -10,7 +11,8 @@ export async function GET() {
     const { error } = await createAdminClient()
       .from("profiles")
       .select("id")
-      .limit(1);
+      .limit(1)
+      .abortSignal(AbortSignal.timeout(DATABASE_HEALTH_TIMEOUT_MS));
     if (error) throw error;
     return NextResponse.json(
       { status: "ok", database: "reachable" },

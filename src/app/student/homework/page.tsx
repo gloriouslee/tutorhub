@@ -26,8 +26,14 @@ const ACCEPTED = ".pdf,.doc,.docx,.jpg,.jpeg,.png";
 const MAX_MB   = 10;
 
 // ── localStorage fallback ─────────────────────────────────────────────────────
-async function loadLocalSubs(): Promise<SubmissionRecord[]> {
-  try { return await getHwSubmissions<SubmissionRecord>(); } catch { return []; }
+async function loadLocalSubs(studentId: string): Promise<SubmissionRecord[]> {
+  try {
+    return await getHwSubmissions<SubmissionRecord>({
+      studentIds: [studentId],
+    });
+  } catch {
+    return [];
+  }
 }
 async function saveLocalSub(sub: SubmissionRecord, classId?: string) {
   await upsertHwSubmission({ ...sub, class_id: classId });
@@ -83,7 +89,7 @@ export default function StudentHomeworkPage() {
     if (!classKey) return;
 
     // Load manually-created homework
-    getTeacherHomework<HomeworkItem>()
+    getTeacherHomework<HomeworkItem>(myClassIds)
       .then(all => setTeacherHw(prev => {
         const manual = all.filter(h => myClassIds.includes(h.class_id) && isAssignedToStudent(h.assigned_to, STUDENT_ID));
         const existingIds = new Set(prev.map(h => h.id));
@@ -144,7 +150,7 @@ export default function StudentHomeworkPage() {
       if (remote.length > 0) {
         setSubmissions(remote);
       } else {
-        setSubmissions((await loadLocalSubs()).filter(s => s.student_id === STUDENT_ID));
+        setSubmissions(await loadLocalSubs(STUDENT_ID));
       }
     });
   }, [STUDENT_ID]);

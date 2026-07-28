@@ -309,8 +309,25 @@ export interface TeacherAttendanceRecord {
   status: "present" | "absent" | "late" | "excused";
   saved_at: string;
 }
-export async function getAllTeacherAttendance(): Promise<TeacherAttendanceRecord[]> {
-  const { data, error } = await supabase.from("class_attendance").select("data");
+export interface AttendanceQuery {
+  classIds?: readonly string[];
+  studentIds?: readonly string[];
+  from?: string;
+  to?: string;
+}
+
+export async function getAllTeacherAttendance(
+  filters: AttendanceQuery = {},
+): Promise<TeacherAttendanceRecord[]> {
+  if (filters.classIds?.length === 0 || filters.studentIds?.length === 0) return [];
+
+  let query = supabase.from("class_attendance").select("data");
+  if (filters.classIds) query = query.in("class_id", [...filters.classIds]);
+  if (filters.studentIds) query = query.in("student_id", [...filters.studentIds]);
+  if (filters.from) query = query.gte("attendance_date", filters.from);
+  if (filters.to) query = query.lte("attendance_date", filters.to);
+
+  const { data, error } = await query;
   if (error) {
     console.error("getAllTeacherAttendance:", error);
     return [];
@@ -341,8 +358,13 @@ export async function saveClassAttendance(records: TeacherAttendanceRecord[]): P
 // Each stores the full domain object in a jsonb `data` column plus scope columns
 // used by RLS. Reads return the payload typed by the caller's generic.
 
-export async function getTeacherHomework<T = Record<string, unknown>>(): Promise<T[]> {
-  const { data, error } = await supabase.from("teacher_homework").select("data");
+export async function getTeacherHomework<T = Record<string, unknown>>(
+  classIds?: readonly string[],
+): Promise<T[]> {
+  if (classIds?.length === 0) return [];
+  let query = supabase.from("teacher_homework").select("data");
+  if (classIds) query = query.in("class_id", [...classIds]);
+  const { data, error } = await query;
   if (error) { console.error("getTeacherHomework:", error); return []; }
   return (data ?? []).map(r => r.data as T);
 }
@@ -392,8 +414,26 @@ export async function removeTeacherExtraClass(id: string): Promise<void> {
   if (error) { console.error("removeTeacherExtraClass(classes):", error); throw error; }
 }
 
-export async function getHwSubmissions<T = Record<string, unknown>>(): Promise<T[]> {
-  const { data, error } = await supabase.from("hw_submissions").select("data");
+export interface SubmissionQuery {
+  classIds?: readonly string[];
+  studentIds?: readonly string[];
+  homeworkIds?: readonly string[];
+}
+
+export async function getHwSubmissions<T = Record<string, unknown>>(
+  filters: SubmissionQuery = {},
+): Promise<T[]> {
+  if (
+    filters.classIds?.length === 0
+    || filters.studentIds?.length === 0
+    || filters.homeworkIds?.length === 0
+  ) return [];
+
+  let query = supabase.from("hw_submissions").select("data");
+  if (filters.classIds) query = query.in("class_id", [...filters.classIds]);
+  if (filters.studentIds) query = query.in("student_id", [...filters.studentIds]);
+  if (filters.homeworkIds) query = query.in("homework_id", [...filters.homeworkIds]);
+  const { data, error } = await query;
   if (error) { console.error("getHwSubmissions:", error); return []; }
   return (data ?? []).map(r => r.data as T);
 }

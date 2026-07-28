@@ -72,8 +72,11 @@ function generateSessionDates(
   return results;
 }
 
-function loadSavedAttendance(): Promise<SavedAttendanceRecord[]> {
-  return getAllTeacherAttendance() as unknown as Promise<SavedAttendanceRecord[]>;
+function loadSavedAttendance(classId: string, studentId: string): Promise<SavedAttendanceRecord[]> {
+  return getAllTeacherAttendance({
+    classIds: [classId],
+    studentIds: [studentId],
+  }) as unknown as Promise<SavedAttendanceRecord[]>;
 }
 
 type TabKey = "overview" | "curriculum" | "sessions" | "attendance" | "homework" | "materials" | "lectures" | "notes";
@@ -157,8 +160,11 @@ function saveWatched(studentId: string, s: Set<string>) {
 }
 
 // ── KV: submissions fallback ─────────────────────────────────────────────────
-function loadLocalSubs(): Promise<SubmissionRecord[]> {
-  return getHwSubmissions<SubmissionRecord>();
+function loadLocalSubs(classId: string, studentId: string): Promise<SubmissionRecord[]> {
+  return getHwSubmissions<SubmissionRecord>({
+    classIds: [classId],
+    studentIds: [studentId],
+  });
 }
 
 type ClassInfo = (typeof MOCK_CLASSES)[number];
@@ -261,7 +267,7 @@ export default function StudentClassDetailPage() {
       setCls(found);
     })();
     getClassScheduleOverride(classId).then(ov => setScheduleOverride(ov as ClassInfo["schedule"] | null));
-    getTeacherHomework<HomeworkItem>()
+    getTeacherHomework<HomeworkItem>([classId])
       .then(all => setTeacherHomework(all.filter(h => h.class_id === classId && isAssignedToStudent(h.assigned_to, studentId))));
   }, [classId]);
 
@@ -285,13 +291,13 @@ export default function StudentClassDetailPage() {
     // Load submissions for homework status
     getSubmissionsByStudent(CURRENT_STUDENT_ID).then(async remote => {
       if (remote.length > 0) { setSubmissions(remote); return; }
-      const local = await loadLocalSubs();
+      const local = await loadLocalSubs(classId, CURRENT_STUDENT_ID);
       setSubmissions(local.filter(s => s.student_id === CURRENT_STUDENT_ID));
     });
     // Load my package for this class
     getStudentPackages(classId).then(pkgs => setMyPackage(pkgs[CURRENT_STUDENT_ID] ?? null));
     // Load attendance records
-    loadSavedAttendance().then(setSavedAttendance);
+    loadSavedAttendance(classId, CURRENT_STUDENT_ID).then(setSavedAttendance);
     // Load curriculum → build date map + đẩy bài tập / bài giảng / video chữa bài / tài liệu về các tab
     getCurriculum(classId).then(async chapters => {
       const today = new Date().toISOString().slice(0, 10);

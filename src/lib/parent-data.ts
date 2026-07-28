@@ -38,8 +38,9 @@ interface TeacherAttendanceKvRecord {
 // Trùng (class_id, student_id, date) → bản thật thắng.
 export async function loadChildrenAttendance(studentIds: string[]): Promise<ChildAttendanceRecord[]> {
   const idSet = new Set(studentIds);
-  const real = ((await getAllTeacherAttendance()) as unknown as TeacherAttendanceKvRecord[])
-    .filter(r => idSet.has(r.student_id))
+  const real = ((await getAllTeacherAttendance({
+    studentIds,
+  })) as unknown as TeacherAttendanceKvRecord[])
     .map(r => ({
       id:         `real_${r.class_id}_${r.student_id}_${r.date}`,
       class_id:   r.class_id,
@@ -137,8 +138,7 @@ export interface ChildHomework {
 // Bài tập của các lớp: giáo viên tạo (kv) + mock nền, kv thắng khi trùng id.
 export async function loadClassHomework(classIds: string[]): Promise<ChildHomework[]> {
   const idSet = new Set(classIds);
-  const teacher = (await getTeacherHomework<ChildHomework>())
-    .filter(h => idSet.has(h.class_id));
+  const teacher = await getTeacherHomework<ChildHomework>(classIds);
   const kvIds = new Set(teacher.map(h => h.id));
   const mock = MOCK_HOMEWORK.filter(h => idSet.has(h.class_id) && !kvIds.has(h.id));
   return [...teacher, ...mock]

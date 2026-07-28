@@ -23,6 +23,22 @@ test("seed route is absent and proxy explicitly blocks it", async () => {
   assert.match(proxy, /pathname === "\/admin\/seed"/);
 });
 
+test("proxy keeps API and anonymous public traffic on the fast path", async () => {
+  const proxy = await read("src/proxy.ts");
+  const apiFastPath = proxy.indexOf('pathname.startsWith("/api/")');
+  const identityLookup = proxy.indexOf(
+    "getRequestIdentity(request, response)",
+  );
+  assert.ok(apiFastPath >= 0 && apiFastPath < identityLookup);
+  assert.match(proxy, /hasSupabaseAuthCookie/);
+  assert.match(proxy, /pathname === "\/enroll"/);
+
+  const auth = await read("src/lib/api-auth.ts");
+  assert.match(auth, /auth\.getClaims\(\)/);
+  assert.doesNotMatch(auth, /auth\.getUser\(\)/);
+  assert.match(auth, /Promise\.all/);
+});
+
 test("production migration drops legacy policies and plaintext columns", async () => {
   const migration = await read(
     "supabase/migrations/20260727140000_production_security.sql",
