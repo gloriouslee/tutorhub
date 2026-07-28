@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { getClasses, createEnrollment, type StudentPackage } from "@/lib/storage";
+import { createEnrollment, type StudentPackage } from "@/lib/storage";
 import type { Class } from "@/types";
 import {
   GraduationCap, User, Mail, Phone, BookOpen, Package,
@@ -67,7 +67,13 @@ export default function EnrollPage() {
   const [submitError, setSubmitError] = useState("");
   const [classes, setClasses] = useState<Class[]>([]);
 
-  useEffect(() => { getClasses().then(setClasses); }, []);
+  useEffect(() => {
+    // Public endpoint (anon cannot read `classes` directly under RLS).
+    fetch("/api/public/classes", { cache: "no-store" })
+      .then(r => (r.ok ? r.json() : []))
+      .then((data: Class[]) => setClasses(Array.isArray(data) ? data : []))
+      .catch(() => setClasses([]));
+  }, []);
 
   const gnum = gradeNum(form.grade);
   const filteredClasses = gnum != null ? classes.filter(c => c.grade === gnum) : [];
@@ -124,7 +130,7 @@ export default function EnrollPage() {
               <p className="text-muted-foreground pt-1">Gói học:</p>
               <p className="font-semibold">{PACKAGES.find(p => p.value === form.package)?.label ?? "—"}</p>
             </div>
-            <Link href="/login">
+            <Link href="/login" prefetch={false}>
               <Button className="w-full mt-2">
                 <ArrowLeft className="h-4 w-4 mr-2" /> Về trang đăng nhập
               </Button>
@@ -169,7 +175,7 @@ export default function EnrollPage() {
           <p className="text-muted-foreground text-sm max-w-md mx-auto">
             Điền đầy đủ thông tin bên dưới. Admin sẽ liên hệ xác nhận và cung cấp tài khoản học viên qua email của bạn.
           </p>
-          <Link href="/login" className="inline-flex items-center gap-1 text-sm text-primary hover:underline">
+          <Link href="/login" prefetch={false} className="inline-flex items-center gap-1 text-sm text-primary hover:underline">
             Đã có tài khoản? Đăng nhập <ChevronRight className="h-3.5 w-3.5" />
           </Link>
         </div>

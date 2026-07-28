@@ -12,15 +12,11 @@ import {
 } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { UserRole } from "@/types";
-import { MOCK_HOMEWORK } from "@/lib/mock-data";
 import {
-  getTeacherHomework, getHwSubmissions, getNotifications,
-  getScheduleNotifications, getEnrollments,
-} from "@/lib/storage";
-import { getSubmissionsByStudent } from "@/lib/supabase/submissions";
-import { useStudentContext } from "@/hooks/useStudentContext";
-import { useParentContext, type ParentChild } from "@/hooks/useParentContext";
-import { loadParentEventNotifications } from "@/lib/parent-data";
+  resetAccountContextCache,
+  useAccountContext,
+  type ParentChild,
+} from "@/hooks/useAccountContext";
 
 // ── Nav config (no static badges) ────────────────────────────────────────────
 interface NavItem {
@@ -101,6 +97,7 @@ async function unreadBroadcasts(
 ): Promise<{ unread: number; readIds: Set<string>; deletedIds: Set<string> }> {
   const readIds    = parseSet(readKey);
   const deletedIds = parseSet(deletedKey);
+  const { getNotifications } = await import("@/lib/storage");
   const all = await getNotifications();
   const unread = all.filter(n =>
     (n.target_role === targetRole || n.target_role === "all")
@@ -123,6 +120,15 @@ async function computeBadges(
   const result: Record<string, number> = {};
 
   if (role === "student") {
+    const [
+      { getTeacherHomework, getHwSubmissions, getScheduleNotifications },
+      { getSubmissionsByStudent },
+      { MOCK_HOMEWORK },
+    ] = await Promise.all([
+      import("@/lib/storage"),
+      import("@/lib/supabase/submissions"),
+      import("@/lib/mock-data"),
+    ]);
     // Bài tập "Chưa nộp" — cùng nguồn với trang bài tập: homework giáo viên tạo
     // (kv) + mock nền theo lớp thật của học sinh, trừ bài đã nộp (Supabase → kv).
     const teacherHw = (await getTeacherHomework<{ id: string; class_id: string }>())
@@ -150,6 +156,7 @@ async function computeBadges(
   }
 
   if (role === "parent") {
+    const { loadParentEventNotifications } = await import("@/lib/parent-data");
     // Broadcast + sự kiện sinh từ dữ liệu thật của các con — khớp trang thông báo
     const { unread, readIds, deletedIds } = await unreadBroadcasts("parent", "tutorhub_parent_notif_read", "tutorhub_parent_notif_deleted");
     const events = await loadParentEventNotifications(parentChildren).catch(() => []);
@@ -164,6 +171,7 @@ async function computeBadges(
   }
 
   if (role === "admin") {
+    const { getEnrollments } = await import("@/lib/storage");
     // Chỉ còn hàng đợi duyệt đăng ký học viên; học phí & giao dịch do giáo viên duyệt.
     const enrollments = await getEnrollments().catch(() => []);
     const pendingEnroll = enrollments.filter(e => e.status === "pending").length;
@@ -187,9 +195,11 @@ export default function Sidebar({ role, userName, isOpen = true, onClose }: Side
   const items    = navConfig[role];
   const config   = roleConfig[role];
   // Nhận diện đúng học viên hiện tại (demo s1 / cookie enrolled / phiên Supabase)
-  const { studentId, myClasses, ready } = useStudentContext();
+  const { context: accountContext, ready: contextReady } = useAccountContext();
   // Danh sách con (chỉ dùng khi role = parent) — nguồn sự kiện thông báo
-  const { children: parentChildren, ready: parentReady } = useParentContext();
+  const studentId = accountContext?.role === "student" ? accountContext.studentId : "";
+  const myClasses = accountContext?.role === "student" ? accountContext.classes : [];
+  const parentChildren = accountContext?.role === "parent" ? accountContext.children : [];
 
   const [badges, setBadges] = useState<Record<string, number>>({});
 
@@ -198,22 +208,25 @@ export default function Sidebar({ role, userName, isOpen = true, onClose }: Side
 
   // Recompute on every navigation so badge clears when user visits the page
   useEffect(() => {
-    if (role === "student" && !ready) return;       // chờ context resolve, tránh đếm theo s1 mặc định
-    if (role === "parent" && !parentReady) return;  // chờ danh sách con
+    if ((role === "student" || role === "parent") && !contextReady) return;
     let cancelled = false;
-    (async () => {
+    const timer = window.setTimeout(async () => {
       const next = await computeBadges(role, studentId, myClasses.map(c => c.id), parentChildren);
       if (!cancelled) setBadges(next);
-    })();
-    return () => { cancelled = true; };
+    }, 100);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [role, pathname, studentId, ready, parentReady, myClassKey, childrenKey]);
+  }, [role, pathname, studentId, contextReady, myClassKey, childrenKey]);
 
   const handleLogout = async () => {
     try {
       const { createClient } = await import("@/lib/supabase/client");
       await createClient().auth.signOut();
     } catch {}
+    resetAccountContextCache();
     router.push("/login");
   };
 
@@ -239,7 +252,13 @@ export default function Sidebar({ role, userName, isOpen = true, onClose }: Side
       >
         {/* Logo */}
         <div className="flex items-center justify-between h-16 px-5 border-b border-border shrink-0">
-          <Link href={`/${role}`} className="flex items-center gap-2.5">
+          <Link
+            href={`/${role}`}
+            prefetch={false}
+            onMouseEnter={() => router.prefetch(`/${role}`)}
+            onFocus={() => router.prefetch(`/${role}`)}
+            className="flex items-center gap-2.5"
+          >
             <div className={`h-8 w-8 rounded-xl bg-gradient-to-br ${config.gradient} flex items-center justify-center shadow-lg`}>
               <GraduationCap className="h-4 w-4 text-white" />
             </div>
@@ -266,6 +285,13 @@ export default function Sidebar({ role, userName, isOpen = true, onClose }: Side
               <Link
                 key={item.href}
                 href={item.href}
+                prefetch={false}
+                onMouseEnter={() => {
+                  if (!isActive) router.prefetch(item.href);
+                }}
+                onFocus={() => {
+                  if (!isActive) router.prefetch(item.href);
+                }}
                 onClick={onClose}
                 className={cn("sidebar-item group", isActive && "active")}
               >

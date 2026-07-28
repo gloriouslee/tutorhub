@@ -1,15 +1,9 @@
-"use client";
+import {
+  useAccountContext,
+  type ParentChild,
+} from "@/hooks/useAccountContext";
 
-import { useEffect, useState } from "react";
-import type { Class } from "@/types";
-
-export interface ParentChild {
-  id: string;
-  name: string;
-  grade?: string;
-  school?: string;
-  classes: Class[];
-}
+export type { ParentChild } from "@/hooks/useAccountContext";
 
 export interface ParentContext {
   parentId: string;
@@ -26,37 +20,13 @@ const EMPTY_CONTEXT: ParentContext = {
 };
 
 export function useParentContext(): ParentContext {
-  const [context, setContext] = useState<ParentContext>(EMPTY_CONTEXT);
+  const { context, ready } = useAccountContext();
+  if (context?.role !== "parent") return { ...EMPTY_CONTEXT, ready };
 
-  useEffect(() => {
-    let cancelled = false;
-    fetch("/api/account/context", { cache: "no-store" })
-      .then(async (response) => {
-        if (!response.ok) throw new Error("parent_context_unavailable");
-        return response.json() as Promise<{
-          role: string;
-          parentId: string;
-          parentName: string;
-          children: ParentChild[];
-        }>;
-      })
-      .then((data) => {
-        if (cancelled || data.role !== "parent") return;
-        setContext({
-          parentId: data.parentId,
-          parentName: data.parentName,
-          children: data.children ?? [],
-          ready: true,
-        });
-      })
-      .catch(() => {
-        if (!cancelled) setContext((current) => ({ ...current, ready: true }));
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  return context;
+  return {
+    parentId: context.parentId,
+    parentName: context.parentName,
+    children: context.children ?? [],
+    ready,
+  };
 }

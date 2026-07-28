@@ -7,6 +7,7 @@ import { GraduationCap, Mail, Lock, Eye, EyeOff, ArrowRight, CheckCircle2, Spark
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { createClient } from "@/lib/supabase/client";
+import { resetAccountContextCache } from "@/hooks/useAccountContext";
 
 const HIGHLIGHTS = [
   "Lộ trình học cá nhân hoá theo từng học viên",
@@ -57,6 +58,7 @@ export default function LoginPage() {
         role: "student" | "parent" | "teacher" | "admin";
         mustResetPassword: boolean;
       };
+      resetAccountContextCache();
       router.push(
         identity.mustResetPassword ? "/reset-password" : `/${identity.role}`,
       );
@@ -222,7 +224,7 @@ export default function LoginPage() {
           {/* Chưa có tài khoản */}
           <p className="text-center text-sm text-muted-foreground mt-5">
             Chưa có tài khoản?{" "}
-            <Link href="/enroll" className="text-primary font-semibold hover:underline">
+            <Link href="/enroll" prefetch={false} className="text-primary font-semibold hover:underline">
               Đăng ký học
             </Link>
           </p>

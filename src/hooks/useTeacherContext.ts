@@ -1,7 +1,5 @@
-"use client";
-
-import { useEffect, useState } from "react";
 import type { Class } from "@/types";
+import { useAccountContext } from "@/hooks/useAccountContext";
 
 export interface TeacherContext {
   teacherId: string;
@@ -18,37 +16,13 @@ const EMPTY_CONTEXT: TeacherContext = {
 };
 
 export function useTeacherContext(): TeacherContext {
-  const [context, setContext] = useState<TeacherContext>(EMPTY_CONTEXT);
+  const { context, ready } = useAccountContext();
+  if (context?.role !== "teacher") return { ...EMPTY_CONTEXT, ready };
 
-  useEffect(() => {
-    let cancelled = false;
-    fetch("/api/account/context", { cache: "no-store" })
-      .then(async (response) => {
-        if (!response.ok) throw new Error("teacher_context_unavailable");
-        return response.json() as Promise<{
-          role: string;
-          teacherId: string;
-          teacherName: string;
-          classes: Class[];
-        }>;
-      })
-      .then((data) => {
-        if (cancelled || data.role !== "teacher") return;
-        setContext({
-          teacherId: data.teacherId,
-          teacherName: data.teacherName,
-          myClasses: data.classes ?? [],
-          ready: true,
-        });
-      })
-      .catch(() => {
-        if (!cancelled) setContext((current) => ({ ...current, ready: true }));
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  return context;
+  return {
+    teacherId: context.teacherId,
+    teacherName: context.teacherName,
+    myClasses: context.classes ?? [],
+    ready,
+  };
 }
