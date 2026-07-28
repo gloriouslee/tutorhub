@@ -49,6 +49,8 @@ function contentSecurityPolicy() {
     "font-src 'self' data: https://fonts.gstatic.com",
     "connect-src 'self' https://*.supabase.co wss://*.supabase.co",
     "media-src 'self' blob: https:",
+    // Video lecture / solution embeds (YouTube) + Zoom.
+    "frame-src 'self' https://www.youtube.com https://www.youtube-nocookie.com https://*.zoom.us",
     "object-src 'none'",
     "base-uri 'self'",
     "form-action 'self'",

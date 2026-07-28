@@ -57,6 +57,14 @@ export async function GET(req: NextRequest) {
       }
     }
   }
+  // Homework submissions are per-student (path: classId/submissions/<studentId>/…).
+  // A student may only fetch their OWN submission files, never a classmate's.
+  // Teachers/admin keep full class access via the checks above.
+  if (bucket === "homework-submissions" && actor.role === "student") {
+    if (segments[1] !== "submissions" || segments[2] !== actor.studentId) {
+      allowed = false;
+    }
+  }
   if (!allowed) return NextResponse.json({ error: "forbidden" }, { status: 403 });
 
   const { data, error } = await admin.storage

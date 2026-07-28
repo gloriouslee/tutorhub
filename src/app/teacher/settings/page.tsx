@@ -8,17 +8,15 @@ import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { SectionHeader } from "@/components/shared";
 import { getTeacherSettings, saveTeacherSettings, type TeacherSettings } from "@/lib/storage";
-import { MOCK_TEACHERS } from "@/lib/mock-data";
+import { useTeacherContext } from "@/hooks/useTeacherContext";
 import { uploadClassFile } from "@/lib/upload";
 import {
   QrCode, UploadCloud, Link2, Check, Loader2, Building2, X,
   User, Camera, Mail, Phone, GraduationCap, FileText,
 } from "lucide-react";
 
-const TEACHER_ID = "t1";
-
 export default function TeacherSettingsPage() {
-  const teacher = MOCK_TEACHERS.find(t => t.id === TEACHER_ID);
+  const { teacherId, teacherName } = useTeacherContext();
   const [settings, setSettings] = useState<TeacherSettings>({});
   const [loaded, setLoaded] = useState(false);
   const [mode, setMode] = useState<"upload" | "link">("upload");
@@ -31,13 +29,13 @@ export default function TeacherSettingsPage() {
   const avatarRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    getTeacherSettings(TEACHER_ID).then(s => {
-      // Seed hồ sơ từ mock nếu chưa có
+    if (!teacherId) return;
+    getTeacherSettings(teacherId).then(s => {
       setSettings({
-        full_name: s.full_name ?? teacher?.full_name ?? "",
-        specialization: s.specialization ?? teacher?.specialization ?? "",
-        bio: s.bio ?? teacher?.bio ?? "",
-        avatar_url: s.avatar_url ?? teacher?.avatar_url ?? undefined,
+        full_name: s.full_name ?? teacherName ?? "",
+        specialization: s.specialization ?? "",
+        bio: s.bio ?? "",
+        avatar_url: s.avatar_url ?? undefined,
         email: s.email ?? "",
         phone: s.phone ?? "",
         ...s,
@@ -45,8 +43,7 @@ export default function TeacherSettingsPage() {
       if (s.qr_image_url) setMode(/^https?:\/\//.test(s.qr_image_url) && !s.qr_image_url.includes("/storage/") ? "link" : "upload");
       setLoaded(true);
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [teacherId, teacherName]);
 
   function set<K extends keyof TeacherSettings>(key: K, val: TeacherSettings[K]) {
     setSettings(s => ({ ...s, [key]: val }));
@@ -57,7 +54,7 @@ export default function TeacherSettingsPage() {
     setUploading(true);
     setUploadError("");
     try {
-      const up = await uploadClassFile(file, TEACHER_ID, "materials");
+      const up = await uploadClassFile(file, teacherId, "materials");
       set("qr_image_url", up.url);
     } catch (e) {
       setUploadError(e instanceof Error ? e.message : "Lỗi tải ảnh lên");
@@ -72,7 +69,7 @@ export default function TeacherSettingsPage() {
     // Hiển thị ngay bằng blob tạm, upload phía sau
     set("avatar_url", URL.createObjectURL(file));
     try {
-      const up = await uploadClassFile(file, TEACHER_ID, "materials");
+      const up = await uploadClassFile(file, teacherId, "materials");
       set("avatar_url", up.url);
     } catch {
       /* offline — giữ blob tạm cho phiên hiện tại */
@@ -85,7 +82,7 @@ export default function TeacherSettingsPage() {
   async function handleSave() {
     setSaving(true);
     try {
-      await saveTeacherSettings(TEACHER_ID, settings);
+      await saveTeacherSettings(teacherId, settings);
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
     } finally {
@@ -93,7 +90,7 @@ export default function TeacherSettingsPage() {
     }
   }
 
-  const displayName = settings.full_name || teacher?.full_name || "Giáo viên";
+  const displayName = settings.full_name || teacherName || "Giáo viên";
   const initials = displayName.split(" ").map(n => n[0]).join("").slice(-2).toUpperCase();
 
   return (

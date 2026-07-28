@@ -14,7 +14,7 @@ import {
   MOCK_CLASSES, MOCK_HOMEWORK, MOCK_ATTENDANCE,
   MOCK_EXAM_SCORES, MOCK_TEACHERS, ATTENDANCE_CHART_DATA,
 } from "@/lib/mock-data";
-import { getNotifications, getEnrollments, getTeacherHomework, getExamScoresByStudent, getCurriculum, getExamResult, isAssignedToStudent } from "@/lib/storage";
+import { getNotifications, getEnrollments, getTeacherHomework, getExamScoresByStudent, getCurriculum, getExamResult, isAssignedToStudent, isLessonVisibleToStudent } from "@/lib/storage";
 import { getSubmissionsByStudent } from "@/lib/supabase/submissions";
 import Link from "next/link";
 import { formatDate } from "@/lib/utils";
@@ -30,6 +30,7 @@ interface HomeworkItem {
   due_date: string;
   created_at?: string;
   assigned_to?: string[] | null;
+  exam_done?: boolean;
 }
 
 const DOW_EN = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -141,15 +142,33 @@ export default function StudentDashboard() {
         getTeacherHomework<HomeworkItem>().catch(() => [] as HomeworkItem[]),
       ]);
       const teacher = allTeacherHw.filter(h => classIds.includes(h.class_id) && isAssignedToStudent(h.assigned_to, studentId));
-      setTeacherHw(teacher);
-      const kvIds = new Set(teacher.map(h => h.id));
-      const hw = [
-        ...teacher,
-        ...MOCK_HOMEWORK.filter(h => classIds.includes(h.class_id) && !kvIds.has(h.id)),
-      ];
-      setSubmittedCount(subs.filter(s =>
-        hw.find(h => h.id === s.homework_id)
-      ).length);
+      // Bài tập / bài thi từ lộ trình (curriculum) — giống trang /student/homework.
+      const today = new Date().toISOString().slice(0, 10);
+      const currItems: HomeworkItem[] = [];
+      for (const cid of classIds) {
+        const chapters = await getCurriculum(cid).catch(() => []);
+        for (const ch of chapters) {
+          for (const s of ch.sessions) {
+            for (const lesson of s.lessons) {
+              if (!isLessonVisibleToStudent(lesson, studentId)) continue;
+              if (lesson.type === "homework") {
+                currItems.push({ id: lesson.id, class_id: cid, title: lesson.title, due_date: (lesson as any).due_date ?? s.date ?? today, created_at: s.date });
+              } else if (lesson.type === "exam") {
+                const r = await getExamResult(cid, lesson.id, studentId).catch(() => null);
+                currItems.push({ id: lesson.id, class_id: cid, title: lesson.title, due_date: (lesson as any).exam_opens_at?.slice(0, 10) ?? s.date ?? today, created_at: s.date, exam_done: !!r });
+              }
+            }
+          }
+        }
+      }
+      const merged = [...teacher];
+      const mergedIds = new Set(teacher.map(h => h.id));
+      for (const it of currItems) if (!mergedIds.has(it.id)) { merged.push(it); mergedIds.add(it.id); }
+      setTeacherHw(merged);
+      const doneExamIds = new Set(currItems.filter(i => i.exam_done).map(i => i.id));
+      setSubmittedCount(
+        merged.filter(h => subs.some(s => s.homework_id === h.id) || doneExamIds.has(h.id)).length
+      );
     })();
   }, [ready, studentId, myClasses]);
 
@@ -162,7 +181,9 @@ export default function StudentDashboard() {
   const kvHwIds           = new Set(teacherHw.map(h => h.id));
   const myHomework: HomeworkItem[] = [
     ...teacherHw,
-    ...MOCK_HOMEWORK.filter(h => myClassIds.includes(h.class_id) && !kvHwIds.has(h.id)),
+    ...(process.env.NODE_ENV === "production"
+      ? []
+      : MOCK_HOMEWORK.filter(h => myClassIds.includes(h.class_id) && !kvHwIds.has(h.id))),
   ];
   const pendingHomework   = myHomework.filter(h => new Date(h.due_date) >= now);
   const homeworkTotal     = myHomework.length;

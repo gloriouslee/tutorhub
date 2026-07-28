@@ -1282,22 +1282,32 @@ create policy curriculum_teacher_admin_all on public.kv_curriculum
   with check (public.get_my_role() = 'admin' or public.teaches_class(id::text));
 
 -- ── KV: exam results / submissions registry ─────────────────────────────────
-grant select on public.kv_exam_results to authenticated;
+grant select, insert, update on public.kv_exam_results to authenticated;
+-- Class id can contain '_' (e.g. cls_123), so match by prefix rather than split_part.
 drop policy if exists exam_results_scoped_select on public.kv_exam_results;
 create policy exam_results_scoped_select on public.kv_exam_results
   for select to authenticated
   using (
-    id like '%\_' || public.my_student_id() escape '\'
-    or public.teaches_class(split_part(id, '_', 1))
-    or public.get_my_role() = 'admin'
+    public.get_my_role() = 'admin'
+    or id like '%\_' || public.my_student_id() escape '\'
+    or exists (select 1 from public.classes c where c.tutor_id::text = public.my_teacher_id() and id like c.id || '\_%' escape '\')
   );
+drop policy if exists exam_results_teacher_write on public.kv_exam_results;
+create policy exam_results_teacher_write on public.kv_exam_results
+  for insert to authenticated
+  with check (public.get_my_role() = 'admin' or exists (select 1 from public.classes c where c.tutor_id::text = public.my_teacher_id() and id like c.id || '\_%' escape '\'));
+drop policy if exists exam_results_teacher_update on public.kv_exam_results;
+create policy exam_results_teacher_update on public.kv_exam_results
+  for update to authenticated
+  using (public.get_my_role() = 'admin' or exists (select 1 from public.classes c where c.tutor_id::text = public.my_teacher_id() and id like c.id || '\_%' escape '\'))
+  with check (public.get_my_role() = 'admin' or exists (select 1 from public.classes c where c.tutor_id::text = public.my_teacher_id() and id like c.id || '\_%' escape '\'));
 grant select on public.kv_exam_submissions to authenticated;
 drop policy if exists exam_registry_teacher_select on public.kv_exam_submissions;
 create policy exam_registry_teacher_select on public.kv_exam_submissions
   for select to authenticated
   using (
-    public.teaches_class(split_part(id, '_', 1))
-    or public.get_my_role() = 'admin'
+    public.get_my_role() = 'admin'
+    or exists (select 1 from public.classes c where c.tutor_id::text = public.my_teacher_id() and id like c.id || '\_%' escape '\')
   );
 
 -- ── KV: class-scoped datasets ────────────────────────────────────────────────
@@ -1581,6 +1591,7 @@ create policy storage_class_scoped_select on storage.objects
       public.get_my_role() = 'admin'
       or public.teaches_class((storage.foldername(name))[1])
       or public.enrolled_in_class((storage.foldername(name))[1])
+      or (storage.foldername(name))[1] = public.my_teacher_id()
     )
   );
 drop policy if exists storage_class_scoped_insert on storage.objects;
@@ -1592,6 +1603,7 @@ create policy storage_class_scoped_insert on storage.objects
       and (
         public.get_my_role() = 'admin'
         or public.teaches_class((storage.foldername(name))[1])
+        or (storage.foldername(name))[1] = public.my_teacher_id()
         or (
           (storage.foldername(name))[2] = 'homework'
           and public.enrolled_in_class((storage.foldername(name))[1])

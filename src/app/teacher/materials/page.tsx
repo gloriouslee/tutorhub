@@ -237,6 +237,7 @@ function LessonModal({
   const [uploading,   setUploading]   = useState(false);
   const [uploadError, setUploadError] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const { teacherId } = useTeacherContext();
 
   const isEdit = !!initial?.id;
 
@@ -251,7 +252,7 @@ function LessonModal({
     if (fileMode === "upload" && file) {
       setUploading(true);
       try {
-        const uploaded = await uploadClassFile(file, courseId, "materials");
+        const uploaded = await uploadClassFile(file, teacherId, "materials");
         resolvedFileUrl = uploaded.url;
         fileName = uploaded.name;
         fileSize = uploaded.size;

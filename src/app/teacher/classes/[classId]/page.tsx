@@ -285,7 +285,7 @@ export default function TeacherClassDetailPage() {
                 download_count: 0,
                 kind: "material",
               });
-            } else if (lesson.type === "lecture") {
+            } else if (lesson.type === "lecture" || lesson.type === "solution") {
               currLecs.push({
                 id: lesson.id,
                 class_id: classId,
@@ -351,18 +351,20 @@ export default function TeacherClassDetailPage() {
       try {
         const all = await getTeacherHomework<Homework>();
         const forClass = all.filter(h => h.class_id === classId && h.source !== "curriculum");
-        const base: Homework[] = forClass.length === 0
-          ? (MOCK_HOMEWORK as any[])
-              .filter((h: any) => h.class_id === classId)
-              .map((h: any): Homework => ({
-                id: h.id,
-                class_id: h.class_id,
-                title: h.title,
-                description: h.description,
-                due_date: h.due_date,
-                created_at: h.created_at,
-              }))
-          : forClass;
+        const base: Homework[] = forClass.length > 0
+          ? forClass
+          : process.env.NODE_ENV === "production"
+            ? []
+            : (MOCK_HOMEWORK as any[])
+                .filter((h: any) => h.class_id === classId)
+                .map((h: any): Homework => ({
+                  id: h.id,
+                  class_id: h.class_id,
+                  title: h.title,
+                  description: h.description,
+                  due_date: h.due_date,
+                  created_at: h.created_at,
+                }));
         // Giữ lại các bài tập từ lộ trình mà effect curriculum đã nạp vào state,
         // tránh race giữa hai effect ghi đè lẫn nhau (mất bài tập lộ trình khi mới load).
         setHomeworks(prev => {
@@ -376,9 +378,10 @@ export default function TeacherClassDetailPage() {
 
       try {
         const rawSub = await getHwSubmissions<Submission>();
-        setSubmissions(rawSub.length ? rawSub : (MOCK_SUBMISSIONS as any[]));
+        const subFallback = process.env.NODE_ENV === "production" ? [] : (MOCK_SUBMISSIONS as any[]);
+        setSubmissions(rawSub.length ? rawSub : subFallback);
       } catch {
-        setSubmissions(MOCK_SUBMISSIONS as any[]);
+        setSubmissions(process.env.NODE_ENV === "production" ? [] : (MOCK_SUBMISSIONS as any[]));
       }
     })();
   }, [classId, cls]);
