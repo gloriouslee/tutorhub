@@ -1156,6 +1156,13 @@ create policy classes_scoped_select on public.classes
         )
     )
   );
+-- Teachers manage their own classes directly (RLS-scoped); admins any.
+grant insert, update, delete on public.classes to authenticated;
+drop policy if exists classes_teacher_write on public.classes;
+create policy classes_teacher_write on public.classes
+  for all to authenticated
+  using (public.get_my_role() = 'admin' or tutor_id::text = public.my_teacher_id())
+  with check (public.get_my_role() = 'admin' or tutor_id::text = public.my_teacher_id());
 
 -- ── payments / attendance / homework / submissions / materials / notifications / app_exam_scores ──
 grant select on public.payments, public.attendance, public.homework,

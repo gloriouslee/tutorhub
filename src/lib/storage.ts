@@ -338,20 +338,39 @@ export async function removeTeacherHomework(id: string): Promise<void> {
   if (error) { console.error("removeTeacherHomework:", error); throw error; }
 }
 
+// Teacher-created classes are now unified into the core `classes` table.
+// getClasses()/useTeacherContext already return them (RLS-scoped), so this
+// returns [] — call sites merge it with the context/classes list and thus see
+// no duplicates. upsert/remove write directly to `classes` (teacher RLS).
 export async function getTeacherExtraClasses<T = Record<string, unknown>>(): Promise<T[]> {
-  const { data, error } = await supabase.from("teacher_extra_classes").select("data");
-  if (error) { console.error("getTeacherExtraClasses:", error); return []; }
-  return (data ?? []).map(r => r.data as T);
+  return [];
 }
 export async function upsertTeacherExtraClass<T extends { id: string; tutor_id: string; student_ids?: string[] }>(cls: T): Promise<void> {
-  const { error } = await supabase
-    .from("teacher_extra_classes")
-    .upsert({ id: cls.id, tutor_id: cls.tutor_id, student_ids: cls.student_ids ?? [], data: cls }, { onConflict: "id" });
-  if (error) { console.error("upsertTeacherExtraClass:", error); throw error; }
+  const c = cls as Record<string, unknown>;
+  const gradeRaw = c.grade;
+  const grade = typeof gradeRaw === "number" ? gradeRaw : (typeof gradeRaw === "string" && /^[0-9]+$/.test(gradeRaw) ? parseInt(gradeRaw, 10) : null);
+  const maxRaw = c.max_students;
+  const row = {
+    id: cls.id,
+    class_name: (c.class_name as string) ?? "",
+    subject: (c.subject as string) ?? "",
+    grade,
+    learning_mode: (c.learning_mode as string) || "hybrid",
+    tutor_id: cls.tutor_id,
+    classroom: (c.classroom as string) ?? null,
+    zoom_link: (c.zoom_link as string) ?? null,
+    schedule: c.schedule ?? [],
+    student_ids: cls.student_ids ?? [],
+    description: (c.description as string) ?? null,
+    max_students: typeof maxRaw === "number" ? maxRaw : 15,
+    color: (c.color as string) || "#6366f1",
+  };
+  const { error } = await supabase.from("classes").upsert(row, { onConflict: "id" });
+  if (error) { console.error("upsertTeacherExtraClass(classes):", error); throw error; }
 }
 export async function removeTeacherExtraClass(id: string): Promise<void> {
-  const { error } = await supabase.from("teacher_extra_classes").delete().eq("id", id);
-  if (error) { console.error("removeTeacherExtraClass:", error); throw error; }
+  const { error } = await supabase.from("classes").delete().eq("id", id);
+  if (error) { console.error("removeTeacherExtraClass(classes):", error); throw error; }
 }
 
 export async function getHwSubmissions<T = Record<string, unknown>>(): Promise<T[]> {
