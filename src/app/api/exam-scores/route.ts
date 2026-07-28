@@ -22,14 +22,18 @@ async function canAccessStudent(
     return Boolean(data);
   }
   if (actor.role === "teacher" && actor.teacherId) {
-    let query = admin
-      .from("classes")
-      .select("id")
-      .eq("tutor_id", actor.teacherId)
-      .contains("student_ids", [studentId]);
-    if (classId) query = query.eq("id", classId);
-    const { data } = await query.limit(1).maybeSingle();
-    return Boolean(data);
+    // Classes live in `classes` (admin) or `teacher_extra_classes` (teacher).
+    for (const table of ["classes", "teacher_extra_classes"] as const) {
+      let query = admin
+        .from(table)
+        .select("id")
+        .eq("tutor_id", actor.teacherId)
+        .contains("student_ids", [studentId]);
+      if (classId) query = query.eq("id", classId);
+      const { data } = await query.limit(1).maybeSingle();
+      if (data) return true;
+    }
+    return false;
   }
   return false;
 }

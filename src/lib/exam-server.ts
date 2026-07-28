@@ -87,12 +87,15 @@ export async function verifyStudentExamScope(
   studentId: string,
   lesson: CurriculumLesson,
 ): Promise<boolean> {
-  const { data: classRow, error } = await admin
-    .from("classes")
-    .select("student_ids")
-    .eq("id", classId)
-    .maybeSingle();
-  if (error || !classRow) return false;
+  // Class may live in `classes` (admin) or `teacher_extra_classes` (teacher).
+  let classRow: { student_ids?: unknown } | null = null;
+  const core = await admin.from("classes").select("student_ids").eq("id", classId).maybeSingle();
+  classRow = core.data;
+  if (!classRow) {
+    const extra = await admin.from("teacher_extra_classes").select("student_ids").eq("id", classId).maybeSingle();
+    classRow = extra.data;
+  }
+  if (!classRow) return false;
   const studentIds = Array.isArray(classRow.student_ids)
     ? classRow.student_ids.map(String)
     : [];

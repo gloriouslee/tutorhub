@@ -28,22 +28,20 @@ export async function GET(req: NextRequest) {
     allowed ||= segments[0] === actor.userId;
   } else {
     const classId = segments[0];
+    // Classes live either in `classes` (admin-created) or `teacher_extra_classes`
+    // (teacher-created) — check both.
     if (actor.role === "teacher" && actor.teacherId) {
-      const { data } = await admin
-        .from("classes")
-        .select("id")
-        .eq("id", classId)
-        .eq("tutor_id", actor.teacherId)
-        .maybeSingle();
-      allowed ||= Boolean(data);
+      const [core, extra] = await Promise.all([
+        admin.from("classes").select("id").eq("id", classId).eq("tutor_id", actor.teacherId).maybeSingle(),
+        admin.from("teacher_extra_classes").select("id").eq("id", classId).eq("tutor_id", actor.teacherId).maybeSingle(),
+      ]);
+      allowed ||= Boolean(core.data) || Boolean(extra.data);
     } else if (actor.role === "student" && actor.studentId) {
-      const { data } = await admin
-        .from("classes")
-        .select("id")
-        .eq("id", classId)
-        .contains("student_ids", [actor.studentId])
-        .maybeSingle();
-      allowed ||= Boolean(data);
+      const [core, extra] = await Promise.all([
+        admin.from("classes").select("id").eq("id", classId).contains("student_ids", [actor.studentId]).maybeSingle(),
+        admin.from("teacher_extra_classes").select("id").eq("id", classId).contains("student_ids", [actor.studentId]).maybeSingle(),
+      ]);
+      allowed ||= Boolean(core.data) || Boolean(extra.data);
     } else if (actor.role === "parent" && actor.parentId) {
       const { data: children } = await admin
         .from("students")
@@ -51,13 +49,11 @@ export async function GET(req: NextRequest) {
         .eq("parent_id", actor.parentId);
       const childIds = (children ?? []).map((child) => String(child.id));
       if (childIds.length > 0) {
-        const { data } = await admin
-          .from("classes")
-          .select("id")
-          .eq("id", classId)
-          .overlaps("student_ids", childIds)
-          .maybeSingle();
-        allowed ||= Boolean(data);
+        const [core, extra] = await Promise.all([
+          admin.from("classes").select("id").eq("id", classId).overlaps("student_ids", childIds).maybeSingle(),
+          admin.from("teacher_extra_classes").select("id").eq("id", classId).overlaps("student_ids", childIds).maybeSingle(),
+        ]);
+        allowed ||= Boolean(core.data) || Boolean(extra.data);
       }
     }
   }

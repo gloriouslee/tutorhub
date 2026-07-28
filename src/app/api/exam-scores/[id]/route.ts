@@ -28,13 +28,11 @@ export async function DELETE(
     return NextResponse.json({ error: "score_not_found" }, { status: 404 });
   }
   if (actor.role === "teacher") {
-    const { data: ownedClass } = await admin
-      .from("classes")
-      .select("id")
-      .eq("id", score.class_id)
-      .eq("tutor_id", actor.teacherId ?? "")
-      .maybeSingle();
-    if (!ownedClass) return NextResponse.json({ error: "forbidden" }, { status: 403 });
+    const [core, extra] = await Promise.all([
+      admin.from("classes").select("id").eq("id", score.class_id).eq("tutor_id", actor.teacherId ?? "").maybeSingle(),
+      admin.from("teacher_extra_classes").select("id").eq("id", score.class_id).eq("tutor_id", actor.teacherId ?? "").maybeSingle(),
+    ]);
+    if (!core.data && !extra.data) return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
   const { error } = await admin.from("app_exam_scores").delete().eq("id", id);
   if (error) return NextResponse.json({ error: "score_delete_failed" }, { status: 500 });
