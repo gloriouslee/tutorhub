@@ -177,6 +177,9 @@ export default function TeacherClassDetailPage() {
     getClassMaterials(classId).then(setUploadedMaterials);
   }, [classId]);
 
+  // Tài liệu nguồn từ Lộ trình (curriculum lesson type=material) — hiển thị ở tab Tài liệu.
+  const [currMaterials, setCurrMaterials] = useState<StoredClassMaterial[]>([]);
+
   // Student packages per class (persisted to localStorage)
   const [studentPackages, setStudentPackages] = useState<Record<string, StudentPackage>>({});
 
@@ -240,6 +243,7 @@ export default function TeacherClassDetailPage() {
       const map: Record<string, CurriculumSessionData> = {};
       const fileHws: Homework[] = [];
       const examLessons: { id: string; title: string; description?: string; date?: string; assigned_to?: string[] | null; exam_status?: "draft" | "open" | "closed"; opens_at?: string }[] = [];
+      const currMats: StoredClassMaterial[] = [];
       for (const ch of chapters) {
         for (const s of ch.sessions) {
           if (s.date) map[s.date] = s;
@@ -262,6 +266,22 @@ export default function TeacherClassDetailPage() {
                 id: lesson.id, title: lesson.title, description: lesson.description,
                 date: s.date, assigned_to: lesson.assigned_to ?? null,
                 exam_status: lesson.exam_status ?? "draft", opens_at: lesson.exam_opens_at,
+              });
+            } else if (lesson.type === "material") {
+              const u = (lesson.file_url ?? "").toLowerCase();
+              currMats.push({
+                id: lesson.id,
+                class_id: classId,
+                title: lesson.title,
+                description: lesson.description ?? "",
+                file_url: lesson.file_url ?? "",
+                file_type: u.includes(".pdf") ? "pdf" : /\.(png|jpe?g|gif|webp|svg)/.test(u) ? "image" : "file",
+                file_size: "",
+                category: "material",
+                uploaded_by: "",
+                created_at: s.date ?? today,
+                download_count: 0,
+                kind: "material",
               });
             }
           }
@@ -293,6 +313,7 @@ export default function TeacherClassDetailPage() {
         };
       }));
       setCurriculumByDate(map);
+      setCurrMaterials(currMats);
       const currHws = [...fileHws, ...examHws];
       if (currHws.length > 0) {
         setHomeworks(prev => {
@@ -440,6 +461,7 @@ export default function TeacherClassDetailPage() {
   const materials = [
     ...MOCK_CLASS_MATERIALS.filter(m => m.class_id === classId),
     ...uploadedMaterials,
+    ...currMaterials,
   ];
   const lectures = MOCK_LECTURES.filter(l => l.class_id === classId);
   const notes = MOCK_CLASS_NOTES.filter(n => n.class_id === classId);
