@@ -56,7 +56,7 @@ function relativeTime(isoString: string): string {
 
 // ── Unified type ──────────────────────────────────────────────────────────────
 type UnifiedNotif =
-  | ({ source: "mock" }     & Notification)
+  | ({ source: "broadcast" } & Notification)
   | ({ source: "schedule" } & ScheduleNotification);
 
 type NotifCategory = "schedule" | "assignment" | "graded" | "system" | "info";
@@ -68,7 +68,7 @@ function categorize(n: UnifiedNotif): NotifCategory {
   if (notif.category === "assignment") return "assignment";
   if (notif.category === "graded")     return "graded";
   if (notif.category === "system")     return "system";
-  // Fallback: keyword matching (for legacy mock data)
+  // Infer a category for older notification records that predate the category field.
   const title = notif.title ?? "";
   if (title.includes("chấm") || title.includes("Điểm")) return "graded";
   if (title.includes("Bài tập"))  return "assignment";
@@ -113,13 +113,13 @@ export default function StudentNotificationsPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [myClassIds.join(",")]);
 
-  const mockNotifs = notifs.filter(n => !deletedIds.has(n.id));
+  const broadcastNotifs = notifs.filter(n => !deletedIds.has(n.id));
   const scheduleFiltered = scheduleNotifs.filter(n => !deletedIds.has(n.id));
 
   // Bug fix 3: sort by created_at descending across both sources
   const unified: UnifiedNotif[] = [
     ...scheduleFiltered.map(n => ({ source: "schedule" as const, ...n })),
-    ...mockNotifs.map(n => ({ source: "mock" as const, ...n })),
+    ...broadcastNotifs.map(n => ({ source: "broadcast" as const, ...n })),
   ].sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""));
 
   const isRead = (n: UnifiedNotif) => n.is_read || readIds.has(n.id);
@@ -255,7 +255,7 @@ export default function StudentNotificationsPage() {
                       </p>
 
                       {/* Sender */}
-                      {n.source === "mock" && (n as Notification).sent_by && (
+                      {n.source === "broadcast" && (n as Notification).sent_by && (
                         <p className="text-[11px] text-muted-foreground/70 mt-1.5">
                           Gửi bởi: <span className="font-medium text-muted-foreground">{(n as Notification).sent_by}</span>
                         </p>

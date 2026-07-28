@@ -6,9 +6,9 @@ import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import {
   BookOpen, Calendar, ClipboardList, GraduationCap,
-  LayoutDashboard, Bell, User, LogOut, ChevronLeft,
+  LayoutDashboard, Bell, User, LogOut,
   Users, DollarSign, Settings, BarChart3, FileText,
-  CheckSquare, BookMarked, MessageSquare, Home, X, Shield,
+  CheckSquare, BookMarked, MessageSquare, X, Shield,
 } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { UserRole } from "@/types";
@@ -89,7 +89,7 @@ function parseSet(key: string): Set<string> {
 }
 
 // Đếm thông báo chưa đọc theo ĐÚNG logic trang thông báo của từng role:
-// nguồn getNotifications() (đã gồm mock nền) + trừ đã đọc/đã xóa (localStorage).
+// nguồn getNotifications() + trừ các thông báo đã đọc/đã xóa trong cache cục bộ.
 async function unreadBroadcasts(
   targetRole: "student" | "parent" | "teacher",
   readKey: string,
@@ -123,21 +123,15 @@ async function computeBadges(
     const [
       { getTeacherHomework, getHwSubmissions, getScheduleNotifications },
       { getSubmissionsByStudent },
-      { MOCK_HOMEWORK },
     ] = await Promise.all([
       import("@/lib/storage"),
       import("@/lib/supabase/submissions"),
-      import("@/lib/mock-data"),
     ]);
     // Bài tập "Chưa nộp" — cùng nguồn với trang bài tập: homework giáo viên tạo
-    // (kv) + mock nền theo lớp thật của học sinh, trừ bài đã nộp (Supabase → kv).
+    // Trừ các bài đã nộp (Supabase → local fallback).
     const teacherHw = (await getTeacherHomework<{ id: string; class_id: string }>(myClassIds))
       .filter(h => myClassIds.includes(h.class_id));
-    const kvHwIds = new Set(teacherHw.map(h => h.id));
-    const myHw = [
-      ...teacherHw,
-      ...MOCK_HOMEWORK.filter(h => myClassIds.includes(h.class_id) && !kvHwIds.has(h.id)),
-    ];
+    const myHw = teacherHw;
     let subs = await getSubmissionsByStudent(sid).catch(() => []);
     if (subs.length === 0) {
       const local = await getHwSubmissions<{ homework_id: string; student_id: string }>({
@@ -196,7 +190,7 @@ export default function Sidebar({ role, userName, isOpen = true, onClose }: Side
   const router   = useRouter();
   const items    = navConfig[role];
   const config   = roleConfig[role];
-  // Nhận diện đúng học viên hiện tại (demo s1 / cookie enrolled / phiên Supabase)
+  // Nhận diện đúng học viên hiện tại từ phiên đăng nhập Supabase.
   const { context: accountContext, ready: contextReady } = useAccountContext();
   // Danh sách con (chỉ dùng khi role = parent) — nguồn sự kiện thông báo
   const studentId = accountContext?.role === "student" ? accountContext.studentId : "";

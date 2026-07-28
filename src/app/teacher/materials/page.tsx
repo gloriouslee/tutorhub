@@ -71,75 +71,15 @@ interface Course {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Mock seed data
-// ─────────────────────────────────────────────────────────────────────────────
-
-const SEED_COURSES: Course[] = [
-  {
-    id: "tc1", title: "Toán 12 — Giải tích & Hình học",
-    subject: "Toán học", grade: 12, type: "class", classId: "c1",
-    description: "Tài liệu lớp Toán 12 — dành cho học viên đã đăng ký lớp.",
-    published: true, packages: ["online", "advanced", "offline"],
-    includes: [],
-    chapters: [
-      {
-        id: "ch1", title: "Hàm số & đồ thị",
-        lessons: [
-          { id: "l1", title: "Lý thuyết hàm số bậc 3", type: "video", isPreview: true, duration: "18:40", fileName: "ly-thuyet-ham-so.mp4", fileSize: "124 MB" },
-          { id: "l2", title: "Công thức tổng hợp hàm số", type: "pdf", isPreview: true, fileName: "cong-thuc-tong-hop.pdf", fileSize: "2.4 MB" },
-          { id: "l3", title: "Bài tập hàm số có hướng dẫn", type: "video", isPreview: false, duration: "24:15", fileName: "bai-tap-ham-so.mp4", fileSize: "210 MB" },
-          { id: "l4", title: "Kiểm tra chương 1", type: "exercise", isPreview: false, fileName: "kiem-tra-chuong-1.pdf", fileSize: "0.6 MB" },
-        ],
-      },
-      {
-        id: "ch2", title: "Đạo hàm & ứng dụng",
-        lessons: [
-          { id: "l5", title: "Định nghĩa và quy tắc tính đạo hàm", type: "video", isPreview: false, duration: "22:30" },
-          { id: "l6", title: "Ứng dụng đạo hàm — cực trị", type: "video", isPreview: false, duration: "31:10" },
-          { id: "l7", title: "Tài liệu lý thuyết đạo hàm", type: "pdf", isPreview: false },
-        ],
-      },
-    ],
-  },
-  {
-    id: "tc2", title: "Toán 12 — Siêu Ôn Luyện THPT Quốc Gia",
-    subject: "Toán học", grade: 12, type: "paid_package",
-    price: 299000, originalPrice: 499000, tier: "pro",
-    rating: 4.9, reviewCount: 218,
-    includes: ["32 video bài giảng HD", "500 bài tập có đáp án", "10 đề thi thử THPT", "Tóm tắt lý thuyết mỗi chương"],
-    description: "Bộ tài liệu toàn diện nhất cho kỳ thi THPT, bao gồm video bài giảng, bộ đề và đáp án chi tiết.",
-    published: true, packages: ["advanced", "offline"],
-    chapters: [
-      {
-        id: "ch1", title: "Hàm số & đồ thị (Preview)",
-        lessons: [
-          { id: "p1", title: "Lý thuyết hàm số — tổng quan", type: "video", isPreview: true, duration: "15:00", fileName: "preview-ham-so.mp4", fileSize: "98 MB" },
-          { id: "p2", title: "Công thức nhanh hàm số", type: "pdf", isPreview: true, fileName: "cong-thuc-nhanh.pdf", fileSize: "1.1 MB" },
-        ],
-      },
-      {
-        id: "ch2", title: "Đạo hàm nâng cao",
-        lessons: [
-          { id: "p3", title: "Đạo hàm — kỹ thuật nâng cao", type: "video", isPreview: false, duration: "28:00" },
-          { id: "p4", title: "500 bài tập đạo hàm", type: "exercise", isPreview: false },
-        ],
-      },
-    ],
-  },
-];
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function loadCourses(): Promise<Course[]> {
-  const seed = process.env.NODE_ENV === "production" ? [] : SEED_COURSES;
-  if (typeof window === "undefined") return seed;
+  if (typeof window === "undefined") return [];
   try {
-    const raw = await getTeacherMaterials<Course>();
-    if (raw.length) return raw;
+    return await getTeacherMaterials<Course>();
   } catch {}
-  return seed;
+  return [];
 }
 function saveCourses(courses: Course[], teacherId: string) {
   if (!teacherId) return;
@@ -213,12 +153,10 @@ const LESSON_TYPE_META: Record<LessonType, { label: string; icon: React.ElementT
 };
 
 function LessonModal({
-  courseId,
   initial,
   onSave,
   onClose,
 }: {
-  courseId: string;
   initial?: Lesson;
   onSave: (lesson: Lesson) => void;
   onClose: () => void;
@@ -1054,7 +992,6 @@ function CourseEditor({
       {/* Lesson modal */}
       {lessonModal && (
         <LessonModal
-          courseId={draft.id}
           initial={lessonModal.lesson}
           onSave={lesson => saveLesson(lessonModal.chapterId, lesson)}
           onClose={() => setLessonModal(null)}

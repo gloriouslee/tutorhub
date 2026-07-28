@@ -8,16 +8,12 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { SectionHeader, ProgressBar } from "@/components/shared";
-import {
-  MOCK_STUDENTS, MOCK_CLASSES, MOCK_EXAM_SCORES,
-  MOCK_ATTENDANCE, MOCK_HOMEWORK, MOCK_SUBMISSIONS,
-} from "@/lib/mock-data";
-import type { Class } from "@/types";
+import type { Class, Student } from "@/types";
 import {
   getStudentComments, saveStudentComment,
   getStudentPackages, type StudentPackage,
-  getExamScoresByStudent, saveExamScore, deleteExamScore, type StoredExamScore,
-  getAllTeacherAttendance, getHwSubmissions,
+  getAllExamScores, getExamScoresByStudent, saveExamScore, deleteExamScore, type StoredExamScore,
+  getAllTeacherAttendance, getHwSubmissions, getStudents, getTeacherHomework,
 } from "@/lib/storage";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { useTeacherContext } from "@/hooks/useTeacherContext";
@@ -49,11 +45,19 @@ interface Submission {
   status?: string;
 }
 
+interface HomeworkRecord {
+  id: string;
+  class_id: string;
+  title: string;
+  due_date: string;
+  assigned_to?: string[] | null;
+}
+
 type DetailTab = "overview" | "scores" | "attendance" | "homework" | "comments";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-function avgScore(studentId: string, classIds: string[]): number | null {
-  const scores = MOCK_EXAM_SCORES.filter(
+function avgScore(studentId: string, classIds: string[], allScores: StoredExamScore[]): number | null {
+  const scores = allScores.filter(
     e => e.student_id === studentId && classIds.includes(e.class_id)
   );
   if (!scores.length) return null;
@@ -62,8 +66,6 @@ function avgScore(studentId: string, classIds: string[]): number | null {
 
 function attendanceRate(studentId: string, classIds: string[], extra: SavedAttendanceRecord[]): number | null {
   const byKey = new Map<string, string>();
-  for (const r of MOCK_ATTENDANCE.filter(a => a.student_id === studentId && classIds.includes(a.class_id)))
-    byKey.set(`${r.class_id}|${r.attendance_date}`, r.status);
   for (const r of extra.filter(a => a.student_id === studentId && classIds.includes(a.class_id)))
     byKey.set(`${r.class_id}|${r.date}`, r.status);
   if (!byKey.size) return null;
@@ -178,7 +180,7 @@ function StudentDetailPanel({
   savedAttendance,
   onBack,
 }: {
-  student: (typeof MOCK_STUDENTS)[0];
+  student: Student;
   studentClasses: Class[];
   packagesMap: Record<string, Record<string, StudentPackage>>;
   savedAttendance: SavedAttendanceRecord[];
@@ -188,33 +190,40 @@ function StudentDetailPanel({
   const [lsSubmissions, setLsSubmissions] = useState<Submission[]>([]);
   const [gpaTarget, setGpaTarget] = useState<number | null>(null);
   const [storedScores, setStoredScores] = useState<StoredExamScore[]>([]);
+  const [homework, setHomework] = useState<HomeworkRecord[]>([]);
   const [showScoreForm, setShowScoreForm] = useState(false);
   const [scoreForm, setScoreForm] = useState({ exam_name: "", score: "", max_score: "10", exam_date: toLocalDateKey(new Date()), class_id: "" });
 
-  const studentClassIds = studentClasses.map(c => c.id);
-  const classNameMap = Object.fromEntries(studentClasses.map(c => [c.id, c.class_name]));
+  const studentClassIds = useMemo(() => studentClasses.map(c => c.id), [studentClasses]);
+  const classNameMap = useMemo(
+    () => Object.fromEntries(studentClasses.map(c => [c.id, c.class_name])),
+    [studentClasses],
+  );
 
   useEffect(() => {
     getHwSubmissions<Submission>({ studentIds: [student.id] })
-      .then(subs => { if (subs.length) setLsSubmissions(subs); })
-      .catch(() => {});
+      .then(setLsSubmissions)
+      .catch(() => setLsSubmissions([]));
+    getTeacherHomework<HomeworkRecord>(studentClassIds)
+      .then(records => setHomework(records.filter(
+        hw => studentClassIds.includes(hw.class_id)
+          && (!hw.assigned_to?.length || hw.assigned_to.includes(student.id))
+      )))
+      .catch(() => setHomework([]));
     try {
       const val = localStorage.getItem(`tutorhub_gpa_target_${student.id}`);
       if (val) setGpaTarget(parseFloat(val));
     } catch {}
     getExamScoresByStudent(student.id).then(setStoredScores);
     setScoreForm(f => ({ ...f, class_id: studentClasses[0]?.id ?? "" }));
-  }, [student.id]);
+  }, [student.id, studentClassIds, studentClasses]);
 
-  // Scores — merge mock + localStorage, deduped
+  // Persisted exam scores for the student's classes.
   const examScores = useMemo(() => {
-    const mock = MOCK_EXAM_SCORES.filter(e => e.student_id === student.id && studentClassIds.includes(e.class_id));
-    const real = storedScores.filter(e => studentClassIds.includes(e.class_id));
-    const seen = new Set<string>();
-    return [...mock, ...real]
-      .filter(e => { if (seen.has(e.id)) return false; seen.add(e.id); return true; })
+    return storedScores
+      .filter(e => studentClassIds.includes(e.class_id))
       .sort((a, b) => a.exam_date.localeCompare(b.exam_date));
-  }, [student.id, studentClassIds, storedScores]);
+  }, [studentClassIds, storedScores]);
 
   const avgVal = examScores.length
     ? examScores.reduce((s, e) => s + (e.score / e.max_score) * 10, 0) / examScores.length
@@ -245,8 +254,6 @@ function StudentDetailPanel({
   // Attendance
   const mergedAttendance = useMemo(() => {
     const byKey = new Map<string, { date: string; class_id: string; status: string }>();
-    for (const r of MOCK_ATTENDANCE.filter(a => a.student_id === student.id && studentClassIds.includes(a.class_id)))
-      byKey.set(`${r.class_id}|${r.attendance_date}`, { date: r.attendance_date, class_id: r.class_id, status: r.status });
     for (const r of savedAttendance.filter(a => a.student_id === student.id && studentClassIds.includes(a.class_id)))
       byKey.set(`${r.class_id}|${r.date}`, { date: r.date, class_id: r.class_id, status: r.status });
     return [...byKey.values()].sort((a, b) => b.date.localeCompare(a.date));
@@ -260,22 +267,7 @@ function StudentDetailPanel({
     ? Math.round(((attPresent + attLate) / mergedAttendance.length) * 100)
     : null;
 
-  // Homework
-  const homework = useMemo(
-    () => MOCK_HOMEWORK.filter(h => studentClassIds.includes(h.class_id)),
-    [studentClassIds]
-  );
-  // kv submissions take precedence over mocks with the same homework_id+student_id
-  const allSubmissions: Submission[] = (() => {
-    const kv = lsSubmissions.filter(s => s.student_id === student.id);
-    const seen = new Set(kv.map(s => `${s.homework_id}|${s.student_id}`));
-    return [
-      ...kv,
-      ...MOCK_SUBMISSIONS.filter(
-        s => s.student_id === student.id && !seen.has(`${s.homework_id}|${s.student_id}`)
-      ),
-    ];
-  })();
+  const allSubmissions = lsSubmissions.filter(s => s.student_id === student.id);
   const submittedHwIds = new Set(allSubmissions.map(s => s.homework_id));
   const hwSubmitted = homework.filter(h => submittedHwIds.has(h.id)).length;
   const hwRate = homework.length ? Math.round((hwSubmitted / homework.length) * 100) : null;
@@ -439,13 +431,11 @@ function StudentDetailPanel({
 
           {/* Per-class breakdown */}
           {studentClasses.map(cls => {
-            const clsScores = MOCK_EXAM_SCORES.filter(e => e.student_id === student.id && e.class_id === cls.id);
+            const clsScores = examScores.filter(e => e.class_id === cls.id);
             const clsAvg = clsScores.length
               ? clsScores.reduce((s, e) => s + (e.score / e.max_score) * 10, 0) / clsScores.length
               : null;
             const clsAttMap = new Map<string, string>();
-            for (const r of MOCK_ATTENDANCE.filter(a => a.student_id === student.id && a.class_id === cls.id))
-              clsAttMap.set(r.attendance_date, r.status);
             for (const r of savedAttendance.filter(a => a.student_id === student.id && a.class_id === cls.id))
               clsAttMap.set(r.date, r.status);
             const clsAttOk = [...clsAttMap.values()].filter(s => s === "present" || s === "late").length;
@@ -550,15 +540,13 @@ function StudentDetailPanel({
               <div className="space-y-2">
                 {examScores.map(e => {
                   const normalized = (e.score / e.max_score) * 10;
-                  const isStored = storedScores.some(s => s.id === e.id);
                   return (
-                    <Card key={e.id} className={`border-border/60 ${isStored ? "ring-1 ring-primary/20" : ""}`}>
+                    <Card key={e.id} className="border-border/60 ring-1 ring-primary/20">
                       <CardContent className="p-4">
                         <div className="flex items-start justify-between gap-3">
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-1.5">
                               <p className="text-sm font-semibold text-foreground">{e.exam_name}</p>
-                              {isStored && <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary font-medium">Thực tế</span>}
                             </div>
                             <p className="text-[11px] text-muted-foreground mt-0.5">
                               {new Date(e.exam_date).toLocaleDateString("vi-VN")} · {classNameMap[e.class_id] ?? e.class_id}
@@ -570,11 +558,9 @@ function StudentDetailPanel({
                               <span className="text-xs text-muted-foreground">/{e.max_score}</span>
                               <p className={`text-[10px] font-semibold ${gradeColor(normalized, 10)}`}>({normalized.toFixed(1)}/10)</p>
                             </div>
-                            {isStored && (
-                              <button onClick={() => handleDeleteScore(e.id)} className="text-muted-foreground hover:text-red-500 transition-colors p-1">
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </button>
-                            )}
+                            <button onClick={() => handleDeleteScore(e.id)} className="text-muted-foreground hover:text-red-500 transition-colors p-1">
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
                           </div>
                         </div>
                         <ProgressBar value={(e.score / e.max_score) * 100} size="sm" color={barColor(e.score, e.max_score)} className="mt-2" />
@@ -826,6 +812,8 @@ export default function TeacherStudentsPage() {
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
   const [packagesMap,       setPackagesMap]       = useState<Record<string, Record<string, StudentPackage>>>({});
   const [savedAttendance,   setSavedAttendance]   = useState<SavedAttendanceRecord[]>([]);
+  const [students,          setStudents]          = useState<Student[]>([]);
+  const [examScores,        setExamScores]        = useState<StoredExamScore[]>([]);
 
   useEffect(() => {
     async function loadPackages() {
@@ -835,17 +823,22 @@ export default function TeacherStudentsPage() {
     }
     loadPackages();
     getAllTeacherAttendance({ classIds: myClasses.map(c => c.id) })
-      .then(recs => { if (recs.length) setSavedAttendance(recs as unknown as SavedAttendanceRecord[]); })
-      .catch(() => {});
+      .then(recs => setSavedAttendance(recs as unknown as SavedAttendanceRecord[]))
+      .catch(() => setSavedAttendance([]));
   }, [myClasses]);
+
+  useEffect(() => {
+    getStudents().then(setStudents).catch(() => setStudents([]));
+    getAllExamScores().then(setExamScores).catch(() => setExamScores([]));
+  }, []);
 
   const allStudentIds = useMemo(
     () => [...new Set(myClasses.flatMap(c => c.student_ids ?? []))],
     [myClasses]
   );
   const allStudents = useMemo(
-    () => MOCK_STUDENTS.filter(s => allStudentIds.includes(s.id)),
-    [allStudentIds]
+    () => students.filter(s => allStudentIds.includes(s.id)),
+    [allStudentIds, students]
   );
 
   const displayed = useMemo(() => {
@@ -867,7 +860,8 @@ export default function TeacherStudentsPage() {
   function toggleExpand(id: string) {
     setExpanded(prev => {
       const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
   }
@@ -941,7 +935,8 @@ export default function TeacherStudentsPage() {
                 {displayed.map((student, i) => {
                   const studentClasses  = myClasses.filter(c => (c.student_ids ?? []).includes(student.id));
                   const studentClassIds = studentClasses.map(c => c.id);
-                  const avg  = avgScore(student.id, studentClassIds);
+                  const studentScores = examScores.filter(e => e.student_id === student.id && studentClassIds.includes(e.class_id));
+                  const avg  = avgScore(student.id, studentClassIds, examScores);
                   const rate = attendanceRate(student.id, studentClassIds, savedAttendance);
                   const isEx = expanded.has(student.id);
 
@@ -1003,15 +998,13 @@ export default function TeacherStudentsPage() {
                         {isEx && (
                           <div className="space-y-1 pt-1 border-t border-border/50" onClick={e => e.stopPropagation()}>
                             <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">Các bài kiểm tra</p>
-                            {MOCK_EXAM_SCORES
-                              .filter(e => e.student_id === student.id && studentClassIds.includes(e.class_id))
-                              .map(e => (
+                            {studentScores.map(e => (
                                 <div key={e.id} className="flex items-center justify-between text-xs">
                                   <span className="text-muted-foreground truncate flex-1 mr-2">{e.exam_name}</span>
                                   <span className={`font-semibold shrink-0 ${gradeColor(e.score, e.max_score)}`}>{e.score}/{e.max_score}</span>
                                 </div>
                               ))}
-                            {MOCK_EXAM_SCORES.filter(e => e.student_id === student.id && studentClassIds.includes(e.class_id)).length === 0 && (
+                            {studentScores.length === 0 && (
                               <p className="text-xs text-muted-foreground">Chưa có dữ liệu kiểm tra.</p>
                             )}
                           </div>

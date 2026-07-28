@@ -78,7 +78,7 @@ export async function loadAnalyticsData(): Promise<AnalyticsData> {
   const firstClassOf = (studentId: string): string | undefined =>
     classes.find(c => (c.student_ids ?? []).includes(studentId))?.id;
 
-  // Điểm thi: chỉ dùng dữ liệu thật đã lưu (không trộn mock)
+  // Điểm thi: chỉ dùng dữ liệu đã lưu.
   const examScores = storedScores;
 
   // ── Sự kiện doanh thu (gộp 3 nguồn tiền) ─────────────────────────────────────

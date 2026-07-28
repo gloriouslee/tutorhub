@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -8,15 +8,13 @@ import { Input } from "@/components/ui/input";
 import { SectionHeader } from "@/components/shared";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
-  Send, BookOpen, CheckCircle2, AlertTriangle, Info, Calendar,
+  Send, BookOpen, CheckCircle2, Info, Calendar,
   Users, School, Trash2, Bell,
 } from "lucide-react";
 import { getNotifications, saveNotifications } from "@/lib/storage";
 import { Notification, NotificationCategory } from "@/types";
 import { formatDate } from "@/lib/utils";
 import { useTeacherContext } from "@/hooks/useTeacherContext";
-
-const TEACHER_INITIALS = "HT";
 
 const CATEGORY_OPTIONS: { value: NotificationCategory; label: string; Icon: React.ElementType; color: string }[] = [
   { value: "general",    label: "Thông tin chung",   Icon: Info,          color: "text-blue-500" },
@@ -27,6 +25,12 @@ const CATEGORY_OPTIONS: { value: NotificationCategory; label: string; Icon: Reac
 
 export default function TeacherAnnouncementsPage() {
   const { teacherName, myClasses } = useTeacherContext();
+  const teacherInitials = (teacherName || "Giáo viên")
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(-2)
+    .map(part => part[0]?.toUpperCase())
+    .join("");
 
   // Classes this teacher teaches
   const MY_CLASSES = myClasses;
@@ -44,15 +48,15 @@ export default function TeacherAnnouncementsPage() {
   const [target,   setTarget]   = useState("all-students");
   const [submitting, setSubmitting] = useState(false);
 
-  useEffect(() => { load(); }, [teacherName]);
-
-  async function load() {
+  const load = useCallback(async () => {
     const all = await getNotifications();
     setNotifications(
       all.filter(n => n.sent_by === teacherName)
          .sort((a, b) => b.created_at.localeCompare(a.created_at))
     );
-  }
+  }, [teacherName]);
+
+  useEffect(() => { load(); }, [load]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -248,7 +252,7 @@ export default function TeacherAnnouncementsPage() {
                         {/* Avatar */}
                         <Avatar className="h-9 w-9 border border-border shrink-0">
                           <AvatarFallback className="bg-primary/10 text-primary text-xs font-bold">
-                            {TEACHER_INITIALS}
+                            {teacherInitials}
                           </AvatarFallback>
                         </Avatar>
 

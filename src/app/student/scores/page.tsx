@@ -5,7 +5,6 @@ import PortalLayout from "@/components/layout/PortalLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { SectionHeader, ProgressBar } from "@/components/shared";
-import { MOCK_EXAM_SCORES, MOCK_CLASSES, MOCK_TEACHERS } from "@/lib/mock-data";
 import { GraduationCap, TrendingUp, Trophy, Target, BookOpen, ChevronDown, Pencil, Check, X } from "lucide-react";
 import { useStudentContext } from "@/hooks/useStudentContext";
 import { getExamScoresByStudent, getCurriculum, getExamResult, type StoredExamScore } from "@/lib/storage";
@@ -112,15 +111,14 @@ export default function StudentScoresPage() {
 
   function cancelEdit() { setEditingGoal(false); }
 
-  // Merge mock scores (demo) + localStorage scores (real), deduplicated by id
+  // Merge teacher-entered scores with completed online exams, deduplicated by id.
   const allScores = useMemo(() => {
-    const mockForStudent = MOCK_EXAM_SCORES.filter(s => s.student_id === studentId);
-    const combined = [...mockForStudent, ...storedScores, ...takenExams];
+    const combined = [...storedScores, ...takenExams];
     const seen = new Set<string>();
     return combined
       .filter(s => { if (seen.has(s.id)) return false; seen.add(s.id); return true; })
       .sort((a, b) => new Date(b.exam_date).getTime() - new Date(a.exam_date).getTime());
-  }, [studentId, storedScores, takenExams]);
+  }, [storedScores, takenExams]);
 
 
   // Filtered list
@@ -146,9 +144,8 @@ export default function StudentScoresPage() {
     const clsAvg    = clsScores.length
       ? Number((clsScores.reduce((a, s) => a + norm(s), 0) / clsScores.length).toFixed(1))
       : 0;
-    const teacher   = MOCK_TEACHERS.find(t => t.id === cls.tutor_id);
     // Dùng tên lớp làm nhãn — các lớp có thể cùng môn học (trùng key React)
-    return { id: cls.id, subject: cls.class_name, score: clsAvg, fullMark: 10, teacher: teacher?.full_name };
+    return { id: cls.id, subject: cls.class_name, score: clsAvg, fullMark: 10, teacher: cls.tutor_name };
   });
 
   // Per-class breakdown for sidebar
@@ -156,8 +153,7 @@ export default function StudentScoresPage() {
     const recs   = allScores.filter(s => s.class_id === cls.id);
     const avg    = recs.length ? Number((recs.reduce((a, s) => a + norm(s), 0) / recs.length).toFixed(1)) : 0;
     const best   = recs.length ? Math.max(...recs.map(norm)) : 0;
-    const teacher = MOCK_TEACHERS.find(t => t.id === cls.tutor_id);
-    return { cls, recs: recs.length, avg, best, teacher };
+    return { cls, recs: recs.length, avg, best, teacherName: cls.tutor_name };
   });
 
   const grade = letterGrade(avgScore);
@@ -309,7 +305,7 @@ export default function StudentScoresPage() {
               ) : (
                 <div className="divide-y divide-border/50">
                   {displayed.map((score, i) => {
-                    const cls = MOCK_CLASSES.find(c => c.id === score.class_id);
+                    const cls = myClasses.find(c => c.id === score.class_id);
                     const pct = score.max_score > 0 ? (score.score / score.max_score) * 100 : 0;
                     const { label, variant } = gradeLabel(pct);
 
@@ -417,14 +413,14 @@ export default function StudentScoresPage() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4 pt-0">
-                {classBreakdown.map(({ cls, recs, avg, best, teacher }) => {
+                {classBreakdown.map(({ cls, recs, avg, best, teacherName }) => {
                   const { label } = gradeLabel((avg / 10) * 100);
                   return (
                     <div key={cls.id} className="space-y-1.5">
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
                           <p className="text-sm font-semibold text-foreground truncate">{cls.subject}</p>
-                          {teacher && <p className="text-[11px] text-muted-foreground">{teacher.full_name}</p>}
+                          {teacherName && <p className="text-[11px] text-muted-foreground">{teacherName}</p>}
                         </div>
                         <div className="text-right shrink-0">
                           <p className="text-sm font-bold text-primary">{avg}/10</p>

@@ -5,17 +5,15 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { isNonEmptyString } from "@/lib/validation";
 import { hasValidMutationOrigin } from "@/lib/request-security";
 
-const FIXED_PRODUCTS: Record<string, { title: string; amount: number }> = {
-  pp1: { title: "Toán 12 — Siêu Ôn Luyện THPT Quốc Gia", amount: 299000 },
-  pp2: { title: "Vật Lý 12 — Điện xoay chiều & Sóng", amount: 199000 },
-  pp3: { title: "Hóa Học 12 — Lý thuyết & Bài tập nâng cao", amount: 349000 },
-  pp4: { title: "Tiếng Anh 12 — Ngữ pháp & Từ vựng", amount: 149000 },
+type CatalogItem = {
+  id?: unknown;
+  title?: unknown;
+  price?: unknown;
+  type?: unknown;
+  published?: unknown;
 };
 
-type CatalogItem = { id?: unknown; title?: unknown; price?: unknown };
-
 async function resolveProduct(pkgId: string) {
-  if (FIXED_PRODUCTS[pkgId]) return FIXED_PRODUCTS[pkgId];
   const { data } = await createAdminClient()
     .from("teacher_materials")
     .select("data")
@@ -24,6 +22,8 @@ async function resolveProduct(pkgId: string) {
   const item = (data?.data ?? null) as CatalogItem | null;
   if (
     item &&
+    item.type === "paid_package" &&
+    item.published === true &&
     typeof item.title === "string" &&
     typeof item.price === "number" &&
     Number.isSafeInteger(item.price) &&

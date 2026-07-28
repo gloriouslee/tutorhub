@@ -2,10 +2,8 @@
 
 import { useState, useMemo } from "react";
 import PortalLayout from "@/components/layout/PortalLayout";
-import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { SectionHeader } from "@/components/shared";
-import { MOCK_CLASSES, MOCK_TEACHERS } from "@/lib/mock-data";
 import { useStudentContext } from "@/hooks/useStudentContext";
 import {
   Clock, MapPin, Video, ChevronLeft, ChevronRight,
@@ -45,8 +43,6 @@ function formatDate(d: Date) {
 // Build a teacher lookup map
 // ─────────────────────────────────────────────────────────────────────────────
 
-const TEACHER_BY_ID = Object.fromEntries(MOCK_TEACHERS.map(t => [t.id, t]));
-
 interface Session {
   classId:   string;
   className: string;
@@ -69,7 +65,7 @@ export default function StudentSchedulePage() {
   const SESSION_BY_DOW = useMemo(() => {
     const map: Record<number, Session[]> = { 0: [], 1: [], 2: [], 3: [], 4: [], 5: [], 6: [] };
     myClasses.forEach(cls => {
-      const teacher = TEACHER_BY_ID[cls.tutor_id]?.full_name ?? "GV chưa xác định";
+      const teacher = cls.tutor_name ?? "GV chưa xác định";
       cls.schedule.forEach(slot => {
         const dow = DAY_EN_TO_DOW[slot.day];
         if (dow === undefined) return;
@@ -120,7 +116,7 @@ export default function StudentSchedulePage() {
         sessions: SESSION_BY_DOW[dow] ?? [],
       };
     });
-  }, [windowStart, totalDays, today]);
+  }, [windowStart, totalDays, today, SESSION_BY_DOW]);
 
   // For 1-month view, only show days inside the target calendar month
   const visibleDays = useMemo(() => {

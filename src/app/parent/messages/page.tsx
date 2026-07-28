@@ -3,66 +3,67 @@
 import { useState, useRef, useEffect } from "react";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { Card } from "@/components/ui/card";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Search, Send, Paperclip, Phone, Info, Check, CheckCheck } from "lucide-react";
 import { getParentMessages, saveParentMessages } from "@/lib/storage";
 import { useParentContext } from "@/hooks/useParentContext";
 
-// Mock Data
-const CONTACTS = [
-  {
-    id: "c1",
-    name: "Thầy Hùng Toán",
-    role: "Giáo viên môn Toán",
-    avatar: "H",
-    online: true,
-    lastActive: "Vừa xong",
-    unread: 0,
-    messages: [
-      { id: "m1", senderId: "c1", text: "Chào anh Minh, tôi là Hùng dạy môn Toán lớp 12 của cháu Tuấn.", time: "09:00", isRead: true },
-      { id: "m2", senderId: "me", text: "Vâng chào thầy, thầy cho tôi hỏi tình hình học tập của cháu dạo này thế nào ạ?", time: "09:05", isRead: true },
-      { id: "m3", senderId: "c1", text: "Cháu Tuấn dạo này làm bài tập rất đầy đủ, tư duy hình học không gian tốt. Tuy nhiên phần nguyên hàm tích phân cần luyện thêm.", time: "09:12", isRead: true },
-      { id: "m4", senderId: "me", text: "Dạ nhờ thầy rèn thêm cho cháu phần đó giúp gia đình với ạ. Cảm ơn thầy.", time: "09:15", isRead: true },
-      { id: "m5", senderId: "c1", text: "Anh yên tâm, tôi đã giao thêm bài tập chuyên đề cho cháu rồi.", time: "09:20", isRead: true },
-    ]
-  },
-  {
-    id: "c2",
-    name: "Cô Lan Anh",
-    role: "Giáo viên Toán Hình Học",
-    avatar: "L",
-    online: false,
-    lastActive: "2 giờ trước",
-    unread: 2,
-    messages: [
-      { id: "m1", senderId: "c2", text: "Chào phụ huynh em Thảo My.", time: "Hôm qua", isRead: true },
-      { id: "m2", senderId: "c2", text: "Kỳ thi thử vừa rồi My làm bài khá tốt, điểm cao nhất lớp.", time: "Hôm qua", isRead: true },
-      { id: "m3", senderId: "c2", text: "Tuy nhiên phụ huynh nhắc bé ôn lại chuyên đề Hình học không gian nhé, phần đó My hay làm ẩu.", time: "14:30", isRead: false },
-      { id: "m4", senderId: "c2", text: "Tối nay tôi sẽ gửi file bài tập lên hệ thống.", time: "14:31", isRead: false },
-    ]
-  },
-  {
-    id: "c3",
-    name: "Ban Giáo Vụ TutorHub",
-    role: "Hỗ trợ phụ huynh",
-    avatar: "TH",
-    online: true,
-    lastActive: "Vừa xong",
-    unread: 0,
-    messages: [
-      { id: "m1", senderId: "c3", text: "TutorHub xin chào! Quý phụ huynh cần hỗ trợ thông tin gì ạ?", time: "T2", isRead: true },
-      { id: "m2", senderId: "me", text: "Tôi vừa chuyển khoản học phí tháng 5 cho 2 bé.", time: "T2", isRead: true },
-      { id: "m3", senderId: "c3", text: "Dạ vâng, hệ thống đã xác nhận nhận được khoản thanh toán 2.700.000 VNĐ. Biên lai điện tử đã được cập nhật.", time: "T2", isRead: true },
-    ]
+interface ChatMessage {
+  id: string;
+  senderId: string;
+  text: string;
+  time: string;
+  isRead: boolean;
+}
+
+interface Contact {
+  id: string;
+  name: string;
+  role: string;
+  avatar: string;
+  online: boolean;
+  lastActive: string;
+  unread: number;
+  messages: ChatMessage[];
+}
+
+function contactsFromClasses(
+  children: ReturnType<typeof useParentContext>["children"],
+): Contact[] {
+  const byTeacher = new Map<string, Contact>();
+  for (const child of children) {
+    for (const cls of child.classes) {
+      if (!cls.tutor_id) continue;
+      const existing = byTeacher.get(cls.tutor_id);
+      const classLabel = `${cls.subject} · ${cls.class_name}`;
+      if (existing) {
+        if (!existing.role.includes(classLabel)) {
+          existing.role = `${existing.role}, ${classLabel}`;
+        }
+        continue;
+      }
+      const name = cls.tutor_name?.trim() || "Giáo viên";
+      byTeacher.set(cls.tutor_id, {
+        id: cls.tutor_id,
+        name,
+        role: classLabel,
+        avatar: name.charAt(0).toUpperCase() || "GV",
+        online: false,
+        lastActive: "Chưa có dữ liệu",
+        unread: 0,
+        messages: [],
+      });
+    }
   }
-];
+  return [...byTeacher.values()];
+}
 
 export default function ParentMessagesPage() {
-  const { parentId } = useParentContext();
-  const [contacts, setContacts] = useState(CONTACTS);
-  const [activeContactId, setActiveContactId] = useState(CONTACTS[0].id);
+  const { parentId, parentName, children, ready } = useParentContext();
+  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [activeContactId, setActiveContactId] = useState("");
   const [inputText, setInputText] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [hydrated, setHydrated] = useState(false);
@@ -71,15 +72,43 @@ export default function ParentMessagesPage() {
 
   // Load this parent's persisted conversations on mount
   useEffect(() => {
-    if (!parentId) return;
+    if (!ready || !parentId) return;
+    let cancelled = false;
     (async () => {
+      const actualContacts = contactsFromClasses(children);
       try {
-        const parsed = await getParentMessages<typeof CONTACTS>(parentId);
-        if (Array.isArray(parsed) && parsed.length > 0) setContacts(parsed);
-      } catch { /* ignore */ }
-      setHydrated(true);
+        const saved = await getParentMessages<Contact[]>(parentId);
+        const savedById = new Map((saved ?? []).map((contact) => [contact.id, contact]));
+        const merged = actualContacts.map((contact) => {
+          const prior = savedById.get(contact.id);
+          return prior
+            ? {
+                ...contact,
+                unread: prior.unread ?? 0,
+                messages: Array.isArray(prior.messages) ? prior.messages : [],
+              }
+            : contact;
+        });
+        if (!cancelled) {
+          setContacts(merged);
+          setActiveContactId((current) =>
+            merged.some((contact) => contact.id === current)
+              ? current
+              : (merged[0]?.id ?? ""),
+          );
+        }
+      } catch {
+        if (!cancelled) {
+          setContacts(actualContacts);
+          setActiveContactId(actualContacts[0]?.id ?? "");
+        }
+      }
+      if (!cancelled) setHydrated(true);
     })();
-  }, [parentId]);
+    return () => {
+      cancelled = true;
+    };
+  }, [children, parentId, ready]);
 
   // Persist conversations whenever they change
   useEffect(() => {
@@ -87,21 +116,21 @@ export default function ParentMessagesPage() {
     saveParentMessages(parentId, contacts).catch(() => { /* ignore */ });
   }, [contacts, hydrated, parentId]);
 
-  const activeContact = contacts.find(c => c.id === activeContactId) || contacts[0];
+  const activeContact = contacts.find(c => c.id === activeContactId);
 
   // Scroll to bottom when messages change
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [activeContact.messages]);
+  }, [activeContact?.messages]);
 
   // Mark as read when opening conversation
   useEffect(() => {
-    if (activeContact.unread > 0) {
+    if (activeContact && activeContact.unread > 0) {
       setContacts(prev => prev.map(c => 
         c.id === activeContactId ? { ...c, unread: 0, messages: c.messages.map(m => ({...m, isRead: true})) } : c
       ));
     }
-  }, [activeContactId, activeContact.unread]);
+  }, [activeContactId, activeContact]);
 
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault();
@@ -131,7 +160,7 @@ export default function ParentMessagesPage() {
   );
 
   return (
-    <PortalLayout role="parent" userName="Trần Văn Minh" pageTitle="Tin nhắn">
+    <PortalLayout role="parent" userName={parentName} pageTitle="Tin nhắn">
       <div className="max-w-6xl mx-auto h-[calc(100vh-100px)] pb-6 flex flex-col">
         <div className="mb-4">
           <h1 className="text-2xl font-bold text-foreground">Tin nhắn & Trao đổi</h1>
@@ -253,7 +282,7 @@ export default function ParentMessagesPage() {
                     </span>
                   </div>
                   
-                  {activeContact.messages.map((msg, idx) => {
+                  {activeContact.messages.map((msg) => {
                     const isMe = msg.senderId === "me";
                     return (
                       <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>

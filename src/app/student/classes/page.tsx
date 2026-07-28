@@ -7,7 +7,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { LearningModeBadge, SectionHeader } from "@/components/shared";
-import { MOCK_CLASSES, MOCK_TEACHERS } from "@/lib/mock-data";
 import { getOnlineLink } from "@/lib/storage";
 import { BookOpen, Clock, Video, MapPin, Users, Search, ChevronRight, GraduationCap } from "lucide-react";
 import { useStudentContext } from "@/hooks/useStudentContext";
@@ -97,7 +96,6 @@ export default function StudentClassesPage() {
             </div>
           ) : (
             displayed.map((cls, i) => {
-              const tutor        = MOCK_TEACHERS.find(t => t.id === cls.tutor_id);
               const studentCount = cls.student_ids?.length ?? 0;
               const liveLink     = onlineLinks[cls.id] || "";
 
@@ -155,10 +153,10 @@ export default function StudentClassesPage() {
                       {/* Meta: teacher + location + students */}
                       <div className="space-y-1.5 flex-1">
                         {/* Teacher */}
-                        {tutor && (
+                        {cls.tutor_name && (
                           <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                             <GraduationCap className="h-3.5 w-3.5 text-violet-500 shrink-0" />
-                            <span className="font-medium text-foreground truncate">{tutor.full_name}</span>
+                            <span className="font-medium text-foreground truncate">{cls.tutor_name}</span>
                           </div>
                         )}
 

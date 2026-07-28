@@ -8,6 +8,7 @@ import { SectionHeader } from "@/components/shared";
 import { Bell, Check, Trash2, BookOpen, CheckCircle2, AlertTriangle, Info, CreditCard } from "lucide-react";
 import { getNotifications } from "@/lib/storage";
 import { Notification } from "@/types";
+import { useTeacherContext } from "@/hooks/useTeacherContext";
 
 // ── localStorage helpers ──────────────────────────────────────────────────────
 const READ_KEY    = "tutorhub_teacher_notif_read";
@@ -72,6 +73,7 @@ function categorize(n: Notification): NotifCategory {
 }
 
 export default function TeacherNotificationsPage() {
+  const { teacherName } = useTeacherContext();
   const [notifs, setNotifs] = useState<Notification[]>([]);
   const [readIds,    setReadIds]    = useState<Set<string>>(new Set());
   const [deletedIds, setDeletedIds] = useState<Set<string>>(new Set());
@@ -112,7 +114,7 @@ export default function TeacherNotificationsPage() {
   };
 
   return (
-    <PortalLayout role="teacher" userName="Thầy Hùng Toán" pageTitle="Thông báo hệ thống">
+    <PortalLayout role="teacher" userName={teacherName || "Giáo viên"} pageTitle="Thông báo hệ thống">
       <div className="space-y-6 max-w-3xl mx-auto">
         <SectionHeader
           title="Tất cả thông báo"

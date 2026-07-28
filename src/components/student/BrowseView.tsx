@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -15,8 +15,8 @@ import {
   Lock, Star, Layers, Eye,
 } from "lucide-react";
 import {
-  OWNED_COURSES, PAID_PACKAGES, PKG_META, TIER_CONFIG, fmt,
-  loadTeacherCourses, teacherCourseToPaidPackage,
+  PKG_META, TIER_CONFIG, fmt,
+  loadTeacherCourses, teacherCourseToOwnedCourse, teacherCourseToPaidPackage,
   type OwnedCourse, type PaidLesson, type PaidPackage, type TeacherCourse,
 } from "./materialsShared";
 import PreviewPlayerModal from "./PreviewPlayerModal";
@@ -28,7 +28,7 @@ import ReviewModal from "./ReviewModal";
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default function BrowseView({ onSelectCourse }: { onSelectCourse: (c: OwnedCourse, isLocked: boolean) => void }) {
-  const { studentId: CURRENT_STUDENT_ID, studentName: CURRENT_STUDENT_NAME, myClasses, assignedClassId } = useStudentContext();
+  const { studentId: CURRENT_STUDENT_ID, studentName: CURRENT_STUDENT_NAME, myClasses } = useStudentContext();
   const router = useRouter();
   const [search, setSearch] = useState("");
   const [selectedPkg, setSelectedPkg] = useState<PaidPackage | null>(null);
@@ -40,14 +40,28 @@ export default function BrowseView({ onSelectCourse }: { onSelectCourse: (c: Own
   const [reviewModal, setReviewModal] = useState<{ courseId: string; courseName: string } | null>(null);
   const [myReviews, setMyReviews] = useState<Record<string, CourseReview | undefined>>({});
 
-  // Filter courses to only those matching the student's enrolled classes
-  const myClassIds = myClasses.map(c => c.id);
-  const isEnrolled = CURRENT_STUDENT_ID.startsWith("enr_");
-  const myCourses = isEnrolled
-    ? OWNED_COURSES.filter(oc => oc.classId && myClassIds.includes(oc.classId))
-    : OWNED_COURSES;
+  const myClassIds = useMemo(() => myClasses.map(c => c.id), [myClasses]);
+  const classById = useMemo(
+    () => new Map(myClasses.map((cls) => [cls.id, cls])),
+    [myClasses],
+  );
+  const myCourses = teacherCourses
+    .filter(
+      (course) =>
+        course.type === "class"
+        && course.published
+        && !!course.classId
+        && myClassIds.includes(course.classId),
+    )
+    .map((course) =>
+      teacherCourseToOwnedCourse(
+        course,
+        classById.get(course.classId ?? "")?.color ?? "#6366f1",
+      ),
+    )
+    .filter((course): course is OwnedCourse => course !== null);
 
-  const reloadRatings = async (pkgIds: string[]) => {
+  const reloadRatings = useCallback(async (pkgIds: string[]) => {
     const map: Record<string, { rating: number; reviewCount: number }> = {};
     const reviews: Record<string, CourseReview | undefined> = {};
     for (const id of pkgIds) {
@@ -56,7 +70,7 @@ export default function BrowseView({ onSelectCourse }: { onSelectCourse: (c: Own
     }
     setRatings(map);
     setMyReviews(reviews);
-  };
+  }, [CURRENT_STUDENT_ID]);
 
   useEffect(() => {
     getGrantedPackages(CURRENT_STUDENT_ID).then(setGrantedPkgIds);
@@ -64,29 +78,31 @@ export default function BrowseView({ onSelectCourse }: { onSelectCourse: (c: Own
       const tc = await loadTeacherCourses();
       setTeacherCourses(tc);
       const map: Record<string, StudentPackage | null> = {};
-      for (const oc of OWNED_COURSES) {
-        const pkgs = await getStudentPackages(oc.classId);
-        const pkg = pkgs[CURRENT_STUDENT_ID] ?? (isEnrolled && oc.classId === assignedClassId ? "online" : null);
-        map[oc.id] = pkg;
+      const classCourses = tc.filter(
+        (course) =>
+          course.type === "class"
+          && course.published
+          && !!course.classId
+          && myClassIds.includes(course.classId),
+      );
+      for (const course of classCourses) {
+        const pkgs = await getStudentPackages(course.classId!);
+        map[course.id] = pkgs[CURRENT_STUDENT_ID] ?? null;
       }
       setStudentPkgs(map);
-      // Load computed ratings for all paid packages (mock + teacher)
-      const allIds = [...PAID_PACKAGES.map(p => p.id), ...tc.filter(t => t.type === "paid_package").map(t => t.id)];
+      const allIds = tc
+        .filter(course => course.type === "paid_package" && course.published)
+        .map(course => course.id);
       await reloadRatings(allIds);
     })();
-  }, [CURRENT_STUDENT_ID, assignedClassId]);
+  }, [CURRENT_STUDENT_ID, myClassIds, reloadRatings]);
 
-  // Teacher-created paid packages from localStorage (published only)
+  // Published paid packages created by teachers.
   const teacherPaidPackages = teacherCourses
     .filter(tc => tc.type === "paid_package" && tc.published && tc.title)
     .map(teacherCourseToPaidPackage);
 
-  // Merge: teacher packages override PAID_PACKAGES with same id, then append rest
-  const teacherIds = new Set(teacherPaidPackages.map(p => p.id));
-  const allPaidPackages = [
-    ...teacherPaidPackages,
-    ...PAID_PACKAGES.filter(p => !teacherIds.has(p.id)),
-  ];
+  const allPaidPackages = teacherPaidPackages;
 
   const filteredPkg = search.trim()
     ? allPaidPackages.filter(p =>
@@ -333,7 +349,9 @@ export default function BrowseView({ onSelectCourse }: { onSelectCourse: (c: Own
           studentName={CURRENT_STUDENT_NAME}
           existingReview={myReviews[reviewModal.courseId]}
           onSave={() => {
-            const allIds = [...PAID_PACKAGES.map(p => p.id), ...teacherCourses.filter(t => t.type === "paid_package").map(t => t.id)];
+            const allIds = teacherCourses
+              .filter(course => course.type === "paid_package" && course.published)
+              .map(course => course.id);
             reloadRatings(allIds);
           }}
           onClose={() => setReviewModal(null)}

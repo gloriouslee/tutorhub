@@ -5,17 +5,15 @@ import PortalLayout from "@/components/layout/PortalLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import { SectionHeader } from "@/components/shared";
 import {
   getEnrollments, approveEnrollment, rejectEnrollment, getClasses, addNotification,
   type EnrollmentRequest, type EnrollmentStatus,
 } from "@/lib/storage";
-import { MOCK_CLASSES } from "@/lib/mock-data";
 import type { Class } from "@/types";
 import {
   CheckCircle2, XCircle, Clock, User, Mail, Phone, BookOpen,
-  Calendar, GraduationCap, Search, RefreshCw, Eye, EyeOff, X,
+  Calendar, Search, RefreshCw, X,
   AlertCircle, Key, ArrowRight, FileText,
 } from "lucide-react";
 
@@ -299,7 +297,7 @@ function RejectModal({ enrollment, onClose, onDone }: Omit<ApproveModalProps, "c
 
 export default function AdminEnrollmentsPage() {
   const [enrollments, setEnrollments] = useState<EnrollmentRequest[]>([]);
-  const [classes, setClasses] = useState<Class[]>(MOCK_CLASSES as unknown as Class[]);
+  const [classes, setClasses] = useState<Class[]>([]);
   const [filter, setFilter]           = useState<Filter>("all");
   const [search, setSearch]           = useState("");
   const [approveTarget, setApproveTarget] = useState<EnrollmentRequest | null>(null);

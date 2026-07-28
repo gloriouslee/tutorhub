@@ -6,7 +6,6 @@ import PortalLayout from "@/components/layout/PortalLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { SectionHeader } from "@/components/shared";
-import { MOCK_STUDENTS, MOCK_HOMEWORK, MOCK_CLASSES } from "@/lib/mock-data";
 import { useTeacherContext } from "@/hooks/useTeacherContext";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
@@ -18,28 +17,16 @@ import {
   updateGrade as supabaseUpdateGrade,
   type SubmissionRecord,
 } from "@/lib/supabase/submissions";
-import { getTeacherHomework, getHwSubmissions, upsertHwSubmission, addNotification } from "@/lib/storage";
+import { getTeacherHomework, getHwSubmissions, upsertHwSubmission, addNotification, getStudents } from "@/lib/storage";
 
 // ── Data types ────────────────────────────────────────────────────────────────
 // Use SubmissionRecord from Supabase lib; extend with student_name for display
 type Submission = SubmissionRecord & { student_name: string };
 
-// ── Seed data ─────────────────────────────────────────────────────────────────
-const DEFAULT_SUBMISSIONS: Submission[] = [
-  { id: "sub1", homework_id: "h1", student_id: "s1", student_name: "Nguyễn Anh Tuấn", status: "graded",    submitted_at: "2026-07-08T14:30:00Z", file_name: "bai_dao_ham_nguyen_anh_tuan.pdf",  score: 9.2, feedback: "Em làm bài rất tốt! Lời giải rõ ràng, lập luận chặt chẽ. Chú ý thêm ở bài 2.14 tính toán sai dấu ở dòng cuối.", graded_at: "2026-07-09T10:00:00Z" },
-  { id: "sub2", homework_id: "h1", student_id: "s2", student_name: "Trần Mai Phương",  status: "submitted", submitted_at: "2026-07-09T20:15:00Z", file_name: "tran_mai_phuong_chuong2.pdf" },
-  { id: "sub3", homework_id: "h1", student_id: "s4", student_name: "Phạm Thảo My",     status: "submitted", submitted_at: "2026-07-08T22:00:00Z", file_name: "baitap_phamthaomy.docx" },
-  { id: "sub4", homework_id: "h4", student_id: "s1", student_name: "Nguyễn Anh Tuấn", status: "submitted", submitted_at: "2026-06-30T16:00:00Z", file_name: "tracnghiem_hamso_s1.pdf" },
-  { id: "sub5", homework_id: "h4", student_id: "s2", student_name: "Trần Mai Phương",  status: "graded",    submitted_at: "2026-06-29T21:30:00Z", file_name: "hamso_tran_mai_phuong.jpg",  score: 7.5, feedback: "Bài làm đạt yêu cầu. Cần đọc kỹ đề hơn.", graded_at: "2026-06-30T09:00:00Z" },
-  { id: "sub6", homework_id: "h4", student_id: "s4", student_name: "Phạm Thảo My",     status: "submitted", submitted_at: "2026-06-30T09:00:00Z", file_name: "phamthaomy_tracnghiem.pdf" },
-];
-
 async function loadSubmissions(classIds: string[]): Promise<Submission[]> {
   try {
-    const raw = await getHwSubmissions<Submission>({ classIds });
-    if (raw.length > 0) return raw;
-    return process.env.NODE_ENV === "production" ? [] : DEFAULT_SUBMISSIONS;
-  } catch { return process.env.NODE_ENV === "production" ? [] : DEFAULT_SUBMISSIONS; }
+    return await getHwSubmissions<Submission>({ classIds });
+  } catch { return []; }
 }
 
 // Upsert the graded submission as its own per-row record.
@@ -57,15 +44,12 @@ interface HomeworkItem {
   [key: string]: unknown;
 }
 
-// Merge mock homework with teacher-created homework from localStorage
-async function loadMyHomework(
-  mockMyHomework: HomeworkItem[],
-  classIds: string[],
-): Promise<HomeworkItem[]> {
-  let stored: HomeworkItem[] = [];
-  try { stored = await getTeacherHomework<HomeworkItem>(classIds); } catch {}
-  const storedIds = new Set(stored.map(h => h.id));
-  return [...stored, ...mockMyHomework.filter(h => !storedIds.has(h.id))];
+async function loadMyHomework(classIds: string[]): Promise<HomeworkItem[]> {
+  try {
+    return await getTeacherHomework<HomeworkItem>(classIds);
+  } catch {
+    return [];
+  }
 }
 
 function relativeTime(iso: string) {
@@ -92,10 +76,6 @@ function TeacherSubmissionsPageInner() {
   const { teacherId, teacherName, myClasses } = useTeacherContext();
 
   const myClassIds = useMemo(() => myClasses.map(c => c.id), [myClasses]);
-  const mockMyHomework = useMemo<HomeworkItem[]>(
-    () => process.env.NODE_ENV === "production" ? [] : MOCK_HOMEWORK.filter(h => myClassIds.includes(h.class_id)),
-    [myClassIds]
-  );
 
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [myHomework,  setMyHomework]  = useState<HomeworkItem[]>([]);
@@ -111,24 +91,32 @@ function TeacherSubmissionsPageInner() {
   useEffect(() => {
     if (!teacherId) return;
     (async () => {
-      const hwList = await loadMyHomework(mockMyHomework, myClassIds);
+      const hwList = await loadMyHomework(myClassIds);
       setMyHomework(hwList);
-      // Try Supabase first, fall back to localStorage seed
-      const remote = await getSubmissionsByHomeworks(hwList.map(h => h.id));
+      const [remote, students] = await Promise.all([
+        getSubmissionsByHomeworks(hwList.map(h => h.id)),
+        getStudents(),
+      ]);
+      const names = new Map(students.map((student) => [student.id, student.full_name]));
       if (remote.length > 0) {
-        // Enrich with student_name from MOCK_STUDENTS for display
         const enriched = remote.map(s => ({
           ...s,
           student_name: s.student_name
-            ?? MOCK_STUDENTS.find(st => st.id === s.student_id)?.full_name
+            ?? names.get(s.student_id)
             ?? s.student_id,
         })) as Submission[];
         setSubmissions(enriched);
       } else {
-        setSubmissions(await loadSubmissions(myClassIds));
+        const local = await loadSubmissions(myClassIds);
+        setSubmissions(local.map((submission) => ({
+          ...submission,
+          student_name: submission.student_name
+            ?? names.get(submission.student_id)
+            ?? submission.student_id,
+        })));
       }
     })();
-  }, [teacherId, mockMyHomework, myClassIds]);
+  }, [teacherId, myClassIds]);
 
   // Filtered list
   const displayed = useMemo(() => {
@@ -163,7 +151,7 @@ function TeacherSubmissionsPageInner() {
     if (isNaN(score) || score < 0 || score > 10) return;
     const feedback = feedbackInput.trim();
 
-    // For demo: persist file as a data URL (blob URLs die on reload), else keep existing teacher_file
+    // Persist a small feedback attachment alongside the grade.
     const existing = submissions.find(s => s.id === subId);
     let teacherFileUrl  = existing?.teacher_file_url;
     let teacherFileName = existing?.teacher_file_name;
@@ -204,7 +192,7 @@ function TeacherSubmissionsPageInner() {
 
   const hwForSub = (sub: Submission) => myHomework.find(h => h.id === sub.homework_id);
   const classForHw = (classId: string) =>
-    myClasses.find(c => c.id === classId) ?? MOCK_CLASSES.find(c => c.id === classId);
+    myClasses.find(c => c.id === classId);
 
   return (
     <PortalLayout role="teacher" userName={teacherName || "Giáo viên"} pageTitle="Quản lý Bài nộp">

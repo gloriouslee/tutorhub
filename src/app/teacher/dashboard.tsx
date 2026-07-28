@@ -1,34 +1,28 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Users, BookOpen, CheckSquare, FileText, Clock, Plus, ArrowRight, CalendarDays } from "lucide-react";
 import { useRouter } from "next/navigation";
 import StatCard from "@/components/shared/StatCard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { AttendanceBadge, LearningModeBadge, ProgressBar, SectionHeader } from "@/components/shared";
-import { MOCK_CLASSES, MOCK_STUDENTS, MOCK_HOMEWORK, MOCK_ATTENDANCE } from "@/lib/mock-data";
+import { LearningModeBadge, ProgressBar, SectionHeader } from "@/components/shared";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
-import { toLocalDateKey } from "@/lib/utils";
-import { getTeacherHomework, getTeacherExtraClasses } from "@/lib/storage";
+import { getTeacherHomework, getAllTeacherAttendance, getStudents, type TeacherAttendanceRecord } from "@/lib/storage";
 import { useTeacherContext } from "@/hooks/useTeacherContext";
-
-// Classes created locally by the teacher (no detail page in MOCK_CLASSES)
-function isTeacherCreated(id?: string) {
-  return !!id && (id.startsWith("extra_") || id.startsWith("cls_"));
-}
+import type { Class, Student } from "@/types";
 
 // Days that have class today (computed from schedule)
-function getTodaySessions(classes: typeof MOCK_CLASSES) {
+function getTodaySessions(classes: Class[]) {
   const today = new Date();
   const dayNames = ["Chủ nhật", "Thứ 2", "Thứ 3", "Thứ 4", "Thứ 5", "Thứ 6", "Thứ 7"];
   const todayLabel = dayNames[today.getDay()];
   const englishDays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
   const todayEnglish = englishDays[today.getDay()];
 
-  const sessions: { cls: (typeof MOCK_CLASSES)[0]; schedule: { day: string; start_time: string; end_time: string } }[] = [];
+  const sessions: { cls: Class; schedule: { day: string; start_time: string; end_time: string } }[] = [];
   for (const cls of classes) {
     for (const s of cls.schedule) {
       if (s.day === todayLabel || s.day === todayEnglish) {
@@ -39,67 +33,72 @@ function getTodaySessions(classes: typeof MOCK_CLASSES) {
   return sessions;
 }
 
-// Load extra classes from localStorage
-async function loadExtraClasses() {
-  try {
-    return await getTeacherExtraClasses<any>();
-  } catch { return []; }
-}
-
-// Load homework from localStorage (seeded from mock if empty)
 async function loadHomework(classIds: string[]) {
   try {
-    const all = await getTeacherHomework<any>(classIds);
-    const forClasses = all.filter((h: any) => classIds.includes(h.class_id));
-    if (forClasses.length > 0) return forClasses;
+    return await getTeacherHomework<any>(classIds);
   } catch {}
-  return MOCK_HOMEWORK.filter(h => classIds.includes(h.class_id));
+  return [];
 }
 
-const ATTENDANCE_CHART_DATA = [
-  { month: "T1", present: 18, absent: 2 },
-  { month: "T2", present: 20, absent: 1 },
-  { month: "T3", present: 17, absent: 3 },
-  { month: "T4", present: 19, absent: 2 },
-  { month: "T5", present: 21, absent: 0 },
-  { month: "T6", present: 16, absent: 4 },
-];
+function attendanceChart(records: TeacherAttendanceRecord[]) {
+  const now = new Date();
+  return Array.from({ length: 6 }, (_, index) => {
+    const date = new Date(now.getFullYear(), now.getMonth() - 5 + index, 1);
+    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+    const rows = records.filter((record) => record.date.startsWith(key));
+    return {
+      month: `T${date.getMonth() + 1}`,
+      present: rows.filter((record) => record.status === "present" || record.status === "late").length,
+      absent: rows.filter((record) => record.status === "absent").length,
+    };
+  });
+}
+
+function studentAttendanceRate(
+  studentId: string,
+  records: TeacherAttendanceRecord[],
+) {
+  const rows = records.filter(
+    (record) => record.student_id === studentId && record.status !== "excused",
+  );
+  if (rows.length === 0) return 0;
+  const attended = rows.filter(
+    (record) => record.status === "present" || record.status === "late",
+  ).length;
+  return Math.round((attended / rows.length) * 100);
+}
 
 export default function TeacherDashboard() {
   const router = useRouter();
   const { teacherName, myClasses } = useTeacherContext();
-  const [extraClasses, setExtraClasses] = useState<any[]>([]);
   const [homeworks, setHomeworks] = useState<any[]>([]);
+  const [students, setStudents] = useState<Student[]>([]);
+  const [attendanceRecords, setAttendanceRecords] = useState<TeacherAttendanceRecord[]>([]);
 
-  const baseMockClasses = myClasses;
-
-  useEffect(() => {
-    loadExtraClasses().then(setExtraClasses);
-  }, []);
-
-  const allClasses = [...baseMockClasses, ...extraClasses];
-  const classIds = allClasses.map(c => c.id);
+  const allClasses = myClasses;
+  const classIds = useMemo(() => allClasses.map(c => c.id), [allClasses]);
 
   useEffect(() => {
     if (classIds.length === 0) return;
     loadHomework(classIds).then(setHomeworks);
-  }, [classIds.join(",")]);
+    Promise.all([
+      getStudents(),
+      getAllTeacherAttendance({ classIds }),
+    ]).then(([studentRows, attendanceRows]) => {
+      setStudents(studentRows);
+      setAttendanceRecords(attendanceRows);
+    });
+  }, [classIds]);
 
   // All unique student IDs across teacher's classes
   const allStudentIds = [...new Set(allClasses.flatMap(c => c.student_ids ?? []))];
-  const myStudents = MOCK_STUDENTS.filter(s => allStudentIds.includes(s.id));
+  const myStudents = students.filter(s => allStudentIds.includes(s.id));
 
   const todaySessions = getTodaySessions(allClasses);
 
   // Homework stats
   const openHw = homeworks.filter(h => new Date(h.due_date) >= new Date());
-  const overdueHw = homeworks.filter(h => new Date(h.due_date) < new Date());
-
-  // Attendance stats for today's students (from mock)
-  const todayStr = toLocalDateKey(new Date());
-  const todayAttendance = (MOCK_ATTENDANCE as any[]).filter(
-    r => baseMockClasses.some(c => c.id === r.class_id)
-  );
+  const attendanceChartData = attendanceChart(attendanceRecords);
 
   return (
     <div className="space-y-6">
@@ -266,7 +265,7 @@ export default function TeacherDashboard() {
           <CardHeader><CardTitle className="text-sm">Biểu đồ chuyên cần</CardTitle></CardHeader>
           <CardContent>
             <ResponsiveContainer width="100%" height={180} minWidth={0} minHeight={0} initialDimension={{ width: 800, height: 180 }}>
-              <LineChart data={ATTENDANCE_CHART_DATA}>
+              <LineChart data={attendanceChartData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.06)" />
                 <XAxis dataKey="month" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
                 <YAxis tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
@@ -279,17 +278,17 @@ export default function TeacherDashboard() {
         </Card>
 
         <Card>
-          <CardHeader><CardTitle className="text-sm">Năng lực học viên</CardTitle></CardHeader>
+          <CardHeader><CardTitle className="text-sm">Chuyên cần học viên</CardTitle></CardHeader>
           <CardContent className="space-y-3">
             {myStudents.length === 0 && (
               <p className="text-xs text-muted-foreground text-center py-4">Chưa có học viên.</p>
             )}
-            {myStudents.slice(0, 5).map((s, i) => (
+            {myStudents.slice(0, 5).map((s) => (
               <div key={s.id} className="flex items-center gap-3">
                 <Avatar size="sm"><AvatarFallback name={s.full_name} /></Avatar>
                 <div className="flex-1 min-w-0">
                   <p className="text-xs font-medium text-foreground truncate">{s.full_name}</p>
-                  <ProgressBar value={[87, 79, 85, 94, 82][i] ?? 75} size="sm" showValue className="mt-1" />
+                  <ProgressBar value={studentAttendanceRate(s.id, attendanceRecords)} size="sm" showValue className="mt-1" />
                 </div>
               </div>
             ))}

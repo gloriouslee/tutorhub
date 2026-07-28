@@ -2,6 +2,35 @@ import { NextRequest, NextResponse } from "next/server";
 import { getRequestIdentity } from "@/lib/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 
+async function attachTutorNames(
+  admin: ReturnType<typeof createAdminClient>,
+  classes: Record<string, unknown>[],
+): Promise<Record<string, unknown>[]> {
+  const tutorIds = [
+    ...new Set(
+      classes
+        .map((item) => String(item.tutor_id ?? ""))
+        .filter(Boolean),
+    ),
+  ];
+  if (tutorIds.length === 0) return classes;
+
+  const { data: teachers } = await admin
+    .from("teachers")
+    .select("id, full_name")
+    .in("id", tutorIds);
+  const names = new Map(
+    (teachers ?? []).map((teacher) => [
+      String(teacher.id),
+      String(teacher.full_name),
+    ]),
+  );
+  return classes.map((item) => ({
+    ...item,
+    tutor_name: names.get(String(item.tutor_id ?? "")),
+  }));
+}
+
 export async function GET(req: NextRequest) {
   const identity = await getRequestIdentity(req);
   if (!identity) {
@@ -20,12 +49,16 @@ export async function GET(req: NextRequest) {
     if (error) {
       return NextResponse.json({ error: "context_unavailable" }, { status: 500 });
     }
+    const hydratedClasses = await attachTutorNames(
+      admin,
+      (classes ?? []) as Record<string, unknown>[],
+    );
     return NextResponse.json({
       role: identity.role,
       studentId: identity.studentId,
       studentName: identity.displayName,
-      classes: classes ?? [],
-      assignedClassId: classes?.[0]?.id ?? "",
+      classes: hydratedClasses,
+      assignedClassId: hydratedClasses[0]?.id ?? "",
     });
   }
 
@@ -41,7 +74,10 @@ export async function GET(req: NextRequest) {
       role: identity.role,
       teacherId: identity.teacherId,
       teacherName: identity.displayName,
-      classes: classes ?? [],
+      classes: (classes ?? []).map((item) => ({
+        ...item,
+        tutor_name: identity.displayName,
+      })),
     });
   }
 
@@ -66,6 +102,10 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "context_unavailable" }, { status: 500 });
     }
 
+    const hydratedClasses = await attachTutorNames(
+      admin,
+      (classes ?? []) as Record<string, unknown>[],
+    );
     return NextResponse.json({
       role: identity.role,
       parentId: identity.parentId,
@@ -75,7 +115,7 @@ export async function GET(req: NextRequest) {
         name: String(child.full_name),
         grade: child.grade,
         school: child.school,
-        classes: (classes ?? []).filter((item) =>
+        classes: hydratedClasses.filter((item) =>
           Array.isArray(item.student_ids)
             ? item.student_ids.includes(String(child.id))
             : false,

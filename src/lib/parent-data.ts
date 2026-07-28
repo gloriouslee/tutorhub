@@ -6,7 +6,7 @@
 //   - Bài tập:    kv "tutorhub_teacher_homework"
 //   - Điểm thi:   kv "tutorhub_exam_scores" (giáo viên nhập) + kết quả bài thi
 //                 online (kv_exam_results, qua getExamResult theo lộ trình)
-// Mỗi helper merge kèm MOCK_* làm dữ liệu nền demo, bản ghi thật thắng khi trùng.
+// Các helper chỉ đọc dữ liệu thật do giáo viên/hệ thống lưu.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import {
@@ -14,7 +14,6 @@ import {
   getTeacherHomework,
   type StoredExamScore,
 } from "@/lib/storage";
-import { MOCK_ATTENDANCE, MOCK_HOMEWORK, MOCK_EXAM_SCORES, MOCK_CLASSES } from "@/lib/mock-data";
 
 export type AttendanceStatus = "present" | "absent" | "late" | "excused";
 
@@ -34,10 +33,8 @@ interface TeacherAttendanceKvRecord {
   saved_at:   string;
 }
 
-// Điểm danh của một (hoặc nhiều) học sinh: bản ghi giáo viên lưu thật + mock nền.
-// Trùng (class_id, student_id, date) → bản thật thắng.
+// Điểm danh của một (hoặc nhiều) học sinh từ bản ghi giáo viên.
 export async function loadChildrenAttendance(studentIds: string[]): Promise<ChildAttendanceRecord[]> {
-  const idSet = new Set(studentIds);
   const real = ((await getAllTeacherAttendance({
     studentIds,
   })) as unknown as TeacherAttendanceKvRecord[])
@@ -48,18 +45,7 @@ export async function loadChildrenAttendance(studentIds: string[]): Promise<Chil
       date:       r.date,
       status:     r.status,
     }));
-  const realKeys = new Set(real.map(r => `${r.class_id}|${r.student_id}|${r.date}`));
-  const mock = MOCK_ATTENDANCE
-    .filter(r => idSet.has(r.student_id))
-    .filter(r => !realKeys.has(`${r.class_id}|${r.student_id}|${r.attendance_date}`))
-    .map(r => ({
-      id:         r.id,
-      class_id:   r.class_id,
-      student_id: r.student_id,
-      date:       r.attendance_date,
-      status:     r.status as AttendanceStatus,
-    }));
-  return [...real, ...mock].sort((a, b) => b.date.localeCompare(a.date));
+  return real.sort((a, b) => b.date.localeCompare(a.date));
 }
 
 // Tỉ lệ chuyên cần chuẩn (đồng bộ trang học viên):
@@ -75,7 +61,7 @@ export function attendanceRate(records: ChildAttendanceRecord[]): number | null 
 // ── Điểm thi ──────────────────────────────────────────────────────────────────
 
 // Toàn bộ điểm của một học sinh: giáo viên nhập (kv) + bài thi online đã làm
-// (kv_exam_results theo lộ trình các lớp của em đó) + mock nền, dedup theo id.
+// (kv_exam_results theo lộ trình các lớp của em đó), dedup theo id.
 export async function loadChildScores(
   studentId: string,
   classIds: string[]
@@ -109,8 +95,7 @@ export async function loadChildScores(
     } catch { /* lớp offline → bỏ qua */ }
   }
 
-  const mock = MOCK_EXAM_SCORES.filter(s => s.student_id === studentId);
-  const combined = [...stored, ...taken, ...mock];
+  const combined = [...stored, ...taken];
   const seen = new Set<string>();
   return combined
     .filter(s => { if (seen.has(s.id)) return false; seen.add(s.id); return true; })
@@ -135,21 +120,17 @@ export interface ChildHomework {
   created_at?: string;
 }
 
-// Bài tập của các lớp: giáo viên tạo (kv) + mock nền, kv thắng khi trùng id.
+// Bài tập của các lớp do giáo viên tạo.
 export async function loadClassHomework(classIds: string[]): Promise<ChildHomework[]> {
-  const idSet = new Set(classIds);
   const teacher = await getTeacherHomework<ChildHomework>(classIds);
-  const kvIds = new Set(teacher.map(h => h.id));
-  const mock = MOCK_HOMEWORK.filter(h => idSet.has(h.class_id) && !kvIds.has(h.id));
-  return [...teacher, ...mock]
+  return teacher
     .sort((a, b) => new Date(b.due_date).getTime() - new Date(a.due_date).getTime());
 }
 
-// ── Tra cứu tên lớp (thật + mock) ────────────────────────────────────────────
+// ── Tra cứu tên lớp ──────────────────────────────────────────────────────────
 
 export function classNameOf(classId: string, realClasses?: { id: string; class_name: string }[]): string {
   return realClasses?.find(c => c.id === classId)?.class_name
-    ?? MOCK_CLASSES.find(c => c.id === classId)?.class_name
     ?? classId;
 }
 

@@ -9,7 +9,6 @@ import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/componen
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SectionHeader } from "@/components/shared";
-import { MOCK_HOMEWORK } from "@/lib/mock-data";
 import { useTeacherContext } from "@/hooks/useTeacherContext";
 import { getCurriculum, getAllExamResults, getTeacherHomework, upsertTeacherHomework, removeTeacherHomework, getTeacherExtraClasses, getHwSubmissions } from "@/lib/storage";
 import { FileText, Plus, Calendar, CheckCircle2, Clock, X, Trash2, Edit2, ArrowRight, BookOpen, NotebookPen, PenSquare, Download } from "lucide-react";
@@ -51,15 +50,9 @@ async function loadExtraClasses(): Promise<ExtraClass[]> {
   try { return await getTeacherExtraClasses<ExtraClass>(); } catch { return []; }
 }
 
-async function loadHw(seedIds: string[]): Promise<Homework[]> {
+async function loadHw(classIds: string[]): Promise<Homework[]> {
   try {
-    const raw = await getTeacherHomework<Homework>(seedIds);
-    if (raw.length) return raw;
-    if (process.env.NODE_ENV === "production") return [];
-    // Demo only: seed from mock data filtered to teacher's classes
-    return MOCK_HOMEWORK
-      .filter(h => seedIds.includes(h.class_id))
-      .map(h => ({ ...h, description: (h as any).description ?? "" }));
+    return await getTeacherHomework<Homework>(classIds);
   } catch { return []; }
 }
 
@@ -154,7 +147,7 @@ export default function TeacherHomeworkPage() {
   useEffect(() => {
     if (!teacherId) return;
     (async () => {
-      // Build full class list: real teacher classes + localStorage extra classes
+      // Build the class list assigned to the current teacher.
       const extra = (await loadExtraClasses()).filter(c => c.tutor_id === teacherId);
       const all = [
         ...baseClasses.map(c => ({ id: c.id, class_name: c.class_name, student_ids: c.student_ids })),

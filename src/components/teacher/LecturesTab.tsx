@@ -25,8 +25,8 @@ export default function LecturesTab({
   // tab tự load nên nội dung mới chỉ hiện sau khi rời/vào lại tab).
   const uploaded = materials.filter(m => m.kind === "lecture");
 
-  const sortedMocks = [...lectures].sort((a, b) => a.order - b.order);
-  const total = sortedMocks.length + uploaded.length;
+  const sortedLectures = [...lectures].sort((a, b) => a.order - b.order);
+  const total = sortedLectures.length + uploaded.length;
 
   return (
     <div className="space-y-4">
@@ -89,8 +89,8 @@ export default function LecturesTab({
         </Card>
       ))}
 
-      {/* Mock lectures (read-only demo data) */}
-      {sortedMocks.map((lec, i) => (
+      {/* Published lecture records supplied by the class curriculum. */}
+      {sortedLectures.map((lec, i) => (
         <Card key={lec.id} className={`overflow-hidden animate-fade-in transition-all hover:shadow-md ${!lec.is_published ? "border-dashed" : ""}`} style={{ animationDelay: `${(uploaded.length + i) * 60}ms` }}>
           <CardContent className="p-0">
             <div className="flex flex-col sm:flex-row">

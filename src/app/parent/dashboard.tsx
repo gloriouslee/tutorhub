@@ -50,7 +50,7 @@ export default function ParentDashboard() {
     if (!ready) return;
     const ids = children.map(c => c.id);
 
-    // Điểm danh thật (giáo viên lưu) + mock nền — cho toàn bộ các con
+    // Điểm danh do giáo viên lưu cho toàn bộ các con.
     loadChildrenAttendance(ids).then(setAttendance);
 
     // Điểm thi thật (giáo viên nhập + bài thi online) theo từng con

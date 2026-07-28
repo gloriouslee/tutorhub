@@ -25,9 +25,9 @@ export default function AdminSettingsPage() {
   const [activeTab, setActiveTab] = useState<"general" | "academic" | "database">("general");
   const [saveSuccess, setSaveSuccess] = useState(false);
 
-  const [centerName, setCenterName] = useState("TutorHub Academy");
-  const [phone, setPhone]           = useState("0987 654 321");
-  const [email, setEmail]           = useState("contact@tutorhub.edu.vn");
+  const [centerName, setCenterName] = useState("");
+  const [phone, setPhone]           = useState("");
+  const [email, setEmail]           = useState("");
   const [timezone, setTimezone]     = useState("GMT+7 (Asia/Ho_Chi_Minh)");
 
   const [lessonDuration, setLessonDuration] = useState("90");
@@ -62,7 +62,7 @@ export default function AdminSettingsPage() {
   };
 
   const handleResetDatabase = async () => {
-    if (confirm("Cảnh báo: Thao tác này sẽ xóa cache cục bộ trên máy này và khôi phục dữ liệu mẫu ban đầu (không ảnh hưởng dữ liệu trên server). Tiếp tục?")) {
+    if (confirm("Thao tác này chỉ xóa cache TutorHub trên trình duyệt hiện tại, không ảnh hưởng dữ liệu trên server. Tiếp tục?")) {
       await resetAllStorage();
     }
   };
@@ -203,9 +203,9 @@ export default function AdminSettingsPage() {
                   <div className="p-4 rounded-xl border border-rose-200 dark:border-rose-950 bg-rose-50/50 dark:bg-rose-950/10 flex items-start gap-3">
                     <Shield className="h-5 w-5 text-rose-500 shrink-0 mt-0.5" />
                     <div className="space-y-1 text-xs">
-                      <p className="font-bold text-foreground">Chế độ Demo (Client-side)</p>
+                      <p className="font-bold text-foreground">Dữ liệu Supabase</p>
                       <p className="text-muted-foreground leading-relaxed">
-                        TutorHub hiện đang chạy ở chế độ demo phía client. Toàn bộ dữ liệu (thêm/xóa học viên, lớp học, điểm danh) được lưu trong localStorage của trình duyệt. Bạn có thể xuất bản sao lưu hoặc khôi phục về dữ liệu mẫu ban đầu.
+                        Dữ liệu nghiệp vụ được lưu trên Supabase. Trình duyệt chỉ giữ cache cục bộ để hỗ trợ tải lại nhanh hơn; xóa cache không làm thay đổi dữ liệu trên server.
                       </p>
                     </div>
                   </div>
@@ -226,11 +226,11 @@ export default function AdminSettingsPage() {
                     <Card className="border border-border hover:bg-muted/10 transition-all">
                       <CardContent className="p-4 space-y-3">
                         <div className="space-y-1">
-                          <h6 className="text-sm font-bold text-foreground">Khôi phục dữ liệu mẫu</h6>
-                          <p className="text-xs text-muted-foreground">Xóa cache cục bộ trên máy này và khôi phục dữ liệu mẫu (không xóa dữ liệu trên server).</p>
+                          <h6 className="text-sm font-bold text-foreground">Xóa cache cục bộ</h6>
+                          <p className="text-xs text-muted-foreground">Xóa cache TutorHub trên trình duyệt hiện tại, không xóa dữ liệu trên server.</p>
                         </div>
                         <Button type="button" variant="outline" className="w-full flex items-center justify-center gap-1.5 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20 font-semibold" onClick={handleResetDatabase}>
-                          <RotateCcw className="h-4 w-4" /> Khôi phục mặc định
+                          <RotateCcw className="h-4 w-4" /> Xóa cache
                         </Button>
                       </CardContent>
                     </Card>

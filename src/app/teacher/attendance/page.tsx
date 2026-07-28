@@ -5,11 +5,11 @@ import PortalLayout from "@/components/layout/PortalLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { AttendanceBadge, LearningModeBadge, SectionHeader } from "@/components/shared";
-import { MOCK_STUDENTS, MOCK_ATTENDANCE } from "@/lib/mock-data";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { formatDate, toLocalDateKey } from "@/lib/utils";
-import { getAllTeacherAttendance, saveClassAttendance, getTeacherExtraClasses } from "@/lib/storage";
+import { getAllTeacherAttendance, saveClassAttendance, getTeacherExtraClasses, getStudents } from "@/lib/storage";
 import { useTeacherContext } from "@/hooks/useTeacherContext";
+import type { Student } from "@/types";
 import {
   CheckSquare, Users, UserCheck, UserX, Clock,
   CalendarDays, ChevronLeft, ChevronRight, Save,
@@ -86,65 +86,48 @@ export default function TeacherAttendancePage() {
   const [date,            setDate]            = useState(today());
   const [marks,           setMarks]           = useState<Record<string, Status>>({});
   const [savedRecords,    setSavedRecords]    = useState<SavedRecord[]>([]);
+  const [students,        setStudents]        = useState<Student[]>([]);
   const [saveFlash,       setSaveFlash]       = useState(false);
 
   const selectedClass = teacherClasses.find(c => c.id === selectedClassId) ?? teacherClasses[0];
 
-  // Load saved records from localStorage
   useEffect(() => {
-    loadSaved(teacherClassIds).then(setSavedRecords);
+    Promise.all([loadSaved(teacherClassIds), getStudents()])
+      .then(([records, studentRows]) => {
+        setSavedRecords(records);
+        setStudents(studentRows);
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [teacherClassKey]);
 
-  // When class or date changes, pre-fill marks from saved/mock data
+  // When class or date changes, pre-fill marks from saved data.
   useEffect(() => {
     if (!selectedClass) return;
     const newMarks: Record<string, Status> = {};
 
-    // From localStorage first
-    const lsEntries = savedRecords.filter(
+    const entries = savedRecords.filter(
       r => r.class_id === selectedClass.id && r.date === date
     );
-    lsEntries.forEach(r => { newMarks[r.student_id] = r.status; });
-
-    // Fill remaining from MOCK_ATTENDANCE
-    if (lsEntries.length === 0) {
-      MOCK_ATTENDANCE
-        .filter(a => a.class_id === selectedClass.id && a.attendance_date === date)
-        .forEach(a => { newMarks[a.student_id] = a.status; });
-    }
+    entries.forEach(r => { newMarks[r.student_id] = r.status; });
 
     setMarks(newMarks);
   }, [selectedClass, date, savedRecords]);
 
   const classStudents = useMemo(() => {
     if (!selectedClass) return [];
-    return MOCK_STUDENTS.filter(s => (selectedClass.student_ids ?? []).includes(s.id));
-  }, [selectedClass]);
+    return students.filter(s => (selectedClass.student_ids ?? []).includes(s.id));
+  }, [selectedClass, students]);
 
   const markedCount  = Object.keys(marks).length;
   const presentCount = Object.values(marks).filter(s => s === "present").length;
   const lateCount    = Object.values(marks).filter(s => s === "late").length;
   const absentCount  = Object.values(marks).filter(s => s === "absent").length;
 
-  // History: merge MOCK_ATTENDANCE + savedRecords for selected class, sorted newest first
   const history = useMemo(() => {
     if (!selectedClass) return [];
-    const map = new Map<string, { student_id: string; date: string; status: Status }>();
-
-    MOCK_ATTENDANCE
-      .filter(a => a.class_id === selectedClass.id)
-      .forEach(a => map.set(`${a.student_id}_${a.attendance_date}`, {
-        student_id: a.student_id, date: a.attendance_date, status: a.status,
-      }));
-
-    savedRecords
+    return savedRecords
       .filter(r => r.class_id === selectedClass.id)
-      .forEach(r => map.set(`${r.student_id}_${r.date}`, {
-        student_id: r.student_id, date: r.date, status: r.status,
-      }));
-
-    return [...map.values()]
+      .map(r => ({ student_id: r.student_id, date: r.date, status: r.status }))
       .sort((a, b) => b.date.localeCompare(a.date))
       .slice(0, 12);
   }, [selectedClass, savedRecords]);
@@ -367,7 +350,7 @@ export default function TeacherAttendancePage() {
                   <p className="text-xs text-muted-foreground py-4 text-center">Chưa có dữ liệu điểm danh.</p>
                 ) : (
                   history.map((h, i) => {
-                    const student = MOCK_STUDENTS.find(s => s.id === h.student_id);
+                    const student = students.find(s => s.id === h.student_id);
                     return (
                       <div key={i} className="flex items-center gap-2 p-2 rounded-lg hover:bg-muted/50 transition-colors">
                         <Avatar size="sm"><AvatarFallback name={student?.full_name ?? "?"} /></Avatar>

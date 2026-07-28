@@ -7,14 +7,11 @@ import PortalLayout from "@/components/layout/PortalLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { LearningModeBadge, ProgressBar, SectionHeader } from "@/components/shared";
-import {
-  MOCK_CLASSES, MOCK_TEACHERS, MOCK_CLASS_MATERIALS,
-  MOCK_LECTURES, MOCK_CLASS_NOTES, MOCK_EXAM_SCORES, MOCK_HOMEWORK, MOCK_ATTENDANCE,
-} from "@/lib/mock-data";
+import { LearningModeBadge, ProgressBar } from "@/components/shared";
 import { getSubmissionsByStudent, type SubmissionRecord } from "@/lib/supabase/submissions";
-import { kvGet, getTeacherHomework, getHwSubmissions, getAllTeacherAttendance, getClasses, getClassScheduleOverride, getOnlineLink, getStudentPackages, getCurriculum, getClassMaterials, getExamResult, incrementMaterialDownload, isLessonVisibleToStudent, isAssignedToStudent, type StudentPackage, type CurriculumSession, type StoredClassMaterial } from "@/lib/storage";
+import { kvGet, getTeacherHomework, getHwSubmissions, getAllTeacherAttendance, getClassScheduleOverride, getOnlineLink, getStudentPackages, getCurriculum, getClassMaterials, getExamResult, getExamScoresByStudent, incrementMaterialDownload, isLessonVisibleToStudent, isAssignedToStudent, type StudentPackage, type CurriculumSession, type StoredClassMaterial, type StoredExamScore } from "@/lib/storage";
 import CurriculumView from "@/components/student/CurriculumView";
+import type { Class } from "@/types";
 import {
   BookOpen, Clock, Video, MapPin, Users, ArrowLeft, FileText, Download,
   PlayCircle, StickyNote, Pin, Eye, ChevronRight, GraduationCap,
@@ -167,7 +164,7 @@ function loadLocalSubs(classId: string, studentId: string): Promise<SubmissionRe
   });
 }
 
-type ClassInfo = (typeof MOCK_CLASSES)[number];
+type ClassInfo = Class;
 
 interface HomeworkItem {
   id: string;
@@ -208,7 +205,7 @@ function recentFirst(a: { created_at?: string; due_date?: string }, b: { created
 const VALID_TABS: TabKey[] = ["overview", "curriculum", "sessions", "attendance", "homework", "materials", "lectures", "notes"];
 
 export default function StudentClassDetailPage() {
-  const { studentId, studentName, assignedClassId, ready } = useStudentContext();
+  const { studentId, studentName, myClasses, assignedClassId, ready } = useStudentContext();
   const CURRENT_STUDENT_ID = studentId;
   const params  = useParams();
   const classId = params.classId as string;
@@ -241,10 +238,13 @@ export default function StudentClassDetailPage() {
   const [sessionNotes, setSessionNotes] = useState<Record<string, string>>({});
   const [uploadedMaterials, setUploadedMaterials] = useState<StoredClassMaterial[]>([]);
   const [studentPkg, setStudentPkg] = useState<StudentPackage | undefined>(undefined);
-  // undefined = still resolving, null = not found
-  const [cls, setCls] = useState<ClassInfo | null | undefined>(undefined);
+  const cls: ClassInfo | null | undefined = ready
+    ? (myClasses.find((item) => item.id === classId) ?? null)
+    : undefined;
+  const tutorId = cls?.tutor_id ?? "";
   const [scheduleOverride, setScheduleOverride] = useState<ClassInfo["schedule"] | null>(null);
   const [teacherHomework, setTeacherHomework] = useState<HomeworkItem[]>([]);
+  const [storedScores, setStoredScores] = useState<StoredExamScore[]>([]);
   // Bài giảng + video chữa bài + tài liệu lấy từ lộ trình của lớp
   const [curriculumLectures, setCurriculumLectures] = useState<LectureCard[]>([]);
   const [curriculumMaterials, setCurriculumMaterials] = useState<StoredClassMaterial[]>([]);
@@ -255,49 +255,38 @@ export default function StudentClassDetailPage() {
   const [matCat, setMatCat]       = useState<string>("all");
   const [matQuery, setMatQuery]   = useState("");
 
-  // Resolve class from DB (includes admin-created), fallback to mock
   useEffect(() => {
-    (async () => {
-      let found: ClassInfo | null = null;
-      try {
-        const all = await getClasses();
-        found = (all.find(c => c.id === classId) as unknown as ClassInfo) ?? null;
-      } catch { /* offline */ }
-      if (!found) found = MOCK_CLASSES.find(c => c.id === classId) ?? null;
-      setCls(found);
-    })();
     getClassScheduleOverride(classId).then(ov => setScheduleOverride(ov as ClassInfo["schedule"] | null));
     getTeacherHomework<HomeworkItem>([classId])
       .then(all => setTeacherHomework(all.filter(h => h.class_id === classId && isAssignedToStudent(h.assigned_to, studentId))));
-  }, [classId]);
+    getExamScoresByStudent(studentId).then(setStoredScores);
+  }, [classId, studentId]);
 
   useEffect(() => {
     getStudentPackages(classId).then(pkgs => setStudentPkg(pkgs[studentId]));
   }, [classId, studentId]);
   useEffect(() => { getClassMaterials(classId).then(setUploadedMaterials); }, [classId]);
   const materials = useMemo(() => {
-    const mockMats = MOCK_CLASS_MATERIALS.filter(m => m.class_id === classId);
     const realMats = uploadedMaterials.filter(m => {
       if (!m.packages || m.packages.length === 0) return true;
       return studentPkg ? m.packages.includes(studentPkg) : false;
     });
-    // Tài liệu từ lộ trình + mock + upload, mới nhất lên đầu
-    return [...curriculumMaterials, ...mockMats, ...realMats].sort(recentFirst);
-  }, [classId, uploadedMaterials, studentPkg, curriculumMaterials]);
+    return [...curriculumMaterials, ...realMats].sort(recentFirst);
+  }, [uploadedMaterials, studentPkg, curriculumMaterials]);
 
   useEffect(() => {
     setWatched(loadWatched(studentId));
     getOnlineLink(classId).then(link => setOnlineLink(link ?? ""));
     // Load submissions for homework status
-    getSubmissionsByStudent(CURRENT_STUDENT_ID).then(async remote => {
+    getSubmissionsByStudent(studentId).then(async remote => {
       if (remote.length > 0) { setSubmissions(remote); return; }
-      const local = await loadLocalSubs(classId, CURRENT_STUDENT_ID);
-      setSubmissions(local.filter(s => s.student_id === CURRENT_STUDENT_ID));
+      const local = await loadLocalSubs(classId, studentId);
+      setSubmissions(local.filter(s => s.student_id === studentId));
     });
     // Load my package for this class
-    getStudentPackages(classId).then(pkgs => setMyPackage(pkgs[CURRENT_STUDENT_ID] ?? null));
+    getStudentPackages(classId).then(pkgs => setMyPackage(pkgs[studentId] ?? null));
     // Load attendance records
-    loadSavedAttendance(classId, CURRENT_STUDENT_ID).then(setSavedAttendance);
+    loadSavedAttendance(classId, studentId).then(setSavedAttendance);
     // Load curriculum → build date map + đẩy bài tập / bài giảng / video chữa bài / tài liệu về các tab
     getCurriculum(classId).then(async chapters => {
       const today = new Date().toISOString().slice(0, 10);
@@ -358,7 +347,7 @@ export default function StudentClassDetailPage() {
                 id: lesson.id, class_id: classId, title: lesson.title,
                 description: (lesson as any).description ?? "",
                 file_url: url, file_type: ext === "pdf" ? "pdf" : ext || "file",
-                file_size: "", category: "textbook", uploaded_by: cls?.tutor_id ?? "",
+                file_size: "", category: "textbook", uploaded_by: tutorId,
                 created_at: created, download_count: 0, kind: "material",
               });
             }
@@ -383,7 +372,7 @@ export default function StudentClassDetailPage() {
     });
     // Load session notes written by teacher
     kvGet<Record<string, string>>(`tutorhub_session_notes_${classId}`, {}).then(setSessionNotes);
-  }, [classId, studentId]);
+  }, [classId, studentId, tutorId]);
 
   // ── Loading (class resolution + student context) ──────────────────────────
   if (!ready || cls === undefined) {
@@ -426,26 +415,19 @@ export default function StudentClassDetailPage() {
 
   // ── Data ──────────────────────────────────────────────────────────────────
   const schedule          = scheduleOverride ?? cls.schedule ?? [];
-  const teacher           = MOCK_TEACHERS.find(t => t.id === cls.tutor_id);
-  const notes             = MOCK_CLASS_NOTES.filter(n => n.class_id === classId);
-  // Bài giảng + video chữa bài: lộ trình + mock, mới nhất lên đầu
-  const mockLectureCards: LectureCard[] = MOCK_LECTURES.filter(l => l.class_id === classId).map(l => ({
-    id: l.id, title: l.title, description: l.description, video_url: l.video_url,
-    is_published: l.is_published, kind: "lecture", order: l.order, duration: l.duration,
-    views: l.views, slides_url: l.slides_url, created_at: l.created_at,
-  }));
-  const mockLectureIds    = new Set(mockLectureCards.map(l => l.id));
-  const lectureItems: LectureCard[] = [
-    ...curriculumLectures.filter(l => !mockLectureIds.has(l.id)),
-    ...mockLectureCards,
-  ].sort(recentFirst);
+  const notes = Object.entries(sessionNotes)
+    .filter(([, content]) => content.trim().length > 0)
+    .map(([date, content]) => ({
+      id: `session-note-${date}`,
+      title: `Ghi chú buổi học ${formatDate(date)}`,
+      content,
+      is_pinned: false,
+      created_at: date,
+      tags: [] as string[],
+    }));
+  const lectureItems: LectureCard[] = [...curriculumLectures].sort(recentFirst);
   const publishedLectures = lectureItems.filter(l => l.is_published);
-  // Merge teacher-created homework (kv) with mock — kv wins on id collision
-  const kvHwIds           = new Set(teacherHomework.map(h => h.id));
-  const classHomework: HomeworkItem[] = [
-    ...teacherHomework,
-    ...MOCK_HOMEWORK.filter(h => h.class_id === classId && !kvHwIds.has(h.id)),
-  ];
+  const classHomework: HomeworkItem[] = teacherHomework;
   // Tất cả bài tập của lớp, mới nhất lên đầu (dùng cho tab Bài tập)
   const sortedClassHomework = [...classHomework].sort(recentFirst);
   // "done" = đã làm/đã nộp xong; "todo" = chưa làm / cần làm lại
@@ -480,10 +462,22 @@ export default function StudentClassDetailPage() {
     ? Math.round((watchedCount / publishedLectures.length) * 100)
     : 0;
 
-  // Scores
-  const myScores = MOCK_EXAM_SCORES.filter(e => e.student_id === CURRENT_STUDENT_ID && e.class_id === classId);
-  const avgScore = myScores.length
-    ? (myScores.reduce((s, e) => s + e.score, 0) / myScores.length).toFixed(1)
+  const manualScores = storedScores
+    .filter((score) => score.class_id === classId)
+    .map((score) => score.max_score > 0 ? (score.score / score.max_score) * 10 : 0);
+  const onlineScores = classHomework
+    .filter(
+      (homework) =>
+        homework.kind === "exam"
+        && homework.exam_done
+        && typeof homework.exam_score === "number"
+        && typeof homework.exam_total === "number"
+        && homework.exam_total > 0,
+    )
+    .map((homework) => (homework.exam_score! / homework.exam_total!) * 10);
+  const scoreValues = [...manualScores, ...onlineScores];
+  const avgScore = scoreValues.length
+    ? (scoreValues.reduce((sum, score) => sum + score, 0) / scoreValues.length).toFixed(1)
     : null;
 
   const enrolledCount = (cls.student_ids ?? []).length;
@@ -706,16 +700,13 @@ export default function StudentClassDetailPage() {
                   <CardContent className="space-y-3">
                     <div className="flex items-center gap-3 p-3 bg-muted/30 rounded-xl border border-border/50">
                       <div className="h-11 w-11 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-sm shrink-0">
-                        {teacher?.full_name.split(" ").slice(-2).map(n => n[0]).join("")}
+                        {(cls.tutor_name ?? "GV").split(" ").slice(-2).map(n => n[0]).join("")}
                       </div>
                       <div className="min-w-0">
-                        <p className="font-semibold text-sm">{teacher?.full_name}</p>
-                        <p className="text-xs text-muted-foreground">{teacher?.specialization}</p>
+                        <p className="font-semibold text-sm">{cls.tutor_name ?? "Giáo viên"}</p>
+                        <p className="text-xs text-muted-foreground">{cls.subject}</p>
                       </div>
                     </div>
-                    {teacher?.bio && (
-                      <p className="text-xs text-muted-foreground leading-relaxed px-1">{teacher.bio}</p>
-                    )}
                   </CardContent>
                 </Card>
 
@@ -1267,16 +1258,9 @@ export default function StudentClassDetailPage() {
 
           {/* ── Attendance ── */}
           {activeTab === "attendance" && (() => {
-            // Merge MOCK_ATTENDANCE + localStorage teacher records for this class
-            const mockRecs = MOCK_ATTENDANCE
-              .filter(a => a.student_id === CURRENT_STUDENT_ID && a.class_id === classId)
-              .map(a => ({ date: a.attendance_date, status: a.status as AttendanceStatus }));
-            const lsRecs = savedAttendance
+            const merged = savedAttendance
               .filter(r => r.class_id === classId && r.student_id === CURRENT_STUDENT_ID)
-              .map(r => ({ date: r.date, status: r.status }));
-            // localStorage overrides mock for same date
-            const lsDates = new Set(lsRecs.map(r => r.date));
-            const merged = [...lsRecs, ...mockRecs.filter(r => !lsDates.has(r.date))]
+              .map(r => ({ date: r.date, status: r.status }))
               .sort((a, b) => b.date.localeCompare(a.date));
 
             const total    = merged.length;

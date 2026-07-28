@@ -6,7 +6,6 @@ import PortalLayout from "@/components/layout/PortalLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { SectionHeader } from "@/components/shared";
-import { MOCK_HOMEWORK, MOCK_CLASSES } from "@/lib/mock-data";
 import { useStudentContext } from "@/hooks/useStudentContext";
 import {
   FileText, Clock, CheckCircle2, Upload, Calendar,
@@ -67,14 +66,7 @@ export default function StudentHomeworkPage() {
   const { studentId: STUDENT_ID, studentName: STUDENT_NAME, myClasses } = useStudentContext();
   const myClassIds = myClasses.map(c => c.id);
   const [teacherHw,    setTeacherHw]    = useState<HomeworkItem[]>([]);
-  // Merge teacher-created homework (kv) with mock — kv wins on id collision
-  const kvHwIds = new Set(teacherHw.map(h => h.id));
-  const myHomework: HomeworkItem[] = [
-    ...teacherHw,
-    ...(process.env.NODE_ENV === "production"
-      ? []
-      : MOCK_HOMEWORK.filter(h => myClassIds.includes(h.class_id) && !kvHwIds.has(h.id))),
-  ];
+  const myHomework: HomeworkItem[] = teacherHw;
   const [submissions,  setSubmissions]  = useState<SubmissionRecord[]>([]);
   const [filterTab,    setFilterTab]    = useState<FilterTab>("all");
   const [selectedHw,   setSelectedHw]   = useState<HomeworkItem | null>(null);
@@ -314,7 +306,7 @@ export default function StudentHomeworkPage() {
               </div>
             ) : (
               displayed.map((hw, i) => {
-                const cls    = MOCK_CLASSES.find(c => c.id === hw.class_id);
+                const cls = myClasses.find(c => c.id === hw.class_id);
 
                 // Bài làm câu hỏi trên hệ thống — mở trang làm bài, không nộp file
                 if (hw.kind === "exam") {
@@ -647,7 +639,7 @@ export default function StudentHomeworkPage() {
 
               {/* ── Detail ── */}
               {modalType === "detail" && (() => {
-                const cls = MOCK_CLASSES.find(c => c.id === selectedHw.class_id);
+                const cls = myClasses.find(c => c.id === selectedHw.class_id);
                 const sub = getSub(selectedHw.id);
                 return (
                   <div className="space-y-4">

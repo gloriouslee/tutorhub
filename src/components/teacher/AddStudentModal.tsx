@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { MOCK_STUDENTS } from "@/lib/mock-data";
 import { Users, Plus, X } from "lucide-react";
 import { kvGet, kvSet } from "@/lib/storage";
 
@@ -20,13 +19,9 @@ export default function AddStudentModal({
   onAdd: (ids: string[]) => void;
   onClose: () => void;
 }) {
-  const mockAvailable = MOCK_STUDENTS
-    .filter(s => !enrolledIds.includes(s.id))
-    .map(s => ({ id: s.id, full_name: s.full_name, email: "", school: s.school ?? "", grade: s.grade ?? "", isEnrolled: false }));
-  const enrolledAvailable = approvedEnrollments
+  const available = approvedEnrollments
     .filter(e => !enrolledIds.includes(e.id))
     .map(e => ({ ...e, isEnrolled: true }));
-  const available = [...mockAvailable, ...enrolledAvailable];
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
@@ -40,7 +35,12 @@ export default function AddStudentModal({
   });
 
   function toggle(id: string) {
-    setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   }
 
   async function handleAdd() {

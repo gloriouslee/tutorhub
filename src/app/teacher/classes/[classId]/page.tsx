@@ -9,10 +9,6 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { LearningModeBadge } from "@/components/shared";
 import {
-  MOCK_CLASSES, MOCK_TEACHERS, MOCK_CLASS_MATERIALS, MOCK_LECTURES, MOCK_CLASS_NOTES, MOCK_STUDENTS,
-  MOCK_ATTENDANCE, MOCK_HOMEWORK, MOCK_SUBMISSIONS
-} from "@/lib/mock-data";
-import {
   getStudentComments, saveStudentComment,
   getClassScheduleOverride,
   getOnlineLink, saveOnlineLink,
@@ -21,12 +17,12 @@ import {
   getStudentPackages, saveStudentPackages, type StudentPackage,
   getClassMaterials, type StoredClassMaterial,
   kvGet, kvUpdate,
-  getClasses, removeStudentFromClass,
+  getClasses, getStudents, removeStudentFromClass,
   getTeacherHomework, upsertTeacherHomework, removeTeacherHomework,
-  getTeacherExtraClasses, getAllTeacherAttendance, getHwSubmissions,
+  getAllTeacherAttendance, getHwSubmissions,
 } from "@/lib/storage";
 import { toLocalDateKey } from "@/lib/utils";
-import { ClassSchedule } from "@/types";
+import { ClassSchedule, type Student } from "@/types";
 import { useTeacherContext } from "@/hooks/useTeacherContext";
 import {
   BookOpen, Users, ArrowLeft, FileText, Plus,
@@ -38,7 +34,6 @@ import {
   generateSessions,
   type Homework,
   type Submission,
-  type AttendanceStatus,
   type SavedAttendanceRecord,
 } from "@/components/teacher/classDetail.types";
 
@@ -108,7 +103,7 @@ export default function TeacherClassDetailPage() {
   const params = useParams();
   const classId = params.classId as string;
   const router = useRouter();
-  const { teacherId, teacherName, myClasses } = useTeacherContext();
+  const { teacherName, myClasses, ready } = useTeacherContext();
 
   // Tab hiện tại đồng bộ với URL (?tab=) để nút back của trình duyệt khôi phục đúng tab.
   // Đọc từ URL khi mount + khi back/forward (popstate); mặc định "overview" để khớp SSR.
@@ -167,6 +162,7 @@ export default function TeacherClassDetailPage() {
   const [extraStudentIds, setExtraStudentIds] = useState<string[]>([]);
   const [addStudentModal, setAddStudentModal] = useState(false);
   const [studentSearch, setStudentSearch] = useState("");
+  const [students, setStudents] = useState<Student[]>([]);
 
   // Approved enrolled students from Supabase — only those assigned to THIS class.
   // Id dùng `enr_${e.id}` cho khớp với id mà approveEnrollment ghi vào classes.student_ids.
@@ -201,7 +197,13 @@ export default function TeacherClassDetailPage() {
       .catch(() => {});
   }, [classId]);
 
-  // Uploaded materials (localStorage) merged with mock
+  useEffect(() => {
+    getStudents()
+      .then(setStudents)
+      .catch(() => setStudents([]));
+  }, []);
+
+  // Materials uploaded by the teacher.
   const [uploadedMaterials, setUploadedMaterials] = useState<StoredClassMaterial[]>([]);
   useEffect(() => {
     getClassMaterials(classId).then(setUploadedMaterials);
@@ -214,36 +216,7 @@ export default function TeacherClassDetailPage() {
   // Student packages per class (persisted to localStorage)
   const [studentPackages, setStudentPackages] = useState<Record<string, StudentPackage>>({});
 
-  // Teacher-created classes (persisted in localStorage) — normalized to the mock class shape
-  const [extraClass, setExtraClass] = useState<(typeof MOCK_CLASSES)[number] | null>(null);
-  const [extraClassLoaded, setExtraClassLoaded] = useState(false);
-  useEffect(() => {
-    getTeacherExtraClasses<any>()
-      .then(list => {
-        const found = list.find(c => c.id === classId);
-        if (found) {
-          setExtraClass({
-            id: found.id,
-            class_name: found.class_name ?? "Lớp học",
-            subject: found.subject ?? "",
-            grade: found.grade ?? 0,
-            learning_mode: found.learning_mode ?? "offline",
-            classroom: found.classroom ?? "",
-            description: found.description ?? "",
-            max_students: found.max_students ?? 15,
-            student_ids: found.student_ids ?? [],
-            schedule: found.schedule ?? [],
-            color: found.color ?? "#6366f1",
-            tutor_id: found.tutor_id ?? teacherId,
-            zoom_link: found.zoom_link,
-          } as unknown as (typeof MOCK_CLASSES)[number]);
-        }
-        setExtraClassLoaded(true);
-      })
-      .catch(() => setExtraClassLoaded(true));
-  }, [classId]);
-
-  const cls = myClasses.find(c => c.id === classId) ?? MOCK_CLASSES.find(c => c.id === classId) ?? extraClass ?? undefined;
+  const cls = myClasses.find(c => c.id === classId);
 
   useEffect(() => {
     if (!cls) return;
@@ -374,27 +347,14 @@ export default function TeacherClassDetailPage() {
     })();
   }, [classId, activeTab]);
 
-  // Load homework from localStorage
+  // Load persisted homework and submissions.
   useEffect(() => {
     if (!cls) return;
     (async () => {
       try {
         const all = await getTeacherHomework<Homework>([classId]);
         const forClass = all.filter(h => h.class_id === classId && h.source !== "curriculum");
-        const base: Homework[] = forClass.length > 0
-          ? forClass
-          : process.env.NODE_ENV === "production"
-            ? []
-            : (MOCK_HOMEWORK as any[])
-                .filter((h: any) => h.class_id === classId)
-                .map((h: any): Homework => ({
-                  id: h.id,
-                  class_id: h.class_id,
-                  title: h.title,
-                  description: h.description,
-                  due_date: h.due_date,
-                  created_at: h.created_at,
-                }));
+        const base: Homework[] = forClass;
         // Giữ lại các bài tập từ lộ trình mà effect curriculum đã nạp vào state,
         // tránh race giữa hai effect ghi đè lẫn nhau (mất bài tập lộ trình khi mới load).
         setHomeworks(prev => {
@@ -410,10 +370,9 @@ export default function TeacherClassDetailPage() {
         const rawSub = await getHwSubmissions<Submission>({
           classIds: [classId],
         });
-        const subFallback = process.env.NODE_ENV === "production" ? [] : (MOCK_SUBMISSIONS as any[]);
-        setSubmissions(rawSub.length ? rawSub : subFallback);
+        setSubmissions(rawSub);
       } catch {
-        setSubmissions(process.env.NODE_ENV === "production" ? [] : (MOCK_SUBMISSIONS as any[]));
+        setSubmissions([]);
       }
     })();
   }, [classId, cls]);
@@ -497,7 +456,7 @@ export default function TeacherClassDetailPage() {
   if (!cls) {
     return (
       <PortalLayout role="teacher" userName={teacherName || "Giáo viên"} pageTitle="Lớp học">
-        {!extraClassLoaded ? (
+        {!ready ? (
           <div className="py-20 text-center text-sm text-muted-foreground">Đang tải lớp học…</div>
         ) : (
         <div className="flex flex-col items-center justify-center py-20">
@@ -510,18 +469,32 @@ export default function TeacherClassDetailPage() {
     );
   }
 
-  const teacher = MOCK_TEACHERS.find(t => t.id === cls.tutor_id);
   const materials = [
-    ...MOCK_CLASS_MATERIALS.filter(m => m.class_id === classId),
     ...uploadedMaterials,
     ...currMaterials,
   ];
-  const lectures = MOCK_LECTURES.filter(l => l.class_id === classId);
-  const notes = MOCK_CLASS_NOTES.filter(n => n.class_id === classId);
+  const lectureMaterials = [...uploadedMaterials, ...currLectures].filter(m => m.kind === "lecture");
+  const overviewLectures = lectureMaterials.map((lecture, index) => ({
+    ...lecture,
+    is_published: true,
+    order: index + 1,
+  }));
+  const notes = Object.entries(sessionNotes)
+    .filter(([, content]) => content.trim().length > 0)
+    .map(([date, content]) => ({
+      id: `session-note-${date}`,
+      title: `Ghi chú buổi học ${date}`,
+      content,
+      is_pinned: false,
+      created_at: date,
+    }));
 
-  // Students enrolled in this class — DB class row is the source of truth for
-  // student_ids (falls back to mock when offline), plus extras added by teacher.
-  const allEnrolledIds = [...new Set([...(dbStudentIds ?? cls.student_ids ?? []), ...extraStudentIds])];
+  // The class row and approved enrollments are the sources of truth for membership.
+  const allEnrolledIds = [...new Set([
+    ...(dbStudentIds ?? cls.student_ids ?? []),
+    ...extraStudentIds,
+    ...approvedEnrollments.map(e => e.id),
+  ])];
   // Progress from real data: distinct homework submissions / homework count (null → hiển thị "—")
   const progressFor = (studentId: string): number | null => {
     if (homeworks.length === 0) return null;
@@ -531,14 +504,14 @@ export default function TeacherClassDetailPage() {
     ).size;
     return Math.round((done / homeworks.length) * 100);
   };
-  const mockClassStudents = MOCK_STUDENTS.filter(s => allEnrolledIds.includes(s.id)).map(s => ({
+  const storedClassStudents = students.filter(s => allEnrolledIds.includes(s.id)).map(s => ({
     ...s,
     package: (studentPackages[s.id] ?? "online") as StudentPackage,
-    join_date: toLocalDateKey(new Date()),
+    join_date: s.created_at?.slice(0, 10) || toLocalDateKey(new Date()),
     progress: progressFor(s.id),
   }));
   const enrolledClassStudents = approvedEnrollments
-    .filter(e => allEnrolledIds.includes(e.id))
+    .filter(e => allEnrolledIds.includes(e.id) && !students.some(s => s.id === e.id))
     .map(e => ({
       id: e.id, user_id: e.id, full_name: e.full_name, email: e.email,
       dob: "", school: e.school, grade: e.grade, learning_type: "online" as const,
@@ -547,7 +520,7 @@ export default function TeacherClassDetailPage() {
       join_date: e.created_at ? e.created_at.slice(0, 10) : toLocalDateKey(new Date()),
       progress: progressFor(e.id),
     }));
-  const classStudents = [...mockClassStudents, ...enrolledClassStudents];
+  const classStudents = [...storedClassStudents, ...enrolledClassStudents];
 
   async function handleRemoveStudent(student: { id: string; full_name: string }) {
     if (!window.confirm(`Xóa ${student.full_name} khỏi lớp?`)) return;
@@ -582,10 +555,10 @@ export default function TeacherClassDetailPage() {
   const upcomingSessions = allSessions.filter(s => !s.isPast || s.isToday);
   const pastSessions = allSessions.filter(s => s.isPast && !s.isToday);
 
-  // Dedupe by date+student: saved overrides mock
+  // Dedupe persisted records by date and student.
   const dedupedHistory: SavedAttendanceRecord[] = [];
   const seen = new Set<string>();
-  for (const rec of [...savedAttendanceRecords.filter(r => r.class_id === classId), ...(MOCK_ATTENDANCE as any[]).filter((r: any) => r.class_id === classId).map((r: any) => ({ class_id: r.class_id, student_id: r.student_id, date: r.attendance_date, status: r.status as AttendanceStatus, saved_at: r.attendance_date }))]) {
+  for (const rec of savedAttendanceRecords.filter(r => r.class_id === classId)) {
     const key = `${rec.date}_${rec.student_id}`;
     if (!seen.has(key)) {
       seen.add(key);
@@ -627,7 +600,7 @@ export default function TeacherClassDetailPage() {
               </div>
               <div className="flex flex-wrap gap-3 shrink-0">
                 <div className="bg-white/10 backdrop-blur px-4 py-2 rounded-xl text-center border border-white/20">
-                  <p className="text-2xl font-bold">{lectures.length}</p>
+                  <p className="text-2xl font-bold">{lectureMaterials.length}</p>
                   <p className="text-[11px] text-white/60">Bài giảng</p>
                 </div>
                 <div className="bg-white/10 backdrop-blur px-4 py-2 rounded-xl text-center border border-white/20">
@@ -661,7 +634,7 @@ export default function TeacherClassDetailPage() {
             <OverviewTab
               description={cls.description ?? ""}
               scheduleForDisplay={scheduleForDisplay}
-              lectures={lectures}
+              lectures={overviewLectures}
               materials={materials}
               notes={notes}
               classStudentsCount={classStudents.length}
@@ -741,7 +714,7 @@ export default function TeacherClassDetailPage() {
 
           {/* ── Lectures ── */}
           {activeTab === "lectures" && (
-            <LecturesTab classId={classId} lectures={lectures} materials={[...uploadedMaterials, ...currLectures]} addButton={addButton("lecture", "Thêm bài giảng")} setUploadedMaterials={setUploadedMaterials} />
+            <LecturesTab classId={classId} lectures={[]} materials={[...uploadedMaterials, ...currLectures]} addButton={addButton("lecture", "Thêm bài giảng")} setUploadedMaterials={setUploadedMaterials} />
           )}
 
           {/* ── Materials ── */}

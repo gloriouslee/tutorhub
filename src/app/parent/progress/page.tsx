@@ -26,7 +26,7 @@ export default function ParentProgressPage() {
   const [childExams, setChildExams] = useState<StoredExamScore[]>([]);
   const [childAttendanceRate, setChildAttendanceRate] = useState<number | null>(null);
 
-  // Load real data (teacher-entered + online exam results merged over mock) per child
+  // Load teacher-entered scores and online exam results for each child.
   useEffect(() => {
     if (!ready || !selectedChild) return;
     let cancelled = false;

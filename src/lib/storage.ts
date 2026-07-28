@@ -1,20 +1,16 @@
 import { createClient } from "./supabase/client";
 import { Student, Teacher, Class, Payment, Attendance, Notification, ClassSchedule } from "@/types";
-import {
-  MOCK_STUDENTS, MOCK_TEACHERS, MOCK_CLASSES,
-  MOCK_PAYMENTS, MOCK_ATTENDANCE, MOCK_NOTIFICATIONS,
-} from "@/lib/mock-data";
 
 const supabase = createClient();
 
-// localStorage keys for the six core entity lists (demo-mode persistence)
+// Cache keys for the six core entity lists.
 const ENTITY_KEYS = {
-  students: "tutorhub_students",
-  teachers: "tutorhub_teachers",
-  classes: "tutorhub_classes",
-  payments: "tutorhub_payments",
-  attendance: "tutorhub_attendance",
-  notifications: "tutorhub_notifications",
+  students: "tutorhub_cache_v2_students",
+  teachers: "tutorhub_cache_v2_teachers",
+  classes: "tutorhub_cache_v2_classes",
+  payments: "tutorhub_cache_v2_payments",
+  attendance: "tutorhub_cache_v2_attendance",
+  notifications: "tutorhub_cache_v2_notifications",
 } as const;
 
 function readLocal<T>(key: string): T[] | null {
@@ -158,14 +154,8 @@ export async function kvDelete(key: string): Promise<void> {
   } catch { /* offline */ }
 }
 
-// Đánh dấu các bảng mà lần đọc gần nhất THỰC SỰ đến từ DB (không phải
-// cache/mock). saveEntity chỉ được phép prune (xóa row vắng mặt) khi cờ này
-// bật — ngăn thảm họa "load lỗi → state là mock → save ghi đè cả bảng thật".
+// Đánh dấu các bảng mà lần đọc gần nhất THỰC SỰ đến từ DB (không phải cache).
 const verifiedTables = new Set<string>();
-
-// Mock fallbacks are for local/demo only. In production a failed read must never
-// render fabricated records.
-const ALLOW_MOCK_FALLBACK = process.env.NODE_ENV !== "production";
 
 // Supabase-first getter: DB là nguồn dữ liệu chính; localStorage chỉ là cache
 // offline. Bảng rỗng là trạng thái hợp lệ (đã xóa hết) — chỉ fallback khi lỗi.
@@ -173,7 +163,6 @@ async function getEntity<T>(
   key: string,
   table: string,
   query: () => Promise<{ data: T[] | null; error: unknown }>,
-  fallback: T[]
 ): Promise<T[]> {
   try {
     const { data, error } = await query();
@@ -186,14 +175,12 @@ async function getEntity<T>(
   verifiedTables.delete(table);
   const local = readLocal<T>(key);
   if (local !== null) return local;
-  // Production: never surface fabricated MOCK data on a read failure — return
-  // empty so a transient/RLS error shows "no data" rather than fake records.
-  return ALLOW_MOCK_FALLBACK ? fallback : [];
+  return [];
 }
 
 // Supabase-first saver: upsert danh sách mới, mirror vào localStorage.
 // Chỉ prune row vắng mặt khi phiên này đã đọc thành công từ DB — nếu không,
-// upsert-only (an toàn: không bao giờ xóa dữ liệu dựa trên state mock/cache).
+// upsert-only (an toàn: không bao giờ xóa dữ liệu dựa trên cache phía client).
 async function saveEntity<T extends { id: string }>(
   key: string,
   table: string,
@@ -214,8 +201,7 @@ export async function getStudents(): Promise<Student[]> {
   return getEntity(
     ENTITY_KEYS.students,
     "students",
-    () => supabase.from("students").select("*").order("created_at", { ascending: false }) as any,
-    MOCK_STUDENTS as unknown as Student[]
+    () => supabase.from("students").select("*").order("created_at", { ascending: false }) as any
   );
 }
 
@@ -227,8 +213,7 @@ export async function getTeachers(): Promise<Teacher[]> {
   return getEntity(
     ENTITY_KEYS.teachers,
     "teachers",
-    () => supabase.from("teachers").select("*").order("created_at", { ascending: false }) as any,
-    MOCK_TEACHERS as unknown as Teacher[]
+    () => supabase.from("teachers").select("*").order("created_at", { ascending: false }) as any
   );
 }
 
@@ -240,8 +225,7 @@ export async function getClasses(): Promise<Class[]> {
   return getEntity(
     ENTITY_KEYS.classes,
     "classes",
-    () => supabase.from("classes").select("*").order("created_at", { ascending: false }) as any,
-    MOCK_CLASSES as unknown as Class[]
+    () => supabase.from("classes").select("*").order("created_at", { ascending: false }) as any
   );
 }
 
@@ -279,8 +263,7 @@ export async function getPayments(): Promise<Payment[]> {
   return getEntity(
     ENTITY_KEYS.payments,
     "payments",
-    () => supabase.from("payments").select("*").order("created_at", { ascending: false }) as any,
-    MOCK_PAYMENTS as unknown as Payment[]
+    () => supabase.from("payments").select("*").order("created_at", { ascending: false }) as any
   );
 }
 
@@ -292,8 +275,7 @@ export async function getAttendance(): Promise<Attendance[]> {
   return getEntity(
     ENTITY_KEYS.attendance,
     "attendance",
-    () => supabase.from("attendance").select("*").order("attendance_date", { ascending: false }) as any,
-    MOCK_ATTENDANCE as unknown as Attendance[]
+    () => supabase.from("attendance").select("*").order("attendance_date", { ascending: false }) as any
   );
 }
 
@@ -493,11 +475,10 @@ export async function saveParentMessages(parentId: string, contacts: unknown): P
 export async function getNotifications(): Promise<Notification[]> {
   // Chụp cache cục bộ TRƯỚC khi getEntity ghi đè bằng dữ liệu DB.
   const localBefore = readLocal<Notification>(ENTITY_KEYS.notifications) ?? [];
-  const list = await getEntity(
+  const list = await getEntity<Notification>(
     ENTITY_KEYS.notifications,
     "notifications",
-    () => supabase.from("notifications").select("*").order("created_at", { ascending: false }) as any,
-    MOCK_NOTIFICATIONS as unknown as Notification[]
+    () => supabase.from("notifications").select("*").order("created_at", { ascending: false }) as any
   );
   // Giữ lại thông báo tạo cục bộ chưa kịp đồng bộ lên DB (Supabase chập chờn),
   // union theo id — vô hại khi đã đồng bộ (trùng id) và trên prod.
@@ -595,7 +576,7 @@ export async function saveStudentComment(studentId: string, commentsList: { text
 }
 
 // ── Teacher-class assignment overrides (localStorage) ────────────────────────
-// Allows admin to reassign classes to different teachers without touching mock data.
+// Allows admin to reassign classes to different teachers.
 
 export async function getClassTeacherOverrides(): Promise<Record<string, string>> {
   const { data, error } = await supabase
@@ -979,7 +960,7 @@ export async function getInvoices(): Promise<TuitionInvoice[]> {
   return response.json() as Promise<TuitionInvoice[]>;
 }
 
-/** Hoá đơn thật, KHÔNG fallback demo — dùng cho báo cáo/thống kê. */
+/** Hoá đơn đã lưu dùng cho báo cáo/thống kê. */
 export async function getInvoicesRaw(): Promise<TuitionInvoice[]> {
   return getInvoices();
 }

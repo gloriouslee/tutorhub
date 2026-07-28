@@ -48,6 +48,7 @@ export interface Class {
   grade?: number;
   learning_mode: "online" | "offline" | "hybrid";
   tutor_id: string;
+  tutor_name?: string;
   classroom?: string;
   zoom_link?: string;
   schedule: ClassSchedule[];

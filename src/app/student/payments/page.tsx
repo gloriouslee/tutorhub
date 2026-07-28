@@ -21,13 +21,6 @@ import { formatDate, formatCurrency } from "@/lib/utils";
 import { useStudentContext } from "@/hooks/useStudentContext";
 import { loadTeacherCourses, teacherCourseToPaidPackage } from "@/components/student/materialsShared";
 
-const PACKAGES: Record<string, { id: string; title: string; price: number }> = {
-  pp1: { id: "pp1", title: "Toán 12 — Siêu Ôn Luyện THPT Quốc Gia",    price: 299000 },
-  pp2: { id: "pp2", title: "Vật Lý 12 — Điện xoay chiều & Sóng",         price: 199000 },
-  pp3: { id: "pp3", title: "Hóa Học 12 — Lý thuyết & Bài tập nâng cao",  price: 349000 },
-  pp4: { id: "pp4", title: "Tiếng Anh 12 — Ngữ pháp & Từ vựng",          price: 149000 },
-};
-
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const formatVND = formatCurrency;
 
@@ -55,7 +48,6 @@ type ModalTarget =
 // ── Inner component ───────────────────────────────────────────────────────────
 function PaymentsContent() {
   const { studentId, studentName, myClasses } = useStudentContext();
-  const STUDENT = { id: studentId, name: studentName, email: "" };
   const params   = useSearchParams();
   const pkgParam = params.get("pkg");
 
@@ -73,28 +65,28 @@ function PaymentsContent() {
   }, [myClasses.map(c => c.id).join(",")]);
 
   useEffect(() => {
-    getInvoices().then(list => setInvoices(list.filter(inv => inv.child_id === STUDENT.id)));
+    getInvoices().then(list => setInvoices(list.filter(inv => inv.child_id === studentId)));
     // Filter by this student only
-    getTransactions().then(txs => setPkgTransactions(txs.filter(t => t.student_id === STUDENT.id)));
+    getTransactions().then(txs => setPkgTransactions(txs.filter(t => t.student_id === studentId)));
     if (pkgParam) {
-      if (PACKAGES[pkgParam]) {
-        const pkg = PACKAGES[pkgParam];
+      loadTeacherCourses().then(courses => {
+        const course = courses.find(
+          item =>
+            item.id === pkgParam
+            && item.type === "paid_package"
+            && item.published
+            && typeof item.price === "number"
+            && item.price > 0,
+        );
+        if (!course) return;
+        const pkg = teacherCourseToPaidPackage(course);
         setModalTarget({ kind: "package", pkgId: pkg.id, title: pkg.title, amount: pkg.price });
-      } else {
-        // Gói do giáo viên tạo — tra trong teacher courses
-        loadTeacherCourses().then(courses => {
-          const tc = courses.find(c => c.id === pkgParam);
-          if (tc) {
-            const pkg = teacherCourseToPaidPackage(tc);
-            setModalTarget({ kind: "package", pkgId: pkg.id, title: pkg.title, amount: pkg.price });
-          }
-        });
-      }
+      });
     }
   }, [pkgParam, studentId]);
 
   const reload = () =>
-    getTransactions().then(txs => setPkgTransactions(txs.filter(t => t.student_id === STUDENT.id)));
+    getTransactions().then(txs => setPkgTransactions(txs.filter(t => t.student_id === studentId)));
 
   const closeModal = () => { setModalTarget(null); setReceiptFile(null); };
 
@@ -107,29 +99,29 @@ function PaymentsContent() {
     if (modalTarget.kind === "invoice") {
       await updateInvoiceStatus(
         modalTarget.invoice.id, "pending_verification", "student",
-        modalTarget.invoice.id === "ALL" ? STUDENT.id : undefined,
+        modalTarget.invoice.id === "ALL" ? studentId : undefined,
       );
       const list = await getInvoices();
-      setInvoices(list.filter(inv => inv.child_id === STUDENT.id));
+      setInvoices(list.filter(inv => inv.child_id === studentId));
       await addNotification({
         title: "Học viên nộp học phí",
-        content: `${STUDENT.name} đã gửi biên lai học phí (${formatVND(modalAmt)}) — chờ xác nhận.`,
-        target_role: "admin", category: "system", sent_by: STUDENT.name,
+        content: `${studentName} đã gửi biên lai học phí (${formatVND(modalAmt)}) — chờ xác nhận.`,
+        target_role: "admin", category: "system", sent_by: studentName,
       });
     } else {
       await createTransaction({
         pkg_id:        modalTarget.pkgId,
         pkg_title:     modalTarget.title,
         amount:        modalTarget.amount,
-        student_id:    STUDENT.id,
-        student_name:  STUDENT.name,
-        student_email: STUDENT.email,
-        transfer_note: `TUTORHUB ${modalTarget.pkgId.toUpperCase()} ${STUDENT.id}`,
+        student_id:    studentId,
+        student_name:  studentName,
+        student_email: "",
+        transfer_note: `TUTORHUB ${modalTarget.pkgId.toUpperCase()} ${studentId}`,
       });
       await addNotification({
         title: "Giao dịch mua tài liệu",
-        content: `${STUDENT.name} đã tạo giao dịch mua "${modalTarget.title}" (${formatVND(modalTarget.amount)}) — chờ duyệt.`,
-        target_role: "admin", category: "system", sent_by: STUDENT.name,
+        content: `${studentName} đã tạo giao dịch mua "${modalTarget.title}" (${formatVND(modalTarget.amount)}) — chờ duyệt.`,
+        target_role: "admin", category: "system", sent_by: studentName,
       });
       reload();
     }
@@ -179,8 +171,8 @@ function PaymentsContent() {
   const modalId       = modalTarget?.kind === "invoice" ? modalTarget.invoice.id
     : modalTarget?.kind === "package" ? modalTarget.pkgId : "";
   const transferNote  = modalTarget?.kind === "package"
-    ? `TUTORHUB ${modalTarget.pkgId.toUpperCase()} ${STUDENT.id}`
-    : `TT ${modalId} ${STUDENT.name.toUpperCase().replace(/ /g, "")}`;
+    ? `TUTORHUB ${modalTarget.pkgId.toUpperCase()} ${studentId}`
+    : `TT ${modalId} ${studentName.toUpperCase().replace(/ /g, "")}`;
 
   return (
     <div className="space-y-6 max-w-5xl mx-auto">

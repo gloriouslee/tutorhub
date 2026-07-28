@@ -6,10 +6,9 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { SectionHeader } from "@/components/shared";
-import { MOCK_STUDENTS } from "@/lib/mock-data";
 import {
   GraduationCap, Building2, BookOpen,
-  Activity, Target, ChevronRight, CalendarDays, Award
+  Activity, Target, ChevronRight, CalendarDays
 } from "lucide-react";
 import Link from "next/link";
 import { useParentContext } from "@/hooks/useParentContext";
@@ -70,9 +69,9 @@ export default function ParentChildrenPage() {
             const avg = avgByChild[child.id] ?? null;
             const avgScoreLabel = avg != null ? avg.toFixed(1) : "—";
             const attendance = attByChild[child.id] ?? null;
-            // Hồ sơ đăng ký (hình thức học, ngày nhập học) chưa có nguồn thật —
-            // tra cứu từ mock roster làm dữ liệu demo.
-            const profile = MOCK_STUDENTS.find(s => s.id === child.id);
+            const learningModes = [
+              ...new Set(enrolledClasses.map(cls => cls.learning_mode)),
+            ];
             const bgGradient = GRADIENTS[index % GRADIENTS.length];
 
             return (
@@ -137,20 +136,14 @@ export default function ParentChildrenPage() {
                       <div className="flex justify-between items-center text-sm">
                         <span className="text-muted-foreground">Hình thức học:</span>
                         <Badge variant="outline" className="font-semibold bg-background">
-                          {profile ? getLearningTypeLabel(profile.learning_type) : "Đang cập nhật"}
+                          {learningModes.length > 0
+                            ? learningModes.map(getLearningTypeLabel).join(", ")
+                            : "Đang cập nhật"}
                         </Badge>
                       </div>
                       <div className="flex justify-between items-center text-sm">
-                        <span className="text-muted-foreground">Ngày nhập học:</span>
-                        <span className="font-medium text-foreground">
-                          {profile ? new Date(profile.created_at).toLocaleDateString('vi-VN') : "—"}
-                        </span>
-                      </div>
-                      <div className="flex justify-between items-center text-sm">
-                        <span className="text-muted-foreground">Danh hiệu hiện tại:</span>
-                        <span className="font-medium text-amber-600 dark:text-amber-500 flex items-center gap-1">
-                          <Award className="h-4 w-4" /> Học viên Tiêu biểu
-                        </span>
+                        <span className="text-muted-foreground">Khối/lớp:</span>
+                        <span className="font-medium text-foreground">{child.grade || "—"}</span>
                       </div>
                     </div>
                   </div>

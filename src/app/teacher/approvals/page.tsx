@@ -15,8 +15,7 @@ import {
   Receipt, CreditCard, CheckCircle2, XCircle, Clock, User, BookOpen,
   Calendar, RefreshCw, Wallet, Inbox,
 } from "lucide-react";
-
-const TEACHER_NAME = "Thầy Hùng Toán";
+import { useTeacherContext } from "@/hooks/useTeacherContext";
 
 function fmtDateTime(iso?: string) {
   if (!iso) return "";
@@ -27,6 +26,7 @@ function periodOf(inv: TuitionInvoice): string {
 }
 
 export default function TeacherApprovalsPage() {
+  const { teacherName } = useTeacherContext();
   const [invoices, setInvoices] = useState<TuitionInvoice[]>([]);
   const [txs, setTxs] = useState<PurchaseTransaction[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
@@ -55,7 +55,7 @@ export default function TeacherApprovalsPage() {
     await addNotification({
       title: "Đã thu học phí",
       content: `Giáo viên đã xác nhận thu ${formatCurrency(inv.amount)} học phí từ ${inv.child_id} (${inv.title}).`,
-      target_role: "admin", category: "system", sent_by: TEACHER_NAME,
+      target_role: "admin", category: "system", sent_by: teacherName || "Giáo viên",
     });
     reload();
     setBusy(null);
@@ -70,7 +70,7 @@ export default function TeacherApprovalsPage() {
       await addNotification({
         title: action === "approved" ? "Đã duyệt giao dịch tài liệu" : "Đã từ chối giao dịch tài liệu",
         content: `Giáo viên ${action === "approved" ? "duyệt" : "từ chối"} giao dịch mua "${tx.pkg_title}" (${formatCurrency(tx.amount)}) của ${tx.student_name}.`,
-        target_role: "admin", category: "system", sent_by: TEACHER_NAME,
+        target_role: "admin", category: "system", sent_by: teacherName || "Giáo viên",
       });
     }
     reload();
@@ -78,7 +78,7 @@ export default function TeacherApprovalsPage() {
   }
 
   return (
-    <PortalLayout role="teacher" userName={TEACHER_NAME} pageTitle="Duyệt thu">
+    <PortalLayout role="teacher" userName={teacherName || "Giáo viên"} pageTitle="Duyệt thu">
       <div className="max-w-4xl mx-auto space-y-6">
         <SectionHeader
           title="Duyệt thu tiền"

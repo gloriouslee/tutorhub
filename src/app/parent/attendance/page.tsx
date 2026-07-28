@@ -18,7 +18,7 @@ export default function ParentAttendancePage() {
   const [selectedChildId, setSelectedChildId] = useState<string>("all");
   const [records, setRecords] = useState<ChildAttendanceRecord[]>([]);
 
-  // Load real attendance (teacher records merged over mock baseline) for all children
+  // Load attendance records saved by teachers for all children.
   useEffect(() => {
     if (!ready || children.length === 0) return;
     loadChildrenAttendance(children.map(c => c.id)).then(setRecords);

@@ -108,7 +108,7 @@ export default function AdminUsersPage() {
       <div className="mx-auto max-w-5xl space-y-6">
         <SectionHeader
           title="Quản lý tài khoản thật"
-          subtitle="Tài khoản Supabase Auth; không còn user demo hoặc mật khẩu plaintext."
+          subtitle="Tài khoản Supabase Auth; không lưu mật khẩu dạng plaintext."
           action={
             <Button variant="outline" size="sm" onClick={() => void reload()}>
               <RefreshCw className="mr-2 h-4 w-4" /> Làm mới

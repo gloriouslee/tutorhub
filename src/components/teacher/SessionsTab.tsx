@@ -3,7 +3,6 @@
 import { useState, useEffect } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { MOCK_ATTENDANCE } from "@/lib/mock-data";
 import { saveClassAttendance, type CurriculumSession as CurriculumSessionData } from "@/lib/storage";
 import {
   Clock, FileText, Save, CheckCircle2, CalendarDays, CheckSquare,
@@ -77,11 +76,6 @@ function InlineAttendancePanel({
 }) {
   const buildMarks = (recs: SavedAttendanceRecord[]) => {
     const m: Record<string, AttendanceStatus> = {};
-    for (const rec of MOCK_ATTENDANCE as any[]) {
-      if (rec.class_id === classId && rec.attendance_date === date) {
-        m[rec.student_id] = rec.status as AttendanceStatus;
-      }
-    }
     for (const rec of recs) {
       if (rec.class_id === classId && rec.date === date) {
         m[rec.student_id] = rec.status;
@@ -93,7 +87,7 @@ function InlineAttendancePanel({
   const [marks, setMarks] = useState<Record<string, AttendanceStatus>>(() => buildMarks(savedRecords));
   const [saved, setSaved] = useState(false);
 
-  // Re-sync when savedRecords arrives (parent loads from localStorage asynchronously)
+  // Re-sync when the persisted attendance records arrive.
   useEffect(() => {
     setMarks(buildMarks(savedRecords));
   // eslint-disable-next-line react-hooks/exhaustive-deps

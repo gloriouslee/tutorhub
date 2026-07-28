@@ -2,19 +2,20 @@
 
 import { useState, useEffect } from "react";
 import {
-  BookOpen, Calendar, CheckSquare, GraduationCap,
+  BookOpen, Calendar, CheckSquare,
   Clock, Bell, ArrowRight, FileText,
-  PlayCircle, Trophy, Star, Target, Sparkles, AlertCircle,
+  PlayCircle, Trophy, Target, Sparkles, AlertCircle,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { LearningModeBadge, SectionHeader } from "@/components/shared";
+import { LearningModeBadge } from "@/components/shared";
 import {
-  MOCK_CLASSES, MOCK_HOMEWORK, MOCK_ATTENDANCE,
-  MOCK_EXAM_SCORES, MOCK_TEACHERS, ATTENDANCE_CHART_DATA,
-} from "@/lib/mock-data";
-import { getNotifications, getEnrollments, getTeacherHomework, getExamScoresByStudent, getCurriculum, getExamResult, isAssignedToStudent, isLessonVisibleToStudent } from "@/lib/storage";
+  getNotifications, getTeacherHomework, getExamScoresByStudent,
+  getCurriculum, getExamResult, getAllTeacherAttendance,
+  isAssignedToStudent, isLessonVisibleToStudent,
+  type TeacherAttendanceRecord,
+} from "@/lib/storage";
 import { getSubmissionsByStudent } from "@/lib/supabase/submissions";
 import Link from "next/link";
 import { formatDate, mapWithConcurrency } from "@/lib/utils";
@@ -46,7 +47,6 @@ function buildWeekSessions(classes: Class[]) {
 
   return classes
     .flatMap(cls => {
-      const tutor = MOCK_TEACHERS.find(t => t.id === cls.tutor_id);
       return cls.schedule.map(s => {
         const dayIdx = DOW_EN.indexOf(s.day);
         let status: "live" | "done" | "upcoming";
@@ -62,13 +62,32 @@ function buildWeekSessions(classes: Class[]) {
                  : "upcoming";
         }
         return {
-          cls, tutorName: tutor?.full_name ?? "Giáo viên",
+          cls, tutorName: cls.tutor_name ?? "Giáo viên",
           day: s.day, dayVi: DOW_VI[s.day] ?? s.day,
           start_time: s.start_time, end_time: s.end_time, status,
         };
       });
     })
     .sort((a, b) => DOW_EN.indexOf(a.day) - DOW_EN.indexOf(b.day));
+}
+
+function buildAttendanceChart(records: TeacherAttendanceRecord[]) {
+  const now = new Date();
+  return Array.from({ length: 6 }, (_, index) => {
+    const date = new Date(now.getFullYear(), now.getMonth() - 5 + index, 1);
+    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+    const monthRecords = records.filter((record) => record.date.startsWith(key));
+    const counted = monthRecords.filter((record) => record.status !== "excused");
+    const attended = counted.filter(
+      (record) => record.status === "present" || record.status === "late",
+    ).length;
+    return {
+      month: `T${date.getMonth() + 1}`,
+      present: counted.length > 0
+        ? Math.round((attended / counted.length) * 100)
+        : 0,
+    };
+  });
 }
 
 export default function StudentDashboard() {
@@ -78,6 +97,9 @@ export default function StudentDashboard() {
   const [unreadCount,    setUnreadCount]    = useState(0);
   const [submittedCount, setSubmittedCount] = useState(0);
   const [teacherHw,      setTeacherHw]      = useState<HomeworkItem[]>([]);
+  const [attendanceChartData, setAttendanceChartData] = useState<
+    { month: string; present: number }[]
+  >([]);
 
   useEffect(() => {
     if (!ready) return;
@@ -105,11 +127,8 @@ export default function StudentDashboard() {
       return { exams, results };
     });
 
-    // Scores — gộp điểm mock (demo) + điểm lưu tay + bài thi online đã làm,
-    // giống trang /student/scores để học sinh thật cũng có điểm TB.
+    // Scores — gộp điểm giáo viên nhập và bài thi online đã làm.
     (async () => {
-      const mock = MOCK_EXAM_SCORES.filter(e => e.student_id === studentId)
-        .map(e => ({ id: e.id, score: e.score, max_score: e.max_score }));
       const [storedScores, { exams, results }] = await Promise.all([
         getExamScoresByStudent(studentId),
         examResultsPromise,
@@ -128,7 +147,7 @@ export default function StudentDashboard() {
         });
       });
       const seen = new Set<string>();
-      const merged = [...mock, ...stored, ...taken].filter(e => {
+      const merged = [...stored, ...taken].filter(e => {
         if (seen.has(e.id)) return false; seen.add(e.id); return true;
       }).filter(e => e.max_score > 0);
       setAvgScore(merged.length > 0
@@ -138,11 +157,19 @@ export default function StudentDashboard() {
     })();
 
     // Attendance — null when there is no record yet (shown as "—")
-    const att = MOCK_ATTENDANCE.filter(a => a.student_id === studentId);
-    setAttendanceRate(att.length > 0
-      ? Math.round((att.filter(a => a.status === "present" || a.status === "late").length / att.length) * 100)
-      : null
-    );
+    getAllTeacherAttendance({
+      classIds: myClasses.map((cls) => cls.id),
+      studentIds: [studentId],
+    }).then((records) => {
+      const counted = records.filter((record) => record.status !== "excused");
+      const attended = counted.filter(
+        (record) => record.status === "present" || record.status === "late",
+      ).length;
+      setAttendanceRate(
+        counted.length > 0 ? Math.round((attended / counted.length) * 100) : null,
+      );
+      setAttendanceChartData(buildAttendanceChart(records));
+    });
 
     // Notifications — trừ các thông báo đã đọc/đã xóa (giống trang thông báo)
     const parseSet = (key: string): Set<string> => {
@@ -223,14 +250,7 @@ export default function StudentDashboard() {
   const greetingHour    = now.getHours();
   const greeting        = greetingHour < 12 ? "Chào buổi sáng" : greetingHour < 18 ? "Chào buổi chiều" : "Chào buổi tối";
 
-  const myClassIds        = myClasses.map(c => c.id);
-  const kvHwIds           = new Set(teacherHw.map(h => h.id));
-  const myHomework: HomeworkItem[] = [
-    ...teacherHw,
-    ...(process.env.NODE_ENV === "production"
-      ? []
-      : MOCK_HOMEWORK.filter(h => myClassIds.includes(h.class_id) && !kvHwIds.has(h.id))),
-  ];
+  const myHomework: HomeworkItem[] = teacherHw;
   const pendingHomework   = myHomework.filter(h => new Date(h.due_date) >= now);
   const homeworkTotal     = myHomework.length;
   const completionPct     = homeworkTotal > 0 ? Math.round((submittedCount / homeworkTotal) * 100) : 0;
@@ -441,7 +461,7 @@ export default function StudentDashboard() {
             ) : (
               <Card className="border-0 shadow-lg bg-gradient-to-br from-amber-50 to-orange-50 dark:from-amber-950/20 dark:to-orange-950/20 border-amber-200/50 dark:border-amber-900/50">
                 <CardContent className="p-5 space-y-3">
-                  {pendingHomework.slice(0, 3).map((hw, i) => {
+                  {pendingHomework.slice(0, 3).map((hw) => {
                     const days = Math.ceil((new Date(hw.due_date).getTime() - Date.now()) / 86400000);
                     const urgent = days <= 2;
                     return (
@@ -492,7 +512,7 @@ export default function StudentDashboard() {
                 </div>
                 <div className="h-[140px] -mx-6 -mb-6">
                   <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0} initialDimension={{ width: 800, height: 140 }}>
-                    <AreaChart data={ATTENDANCE_CHART_DATA} margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>
+                    <AreaChart data={attendanceChartData} margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>
                       <defs>
                         <linearGradient id="colorPresent" x1="0" y1="0" x2="0" y2="1">
                           <stop offset="5%"  stopColor="#8b5cf6" stopOpacity={0.3} />
