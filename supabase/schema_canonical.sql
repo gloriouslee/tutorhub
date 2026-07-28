@@ -132,6 +132,9 @@ as $$
     select 1 from public.classes
     where id::text = p_class_id
       and tutor_id::text = public.my_teacher_id()
+  ) or exists (
+    select 1 from public.teacher_extra_classes
+    where id = p_class_id and tutor_id = public.my_teacher_id()
   )
 $$;
 
@@ -150,6 +153,10 @@ as $$
         from unnest(c.student_ids) student_id
         where student_id::text = public.my_student_id()
       )
+  ) or exists (
+    select 1 from public.teacher_extra_classes ec
+    where ec.id = p_class_id
+      and public.my_student_id() = any (ec.student_ids)
   )
 $$;
 
