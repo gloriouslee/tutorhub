@@ -177,8 +177,9 @@ export default function TeacherClassDetailPage() {
     getClassMaterials(classId).then(setUploadedMaterials);
   }, [classId]);
 
-  // Tài liệu nguồn từ Lộ trình (curriculum lesson type=material) — hiển thị ở tab Tài liệu.
+  // Tài liệu / Bài giảng nguồn từ Lộ trình — hiển thị ở tab Tài liệu / Bài giảng.
   const [currMaterials, setCurrMaterials] = useState<StoredClassMaterial[]>([]);
+  const [currLectures, setCurrLectures] = useState<StoredClassMaterial[]>([]);
 
   // Student packages per class (persisted to localStorage)
   const [studentPackages, setStudentPackages] = useState<Record<string, StudentPackage>>({});
@@ -244,6 +245,7 @@ export default function TeacherClassDetailPage() {
       const fileHws: Homework[] = [];
       const examLessons: { id: string; title: string; description?: string; date?: string; assigned_to?: string[] | null; exam_status?: "draft" | "open" | "closed"; opens_at?: string }[] = [];
       const currMats: StoredClassMaterial[] = [];
+      const currLecs: StoredClassMaterial[] = [];
       for (const ch of chapters) {
         for (const s of ch.sessions) {
           if (s.date) map[s.date] = s;
@@ -283,6 +285,21 @@ export default function TeacherClassDetailPage() {
                 download_count: 0,
                 kind: "material",
               });
+            } else if (lesson.type === "lecture") {
+              currLecs.push({
+                id: lesson.id,
+                class_id: classId,
+                title: lesson.title,
+                description: lesson.description ?? "",
+                file_url: lesson.video_url ?? "",
+                file_type: "video",
+                file_size: "",
+                category: "lecture",
+                uploaded_by: "",
+                created_at: s.date ?? today,
+                download_count: 0,
+                kind: "lecture",
+              });
             }
           }
         }
@@ -314,6 +331,7 @@ export default function TeacherClassDetailPage() {
       }));
       setCurriculumByDate(map);
       setCurrMaterials(currMats);
+      setCurrLectures(currLecs);
       const currHws = [...fileHws, ...examHws];
       if (currHws.length > 0) {
         setHomeworks(prev => {
@@ -688,7 +706,7 @@ export default function TeacherClassDetailPage() {
 
           {/* ── Lectures ── */}
           {activeTab === "lectures" && (
-            <LecturesTab classId={classId} lectures={lectures} materials={uploadedMaterials} addButton={addButton("lecture", "Thêm bài giảng")} setUploadedMaterials={setUploadedMaterials} />
+            <LecturesTab classId={classId} lectures={lectures} materials={[...uploadedMaterials, ...currLectures]} addButton={addButton("lecture", "Thêm bài giảng")} setUploadedMaterials={setUploadedMaterials} />
           )}
 
           {/* ── Materials ── */}

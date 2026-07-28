@@ -71,14 +71,16 @@ export default function LecturesTab({
                         <Eye className="h-3.5 w-3.5" />
                       </a>
                     )}
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      className="h-8 w-8 text-red-500 hover:text-red-600 hover:bg-red-50"
-                      onClick={async () => { await deleteClassMaterial(lec.id); setUploadedMaterials(await getClassMaterials(classId)); }}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
+                    {lec.id.startsWith("mat_") && (
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-8 w-8 text-red-500 hover:text-red-600 hover:bg-red-50"
+                        onClick={async () => { await deleteClassMaterial(lec.id); setUploadedMaterials(await getClassMaterials(classId)); }}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
                   </div>
                 </div>
               </div>
