@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { validatePassword } from "../../src/lib/validation";
+import {
+  isCompleteStudentProfile,
+  isValidDateOfBirth,
+  normalizeContactPhone,
+  normalizeStudentGrade,
+  validatePassword,
+} from "../../src/lib/validation";
 
 const read = (path: string) => readFile(path, "utf8");
 
@@ -9,6 +15,35 @@ test("password policy rejects weak and accepts strong passwords", () => {
   assert.equal(validatePassword("demo1234"), "password_too_short");
   assert.equal(validatePassword("longbutlowercase1!"), "password_needs_uppercase");
   assert.equal(validatePassword("Valid-Password9"), null);
+});
+
+test("student onboarding validates every required profile field", () => {
+  assert.equal(isValidDateOfBirth("2010-02-28"), true);
+  assert.equal(isValidDateOfBirth("2010-02-30"), false);
+  assert.equal(normalizeStudentGrade("12"), "Lớp 12");
+  assert.equal(normalizeStudentGrade("Lớp 13"), null);
+  assert.equal(normalizeContactPhone("0912 345 678"), "0912345678");
+  assert.equal(normalizeContactPhone("123"), null);
+  assert.equal(
+    isCompleteStudentProfile({
+      full_name: "Nguyễn Văn A",
+      dob: "2010-02-28",
+      school: "THPT Nguyễn Trãi",
+      grade: "Lớp 10",
+      phone: "0912345678",
+    }),
+    true,
+  );
+  assert.equal(
+    isCompleteStudentProfile({
+      full_name: "Nguyễn Văn A",
+      dob: "",
+      school: "THPT Nguyễn Trãi",
+      grade: "Lớp 10",
+      phone: "0912345678",
+    }),
+    false,
+  );
 });
 
 test("login contains no demo-cookie or enrollment password fallback", async () => {
@@ -146,4 +181,28 @@ test("self-service signup creates a blank student without enrollment", async () 
   const proxy = await read("src/proxy.ts");
   assert.match(proxy, /"\/signup"/);
   assert.match(proxy, /"\/forgot-password"/);
+});
+
+test("incomplete student profiles are forced through onboarding", async () => {
+  const proxy = await read("src/proxy.ts");
+  assert.match(proxy, /!identity\.profileComplete/);
+  assert.match(proxy, /"\/student\/onboarding"/);
+
+  const login = await read("src/app/login/page.tsx");
+  assert.match(login, /identity\.role === "student"/);
+  assert.match(login, /!identity\.profileComplete/);
+
+  const identity = await read("src/lib/api-auth.ts");
+  assert.match(identity, /isCompleteStudentProfile/);
+  assert.match(identity, /profileComplete/);
+
+  const onboarding = await read("src/app/student/onboarding/page.tsx");
+  assert.match(onboarding, /\/api\/account\/profile/);
+  assert.match(onboarding, /profile_complete/);
+  assert.match(onboarding, /resetAccountContextCache/);
+
+  const profileRoute = await read("src/app/api/account/profile/route.ts");
+  assert.match(profileRoute, /normalizeContactPhone/);
+  assert.match(profileRoute, /normalizeStudentGrade/);
+  assert.match(profileRoute, /profile_complete/);
 });

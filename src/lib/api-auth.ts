@@ -2,6 +2,7 @@ import "server-only";
 
 import { createServerClient } from "@supabase/ssr";
 import type { NextRequest, NextResponse } from "next/server";
+import { isCompleteStudentProfile } from "@/lib/validation";
 
 export type UserRole = "student" | "parent" | "teacher" | "admin";
 
@@ -14,6 +15,7 @@ export type RequestIdentity = {
   teacherId?: string;
   parentId?: string;
   mustResetPassword: boolean;
+  profileComplete: boolean;
 };
 
 const VALID_ROLES = new Set<UserRole>([
@@ -75,14 +77,39 @@ export async function getRequestIdentity(
   const email = typeof claims.email === "string" ? claims.email : null;
   const metadataRole = claims.app_metadata?.role;
 
-  const loadRoleEntity = async (role: UserRole) => {
+  type RoleEntity = {
+    id: string;
+    fullName: string;
+    dob?: unknown;
+    school?: unknown;
+    grade?: unknown;
+  };
+
+  const loadRoleEntity = async (role: UserRole): Promise<RoleEntity | null> => {
     if (role === "admin") return null;
+    if (role === "student") {
+      const { data } = await supabase
+        .from("students")
+        .select("id, full_name, dob, school, grade")
+        .eq("user_id", userId)
+        .maybeSingle();
+      return data
+        ? {
+            id: String(data.id),
+            fullName: String(
+              data.full_name ?? email?.split("@")[0] ?? "User",
+            ),
+            dob: data.dob,
+            school: data.school,
+            grade: data.grade,
+          }
+        : null;
+    }
+
     const table =
-      role === "student"
-        ? "students"
-        : role === "teacher"
-          ? "teachers"
-          : "parents";
+      role === "teacher"
+        ? "teachers"
+        : "parents";
     const { data } = await supabase
       .from(table)
       .select("id, full_name")
@@ -104,20 +131,24 @@ export async function getRequestIdentity(
   const [profileResult, metadataEntity] = await Promise.all([
     supabase
       .from("profiles")
-      .select("role, must_reset_password")
+      .select("role, must_reset_password, phone")
       .eq("id", userId)
       .maybeSingle(),
     metadataEntityPromise,
   ]);
 
-  let profile: { role?: unknown; must_reset_password?: unknown } | null = null;
+  let profile: {
+    role?: unknown;
+    must_reset_password?: unknown;
+    phone?: unknown;
+  } | null = null;
   if (!profileResult.error) {
     profile = profileResult.data;
   } else {
     // Compatibility before the security migration adds must_reset_password.
     const legacyProfile = await supabase
       .from("profiles")
-      .select("role")
+      .select("role, phone")
       .eq("id", userId)
       .maybeSingle();
     profile = legacyProfile.data;
@@ -136,6 +167,15 @@ export async function getRequestIdentity(
     role: roleCandidate,
     displayName: roleEntity?.fullName ?? email?.split("@")[0] ?? "User",
     mustResetPassword: profile?.must_reset_password === true,
+    profileComplete:
+      roleCandidate !== "student" ||
+      isCompleteStudentProfile({
+        full_name: roleEntity?.fullName,
+        dob: roleEntity?.dob,
+        school: roleEntity?.school,
+        grade: roleEntity?.grade,
+        phone: profile?.phone,
+      }),
   };
 
   if (identity.role === "student") {

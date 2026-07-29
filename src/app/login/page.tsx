@@ -59,10 +59,15 @@ export default function LoginPage() {
       const identity = (await identityResponse.json()) as {
         role: "student" | "parent" | "teacher" | "admin";
         mustResetPassword: boolean;
+        profileComplete: boolean;
       };
       resetAccountContextCache();
       router.push(
-        identity.mustResetPassword ? "/reset-password" : `/${identity.role}`,
+        identity.mustResetPassword
+          ? "/reset-password"
+          : identity.role === "student" && !identity.profileComplete
+            ? "/student/onboarding"
+            : `/${identity.role}`,
       );
       router.refresh();
     } catch {

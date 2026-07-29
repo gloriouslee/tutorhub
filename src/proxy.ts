@@ -132,6 +132,22 @@ export async function proxy(request: NextRequest) {
     return redirectWithCookies(request, ROLE_HOME[identity.role], response);
   }
 
+  if (
+    identity.role === "student" &&
+    !identity.profileComplete &&
+    pathname !== "/student/onboarding"
+  ) {
+    return redirectWithCookies(request, "/student/onboarding", response);
+  }
+
+  if (
+    identity.role === "student" &&
+    identity.profileComplete &&
+    pathname === "/student/onboarding"
+  ) {
+    return redirectWithCookies(request, "/student", response);
+  }
+
   if (pathname === "/" || pathname === "/login") {
     return redirectWithCookies(request, ROLE_HOME[identity.role], response);
   }

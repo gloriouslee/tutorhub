@@ -24,7 +24,7 @@ interface ProfileData {
   dob:          string;
   school:       string;
   grade:        string;
-  parent_phone: string;
+  phone:        string;
   student_id:   string;
   username?:    string;
   from_enrollment: boolean;
@@ -42,10 +42,10 @@ function buildProfile(
       dob:             account.dob,
       school:          account.school,
       grade:           account.grade,
-      parent_phone:    account.parent_phone,
+      phone:            account.phone,
       student_id:      account.student_id,
       username:        account.username,
-      from_enrollment: true,
+      from_enrollment: account.from_enrollment === true,
     };
   }
   return {
@@ -54,7 +54,7 @@ function buildProfile(
     dob:             "",
     school:          "",
     grade:           "",
-    parent_phone:    "",
+    phone:           "",
     student_id:      studentId,
     from_enrollment: false,
   };
@@ -125,6 +125,7 @@ export default function StudentProfilePage() {
         dob: form.dob,
         school: form.school,
         grade: form.grade,
+        phone: form.phone,
       }),
     });
     if (!response.ok) {
@@ -421,12 +422,12 @@ export default function StudentProfilePage() {
 
                     <div className="space-y-1.5">
                       <label className="text-sm font-medium flex items-center gap-2">
-                        <Phone className="h-4 w-4 text-muted-foreground" /> SĐT phụ huynh
+                        <Phone className="h-4 w-4 text-muted-foreground" /> SĐT liên hệ
                       </label>
                       <Input
                         type="tel"
-                        value={form.parent_phone}
-                        onChange={e => handleChange("parent_phone", e.target.value)}
+                        value={form.phone}
+                        onChange={e => handleChange("phone", e.target.value)}
                         className="bg-muted/30"
                       />
                     </div>

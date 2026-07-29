@@ -1090,10 +1090,13 @@ export interface StudentAccount {
   dob: string;
   school: string;
   grade: string;
+  phone: string;
   assigned_class_id: string;
   parent_phone: string;
   username: string;
   created_at: string;
+  from_enrollment?: boolean;
+  profile_complete?: boolean;
 }
 
 export async function getEnrollments(): Promise<EnrollmentRequest[]> {
