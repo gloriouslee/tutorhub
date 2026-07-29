@@ -194,6 +194,17 @@ test("password recovery follows Supabase reset and update flow", async () => {
 
   const callback = await read("src/app/auth/callback/route.ts");
   assert.match(callback, /exchangeCodeForSession/);
+  assert.match(callback, /verifyOtp/);
+  assert.match(callback, /token_hash/);
+  assert.match(callback, /otpType === "recovery"/);
+  assert.match(callback, /\/forgot-password\?error=invalid_or_expired_link/);
+
+  const recoveryTemplate = await read(
+    "supabase/email-templates/recovery.html",
+  );
+  assert.match(recoveryTemplate, /\{\{ \.RedirectTo \}\}/);
+  assert.match(recoveryTemplate, /\{\{ \.TokenHash \}\}/);
+  assert.match(recoveryTemplate, /type=recovery/);
 });
 
 test("self-service signup creates a blank student without enrollment", async () => {
