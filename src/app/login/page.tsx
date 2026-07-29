@@ -10,10 +10,10 @@ import { createClient } from "@/lib/supabase/client";
 import { resetAccountContextCache } from "@/hooks/useAccountContext";
 
 const HIGHLIGHTS = [
-  "Lộ trình học cá nhân hoá theo từng học viên",
+  "Khám phá lớp học của tất cả giáo viên",
   "Học Online, Offline hoặc Hybrid linh hoạt",
-  "Theo dõi điểm danh, bài tập, điểm thi realtime",
-  "Trung tâm liên hệ xếp lớp trong 1–2 ngày",
+  "Xem trước lộ trình và tài liệu đang mở",
+  "Tự đăng ký lớp và chờ giáo viên phụ trách duyệt",
 ];
 
 export default function LoginPage() {
@@ -25,12 +25,10 @@ export default function LoginPage() {
   const [remember, setRemember] = useState(true);
   const [loginLoading, setLoginLoading] = useState(false);
   const [loginError, setLoginError] = useState("");
-  const [loginNotice, setLoginNotice] = useState("");
 
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError("");
-    setLoginNotice("");
     setLoginLoading(true);
 
     try {
@@ -74,30 +72,6 @@ export default function LoginPage() {
     }
   };
 
-  const handleForgotPassword = async () => {
-    setLoginError("");
-    setLoginNotice("");
-    if (!email.trim()) {
-      setLoginError("Vui lòng nhập email trước khi yêu cầu đặt lại mật khẩu.");
-      return;
-    }
-
-    const supabase = createClient();
-    const { error } = await supabase.auth.resetPasswordForEmail(
-      email.trim().toLowerCase(),
-      {
-        redirectTo: `${window.location.origin}/auth/callback?next=/reset-password`,
-      },
-    );
-    if (error) {
-      setLoginError("Không thể gửi email đặt lại mật khẩu. Vui lòng thử lại.");
-      return;
-    }
-    setLoginNotice(
-      "Nếu email tồn tại, hướng dẫn đặt lại mật khẩu đã được gửi.",
-    );
-  };
-
   return (
     <div className="min-h-screen flex flex-col lg:flex-row relative overflow-hidden bg-background">
 
@@ -122,7 +96,7 @@ export default function LoginPage() {
               Bắt đầu hành trình<br />học tập cùng TutorHub
             </h1>
             <p className="text-white/70 text-lg mb-8">
-              Đăng ký nhập học chỉ trong 1 phút. Trung tâm sẽ đánh giá và xếp lớp phù hợp nhất cho học viên.
+              Tạo tài khoản học sinh ngay, xem toàn bộ lớp và tài liệu đang mở rồi chọn lộ trình phù hợp với bạn.
             </p>
 
             <ul className="space-y-3 mb-10">
@@ -133,9 +107,9 @@ export default function LoginPage() {
               ))}
             </ul>
 
-            <Link href="/enroll">
+            <Link href="/signup">
               <Button size="lg" className="bg-white text-indigo-900 hover:bg-white/90 font-bold h-12 px-8">
-                Đăng ký học ngay <ArrowRight className="h-5 w-5 ml-2" />
+                Tạo tài khoản miễn phí <ArrowRight className="h-5 w-5 ml-2" />
               </Button>
             </Link>
           </div>
@@ -169,13 +143,9 @@ export default function LoginPage() {
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
                 <label className="text-sm font-medium text-foreground">Mật khẩu</label>
-                <button
-                  type="button"
-                  onClick={handleForgotPassword}
-                  className="text-xs text-primary hover:underline font-medium"
-                >
+                <Link href="/forgot-password" className="text-xs text-primary hover:underline font-medium">
                   Quên mật khẩu?
-                </button>
+                </Link>
               </div>
               <Input
                 type={showPass ? "text" : "password"}
@@ -208,12 +178,6 @@ export default function LoginPage() {
                 {loginError}
               </div>
             )}
-            {loginNotice && (
-              <div className="text-sm text-emerald-700 bg-emerald-50 dark:bg-emerald-900/20 px-4 py-3 rounded-xl border border-emerald-200 dark:border-emerald-800">
-                {loginNotice}
-              </div>
-            )}
-
             <Button
               type="submit"
               variant="gradient"
@@ -238,8 +202,8 @@ export default function LoginPage() {
           {/* Chưa có tài khoản */}
           <p className="text-center text-sm text-muted-foreground mt-5">
             Chưa có tài khoản?{" "}
-            <Link href="/enroll" prefetch={false} className="text-primary font-semibold hover:underline">
-              Đăng ký học
+            <Link href="/signup" prefetch={false} className="text-primary font-semibold hover:underline">
+              Tạo tài khoản học sinh
             </Link>
           </p>
 

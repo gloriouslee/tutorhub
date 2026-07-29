@@ -198,7 +198,6 @@ interface SidebarProps {
 export default function Sidebar({ role, userName, isOpen = true, onClose }: SidebarProps) {
   const pathname = usePathname();
   const router   = useRouter();
-  const items    = navConfig[role];
   const config   = roleConfig[role];
   // Nhận diện đúng học viên hiện tại từ phiên đăng nhập Supabase.
   const { context: accountContext, ready: contextReady } = useAccountContext();
@@ -206,6 +205,19 @@ export default function Sidebar({ role, userName, isOpen = true, onClose }: Side
   const studentId = accountContext?.role === "student" ? accountContext.studentId : "";
   const myClasses = accountContext?.role === "student" ? accountContext.classes : [];
   const parentChildren = accountContext?.role === "parent" ? accountContext.children : [];
+  const isCatalogOnlyStudent =
+    role === "student"
+    && (
+      !contextReady
+      || accountContext?.role !== "student"
+      || myClasses.length === 0
+    );
+  const items = isCatalogOnlyStudent
+    ? navConfig.student.filter((item) =>
+        item.href === "/student/classes" || item.href === "/student/materials",
+      )
+    : navConfig[role];
+  const homeHref = isCatalogOnlyStudent ? "/student/classes" : `/${role}`;
 
   const [badges, setBadges] = useState<Record<string, number>>({});
 
@@ -259,10 +271,10 @@ export default function Sidebar({ role, userName, isOpen = true, onClose }: Side
         {/* Logo */}
         <div className="flex items-center justify-between h-16 px-5 border-b border-border shrink-0">
           <Link
-            href={`/${role}`}
+            href={homeHref}
             prefetch={false}
-            onMouseEnter={() => router.prefetch(`/${role}`)}
-            onFocus={() => router.prefetch(`/${role}`)}
+            onMouseEnter={() => router.prefetch(homeHref)}
+            onFocus={() => router.prefetch(homeHref)}
             className="flex items-center gap-2.5"
           >
             <div className={`h-8 w-8 rounded-xl bg-gradient-to-br ${config.gradient} flex items-center justify-center shadow-lg`}>

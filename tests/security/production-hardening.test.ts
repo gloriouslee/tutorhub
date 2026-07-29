@@ -105,3 +105,38 @@ test("class catalog only exposes sanitized published outlines", async () => {
   assert.match(catalogRoute, /\.eq\("published", true\)/);
   assert.doesNotMatch(catalogRoute, /video_url|file_url|exam_content/);
 });
+
+test("password recovery follows Supabase reset and update flow", async () => {
+  const forgotPage = await read("src/app/forgot-password/page.tsx");
+  assert.match(forgotPage, /resetPasswordForEmail/);
+  assert.match(
+    forgotPage,
+    /\/auth\/callback\?next=\/update-password/,
+  );
+
+  const updatePage = await read("src/app/update-password/page.tsx");
+  assert.match(updatePage, /auth\.updateUser\(\{ password \}\)/);
+  assert.match(updatePage, /validatePassword/);
+
+  const callback = await read("src/app/auth/callback/route.ts");
+  assert.match(callback, /exchangeCodeForSession/);
+});
+
+test("self-service signup creates a blank student without enrollment", async () => {
+  const signupPage = await read("src/app/signup/page.tsx");
+  assert.match(signupPage, /auth\.signUp/);
+  assert.match(signupPage, /self_service_signup: true/);
+  assert.doesNotMatch(signupPage, /\/api\/enrollments|requested_class_id/);
+
+  const migration = await read(
+    "supabase/migrations/20260729130000_self_service_student_signup.sql",
+  );
+  assert.match(migration, /insert into public\.students/);
+  assert.match(migration, /'stu_' \|\| new\.id::text/);
+  assert.doesNotMatch(migration, /insert into public\.enrollment_requests/);
+  assert.doesNotMatch(migration, /update public\.classes/);
+
+  const proxy = await read("src/proxy.ts");
+  assert.match(proxy, /"\/signup"/);
+  assert.match(proxy, /"\/forgot-password"/);
+});

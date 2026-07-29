@@ -1,7 +1,13 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getRequestIdentity, type UserRole } from "@/lib/api-auth";
 
-const PUBLIC_ROUTES = new Set(["/login", "/enroll", "/auth/callback"]);
+const PUBLIC_ROUTES = new Set([
+  "/login",
+  "/signup",
+  "/forgot-password",
+  "/enroll",
+  "/auth/callback",
+]);
 const ROLE_HOME: Record<UserRole, string> = {
   student: "/student",
   parent: "/parent",
@@ -94,7 +100,12 @@ export async function proxy(request: NextRequest) {
 
   // These routes never need a role lookup. The callback validates its own code,
   // while enrollment is intentionally public.
-  if (pathname === "/enroll" || pathname === "/auth/callback") return response;
+  if (
+    pathname === "/signup"
+    || pathname === "/forgot-password"
+    || pathname === "/enroll"
+    || pathname === "/auth/callback"
+  ) return response;
 
   // No session cookie means there is nothing for Supabase to validate. Keep the
   // login page fast and redirect protected pages without a network round trip.

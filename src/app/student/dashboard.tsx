@@ -20,6 +20,7 @@ import { getSubmissionsByStudent } from "@/lib/supabase/submissions";
 import Link from "next/link";
 import { formatDate, mapWithConcurrency } from "@/lib/utils";
 import { useStudentContext } from "@/hooks/useStudentContext";
+import { useRouter } from "next/navigation";
 import { AreaChart, Area, Tooltip, ResponsiveContainer } from "recharts";
 import type { Class } from "@/types";
 
@@ -92,6 +93,7 @@ function buildAttendanceChart(records: TeacherAttendanceRecord[]) {
 
 export default function StudentDashboard() {
   const { studentId, studentName, myClasses, ready } = useStudentContext();
+  const router = useRouter();
   const [avgScore,       setAvgScore]       = useState<string | null>(null);
   const [attendanceRate, setAttendanceRate] = useState<number | null>(null);
   const [unreadCount,    setUnreadCount]    = useState(0);
@@ -100,6 +102,12 @@ export default function StudentDashboard() {
   const [attendanceChartData, setAttendanceChartData] = useState<
     { month: string; present: number }[]
   >([]);
+
+  useEffect(() => {
+    if (ready && myClasses.length === 0) {
+      router.replace("/student/classes");
+    }
+  }, [myClasses.length, ready, router]);
 
   useEffect(() => {
     if (!ready) return;
