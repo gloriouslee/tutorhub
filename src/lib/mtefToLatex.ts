@@ -488,7 +488,10 @@ function escapeCharLatex(code: number, typeface: number): string {
     return " ";
   // Private-use glyph (MathType font riêng) không map được → placeholder ▢ hiển thị
   // rõ để giáo viên sửa đúng điểm đó, thay vì bỏ nguyên công thức.
-  if (typeface >= 0 && code >= 0xe000 && code <= 0xf8ff) return "\\square ";
+  // Ký tự vùng Private-Use (font riêng của MathType) hầu như luôn là glyph
+  // khoảng trắng/trang trí — KHÔNG phải ký hiệu toán (ký hiệu thật lưu bằng
+  // Unicode chuẩn, đã map ở SYMBOLS/GREEK). Bỏ đi thay vì chèn \square gây "ô lạ".
+  if (typeface >= 0 && code >= 0xe000 && code <= 0xf8ff) return "";
   return ch;
 }
 
