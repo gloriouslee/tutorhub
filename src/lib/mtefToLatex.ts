@@ -486,8 +486,9 @@ function escapeCharLatex(code: number, typeface: number): string {
   if (code >= 0x20 && code < 0x7f) return ch;
   if (code === 0xa0 || code === 0x2009 || code === 0x200a || code === 0x2005)
     return " ";
-  // ký tự lạ: giữ nguyên Unicode (KaTeX hiển thị được khá nhiều) + đánh dấu mềm
-  if (typeface >= 0 && code >= 0xe000 && code <= 0xf8ff) return "??"; // private use — chịu
+  // Private-use glyph (MathType font riêng) không map được → placeholder ▢ hiển thị
+  // rõ để giáo viên sửa đúng điểm đó, thay vì bỏ nguyên công thức.
+  if (typeface >= 0 && code >= 0xe000 && code <= 0xf8ff) return "\\square ";
   return ch;
 }
 
