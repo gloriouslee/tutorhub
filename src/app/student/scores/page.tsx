@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { SectionHeader, ProgressBar } from "@/components/shared";
 import { GraduationCap, TrendingUp, Trophy, Target, BookOpen, ChevronDown, Pencil, Check, X } from "lucide-react";
 import { useStudentContext } from "@/hooks/useStudentContext";
-import { getExamScoresByStudent, getCurriculum, getExamResult, type StoredExamScore } from "@/lib/storage";
+import { getExamScoresByStudent, getStudentCurriculum, getExamResult, type StoredExamScore } from "@/lib/storage";
 import { formatDate } from "@/lib/utils";
 import {
   ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
@@ -62,12 +62,12 @@ export default function StudentScoresPage() {
     } catch {}
     getExamScoresByStudent(studentId).then(setStoredScores);
 
-    // Merge results from exams the student actually took — đọc qua storage
-    // (kv-routed) thay vì quét raw localStorage. Mỗi lớp chỉ gọi getCurriculum 1 lần.
+    // Merge results from exams the student actually took using the scoped
+    // curriculum endpoint; class requests run in parallel.
     (async () => {
       const found: StoredExamScore[] = [];
-      for (const cls of myClasses) {
-        const chapters = await getCurriculum(cls.id);
+      const classResults = await Promise.all(myClasses.map(async (cls) => {
+        const chapters = await getStudentCurriculum(cls.id);
         const examLessons = chapters
           .flatMap(ch => ch.sessions)
           .flatMap(sess => sess.lessons)
@@ -75,12 +75,13 @@ export default function StudentScoresPage() {
         const results = await Promise.all(
           examLessons.map(l => getExamResult(cls.id, l.id, studentId))
         );
+        const scores: StoredExamScore[] = [];
         examLessons.forEach((lesson, i) => {
           const rec = results[i];
           if (!rec) return;
           // Điểm hiển thị = tự động + điểm chấm tay (tự luận), giống trang làm bài
           const manualSum = Object.values(rec.manual_scores ?? {}).reduce((a, b) => a + b, 0);
-          found.push({
+          scores.push({
             id:         `tutorhub_exam_result_${cls.id}_${lesson.id}_${studentId}`,
             student_id: studentId,
             class_id:   cls.id,
@@ -90,7 +91,9 @@ export default function StudentScoresPage() {
             exam_date:  rec.submitted_at,
           });
         });
-      }
+        return scores;
+      }));
+      found.push(...classResults.flat());
       setTakenExams(found);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps

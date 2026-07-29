@@ -125,7 +125,7 @@ export async function POST(
       submitted: true,
       result,
       show_solution_after_submit: showSolution,
-      questions: showSolution ? questions : sanitizeQuestions(questions),
+      questions: sanitizeQuestions(questions, showSolution),
     });
   } catch (e) {
     logEvent("error", "exam.submit_failed", {

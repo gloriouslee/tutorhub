@@ -373,3 +373,81 @@ test("teacher profile, schedule and submissions use canonical stores", async () 
   assert.match(submissionStore, /\.from\("hw_submissions"\)/);
   assert.doesNotMatch(submissionStore, /\.from\("submissions"\)/);
 });
+
+test("student portal keeps paid material, submissions and progress server-scoped", async () => {
+  const migration = await read(
+    "supabase/migrations/20260730100000_student_portal_hardening.sql",
+  );
+  const materialsRoute = await read("src/app/api/student/materials/route.ts");
+  const curriculumRoute = await read(
+    "src/app/api/student/curriculum/[classId]/route.ts",
+  );
+  const progressRoute = await read("src/app/api/student/progress/route.ts");
+  const classPage = await read("src/app/student/classes/[classId]/page.tsx");
+  const player = await read("src/components/student/PlayerView.tsx");
+
+  assert.match(migration, /drop policy if exists class_materials_student_download/);
+  assert.match(migration, /teacher_id = public\.my_teacher_id\(\)/);
+  assert.doesNotMatch(migration, /teacher_materials_read[\s\S]{0,160}published/);
+  assert.match(migration, /\(storage\.foldername\(name\)\)\[3\] = public\.my_student_id\(\)/);
+  assert.match(migration, /create table if not exists public\.student_lesson_progress/);
+  assert.match(materialsRoute, /access_granted: canAccessFull/);
+  assert.match(materialsRoute, /videoUrl: _videoUrl/);
+  assert.match(curriculumRoute, /\.contains\("student_ids", \[actor\.studentId\]\)/);
+  assert.match(curriculumRoute, /questions: _questions/);
+  assert.match(progressRoute, /actor\?\.role !== "student"/);
+  assert.match(classPage, /getStudentCurriculum/);
+  assert.match(classPage, /getStudentLessonProgress/);
+  assert.doesNotMatch(classPage, /tutorhub_watched|getCurriculum\(/);
+  assert.match(player, /saveStudentLessonProgress/);
+  assert.match(player, /youtube-nocookie\.com/);
+  assert.doesNotMatch(player, /Chức năng thảo luận đang được phát triển/);
+});
+
+test("student receipts and notification state are durable", async () => {
+  const receipts = await read("src/app/api/payments/receipts/route.ts");
+  const transactions = await read("src/app/api/payments/transactions/route.ts");
+  const invoices = await read("src/app/api/payments/invoices/route.ts");
+  const paymentsPage = await read("src/app/student/payments/page.tsx");
+  const notificationsPage = await read("src/app/student/notifications/page.tsx");
+  const homeworkPage = await read("src/app/student/homework/page.tsx");
+
+  assert.match(receipts, /\.from\("payment-receipts"\)\s*\.upload/);
+  assert.match(transactions, /receipt_path: body\.receipt_path/);
+  assert.match(transactions, /target_role: "teacher"/);
+  assert.match(invoices, /submit_invoice_receipt_secure/);
+  assert.match(paymentsPage, /\/api\/payments\/receipts/);
+  assert.match(paymentsPage, /submitInvoiceReceipt/);
+  assert.doesNotMatch(paymentsPage, /addNotification|target_role:\s*"admin"/);
+  assert.match(notificationsPage, /getNotificationStates/);
+  assert.match(notificationsPage, /markNotificationState/);
+  assert.doesNotMatch(notificationsPage, /localStorage|tutorhub_notif_read/);
+  assert.doesNotMatch(homeworkPage, /saveLocalSub|local-\$\{Date\.now/);
+  assert.match(homeworkPage, /if \(!uploaded\?\.url\)/);
+});
+
+test("exam HTML is sanitized before student delivery", async () => {
+  const server = await read("src/lib/exam-server.ts");
+  const examRoute = await read("src/app/api/exam/[classId]/[lessonId]/route.ts");
+  const submitRoute = await read(
+    "src/app/api/exam/[classId]/[lessonId]/submit/route.ts",
+  );
+
+  assert.match(server, /import sanitizeHtml from "sanitize-html"/);
+  assert.match(server, /content_html: cleanExamHtml/);
+  assert.match(server, /options: safe\.options\?\.map/);
+  assert.match(examRoute, /sanitizeQuestions\(questions, showSolution\)/);
+  assert.match(submitRoute, /sanitizeQuestions\(questions, showSolution\)/);
+});
+
+test("student class and material screens avoid known sequential request waterfalls", async () => {
+  const classesPage = await read("src/app/student/classes/page.tsx");
+  const scoresPage = await read("src/app/student/scores/page.tsx");
+  const browseView = await read("src/components/student/BrowseView.tsx");
+
+  assert.doesNotMatch(classesPage, /getOnlineLink|for \(const cls of myClasses\)/);
+  assert.match(classesPage, /const liveLink = cls\.zoom_link/);
+  assert.match(scoresPage, /Promise\.all\(myClasses\.map/);
+  assert.match(browseView, /getStudentPackagesForClasses/);
+  assert.match(browseView, /Promise\.all\(pkgIds\.map/);
+});

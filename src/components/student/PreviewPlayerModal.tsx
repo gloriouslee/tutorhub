@@ -1,8 +1,36 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { PlayCircle, Clock, Download, X, Eye, ShoppingCart } from "lucide-react";
+import { PlayCircle, Download, X, Eye, ShoppingCart } from "lucide-react";
 import { LessonIcon, type PaidLesson } from "./materialsShared";
+
+function safeMediaUrl(value?: string) {
+  if (!value) return null;
+  if (value.startsWith("/api/files?")) return value;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" || url.protocol === "http:" ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+function youtubeEmbedUrl(value?: string) {
+  const safe = safeMediaUrl(value);
+  if (!safe || safe.startsWith("/")) return null;
+  try {
+    const url = new URL(safe);
+    const host = url.hostname.replace(/^www\./, "");
+    const id = host === "youtu.be"
+      ? url.pathname.split("/").filter(Boolean)[0]
+      : (host === "youtube.com" || host === "m.youtube.com")
+        ? url.searchParams.get("v") || url.pathname.match(/^\/(?:embed|shorts)\/([^/]+)/)?.[1]
+        : null;
+    return id ? `https://www.youtube-nocookie.com/embed/${encodeURIComponent(id)}` : null;
+  } catch {
+    return null;
+  }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Preview player modal (for paid package preview lessons)
@@ -36,26 +64,37 @@ export default function PreviewPlayerModal({
         {/* Player area */}
         {lesson.type === "video" ? (
           <div className="bg-black flex items-center justify-center" style={{ height: 300 }}>
-            <div className="flex flex-col items-center gap-3">
-              <div className="w-16 h-16 rounded-full border-2 border-white/40 bg-white/10 flex items-center justify-center cursor-pointer hover:bg-white/20 transition-colors">
-                <PlayCircle className="h-8 w-8 text-white ml-0.5" />
+            {youtubeEmbedUrl(lesson.videoUrl) ? (
+              <iframe
+                className="h-full w-full"
+                src={youtubeEmbedUrl(lesson.videoUrl)!}
+                title={lesson.title}
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowFullScreen
+              />
+            ) : safeMediaUrl(lesson.videoUrl) ? (
+              <video className="h-full w-full" controls preload="metadata" src={safeMediaUrl(lesson.videoUrl)!} />
+            ) : (
+              <div className="flex flex-col items-center gap-3 text-white/60">
+                <PlayCircle className="h-10 w-10" />
+                <span className="text-sm">Chưa có video xem thử</span>
               </div>
-              <span className="text-white/60 text-sm">{lesson.title}</span>
-              {lesson.duration && (
-                <span className="text-white/40 text-xs flex items-center gap-1">
-                  <Clock className="h-3 w-3" />{lesson.duration}
-                </span>
-              )}
-            </div>
+            )}
           </div>
         ) : (
           <div className="bg-muted/20 flex items-center justify-center" style={{ height: 200 }}>
             <div className="flex flex-col items-center gap-2 text-muted-foreground">
               <LessonIcon type={lesson.type} className="h-10 w-10" />
               <span className="text-sm">{lesson.type === "pdf" ? "Xem trước PDF" : "Bài tập thực hành"}</span>
-              <Button size="sm" variant="outline" className="mt-2 gap-1.5 text-xs">
-                <Download className="h-3.5 w-3.5" /> Tải xuống bản xem thử
-              </Button>
+              {safeMediaUrl(lesson.fileUrl) ? (
+                <Button size="sm" variant="outline" className="mt-2 gap-1.5 text-xs" asChild>
+                  <a href={safeMediaUrl(lesson.fileUrl)!} target="_blank" rel="noopener noreferrer">
+                    <Download className="h-3.5 w-3.5" /> Tải xuống bản xem thử
+                  </a>
+                </Button>
+              ) : (
+                <span className="text-xs">Chưa có file xem thử</span>
+              )}
             </div>
           </div>
         )}

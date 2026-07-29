@@ -11,6 +11,7 @@ import { SectionHeader } from "@/components/shared";
 import { getStudentAccounts, changeStudentPassword, type StudentAccount } from "@/lib/storage";
 import { useStudentContext } from "@/hooks/useStudentContext";
 import { createClient } from "@/lib/supabase/client";
+import { uploadProfileAsset } from "@/lib/upload";
 import {
   User, Mail, Phone, BookOpen, Shield, Key, Camera,
   GraduationCap, Calendar, CheckCircle2, Save, RotateCcw,
@@ -85,9 +86,7 @@ export default function StudentProfilePage() {
       const acc = accounts.find(a => a.student_id === studentId) ?? null;
       setAccount(acc);
       setForm(buildProfile(acc, studentId, studentName));
-      try {
-        setAvatarUrl(localStorage.getItem(`tutorhub_avatar_${studentId}`));
-      } catch { /* ignore */ }
+      setAvatarUrl(acc?.avatar_url || null);
       setLoaded(true);
     })();
   }, [studentId, studentName]);
@@ -185,24 +184,26 @@ export default function StudentProfilePage() {
   async function handleAvatarPick(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-    // Hiển thị ngay bằng blob tạm, upload lên bucket avatars phía sau
-    setAvatarUrl(URL.createObjectURL(file));
+    const temporaryUrl = URL.createObjectURL(file);
+    setAvatarUrl(temporaryUrl);
     try {
-      const supabase = createClient();
-      const ext = file.name.split(".").pop() ?? "png";
-      const { data: userData } = await supabase.auth.getUser();
-      if (!userData.user) return;
-      const path = `${userData.user.id}/${Date.now()}.${ext}`;
-      const { data, error } = await supabase.storage
-        .from("avatars")
-        .upload(path, file, { upsert: true, contentType: file.type });
-      if (error || !data) return;
-      const { data: signed } = await supabase.storage
-        .from("avatars")
-        .createSignedUrl(data.path, 60 * 60);
-      if (!signed?.signedUrl) return;
-      setAvatarUrl(signed.signedUrl);
-    } catch { /* offline — giữ blob tạm cho phiên hiện tại */ }
+      if (!file.type.startsWith("image/") || file.size > 5 * 1024 * 1024) {
+        throw new Error("Ảnh đại diện phải là ảnh và không vượt quá 5 MB.");
+      }
+      const uploaded = await uploadProfileAsset(file, "avatar");
+      const response = await fetch("/api/account/profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ avatar_url: uploaded.url }),
+      });
+      if (!response.ok) throw new Error("Không thể lưu ảnh đại diện.");
+      setAvatarUrl(uploaded.url);
+      setAccount(prev => prev ? { ...prev, avatar_url: uploaded.url } : prev);
+    } catch {
+      setAvatarUrl(account?.avatar_url || null);
+    } finally {
+      URL.revokeObjectURL(temporaryUrl);
+    }
   }
 
   return (

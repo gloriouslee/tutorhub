@@ -8,8 +8,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { SectionHeader } from "@/components/shared";
 import {
-  createTransaction, getTransactions, getInvoices, updateInvoiceStatus,
-  getTeacherSettings, addNotification,
+  createTransaction, getTransactions, getInvoices, submitInvoiceReceipt,
+  getTeacherSettings,
   type PurchaseTransaction, type TuitionInvoice, type TeacherSettings,
 } from "@/lib/storage";
 import {
@@ -56,6 +56,7 @@ function PaymentsContent() {
   const [modalTarget,    setModalTarget]     = useState<ModalTarget | null>(null);
   const [receiptFile,    setReceiptFile]     = useState<File | null>(null);
   const [submitting,     setSubmitting]      = useState(false);
+  const [submitError,    setSubmitError]     = useState("");
   // QR + thông tin ngân hàng do giáo viên của học sinh cấu hình (Cài đặt).
   const [teacherQR,      setTeacherQR]       = useState<TeacherSettings>({});
   useEffect(() => {
@@ -88,45 +89,63 @@ function PaymentsContent() {
   const reload = () =>
     getTransactions().then(txs => setPkgTransactions(txs.filter(t => t.student_id === studentId)));
 
-  const closeModal = () => { setModalTarget(null); setReceiptFile(null); };
+  const closeModal = () => {
+    setModalTarget(null);
+    setReceiptFile(null);
+    setSubmitError("");
+  };
 
   const handleConfirm = async () => {
     if (!modalTarget || modalTarget.kind === "policy") return;
     if (!receiptFile) return;
     setSubmitting(true);
-    await new Promise(r => setTimeout(r, 600));
+    setSubmitError("");
 
-    if (modalTarget.kind === "invoice") {
-      await updateInvoiceStatus(
-        modalTarget.invoice.id, "pending_verification", "student",
-        modalTarget.invoice.id === "ALL" ? studentId : undefined,
-      );
-      const list = await getInvoices();
-      setInvoices(list.filter(inv => inv.child_id === studentId));
-      await addNotification({
-        title: "Học viên nộp học phí",
-        content: `${studentName} đã gửi biên lai học phí (${formatVND(modalAmt)}) — chờ xác nhận.`,
-        target_role: "admin", category: "system", sent_by: studentName,
+    try {
+      if (receiptFile.size > 10 * 1024 * 1024) {
+        throw new Error("Biên lai không được vượt quá 10 MB.");
+      }
+      const form = new FormData();
+      form.append("file", receiptFile);
+      const uploadResponse = await fetch("/api/payments/receipts", {
+        method: "POST",
+        body: form,
       });
-    } else {
-      await createTransaction({
-        pkg_id:        modalTarget.pkgId,
-        pkg_title:     modalTarget.title,
-        amount:        modalTarget.amount,
-        student_id:    studentId,
-        student_name:  studentName,
-        student_email: "",
-        transfer_note: `TUTORHUB ${modalTarget.pkgId.toUpperCase()} ${studentId}`,
-      });
-      await addNotification({
-        title: "Giao dịch mua tài liệu",
-        content: `${studentName} đã tạo giao dịch mua "${modalTarget.title}" (${formatVND(modalTarget.amount)}) — chờ duyệt.`,
-        target_role: "admin", category: "system", sent_by: studentName,
-      });
-      reload();
+      const uploaded = await uploadResponse.json().catch(() => ({})) as {
+        path?: string;
+        error?: string;
+      };
+      if (!uploadResponse.ok || !uploaded.path) {
+        throw new Error(uploaded.error || "Không thể tải biên lai lên.");
+      }
+
+      if (modalTarget.kind === "invoice") {
+        await submitInvoiceReceipt(
+          modalTarget.invoice.id,
+          modalTarget.invoice.id === "ALL" ? studentId : undefined,
+          uploaded.path,
+        );
+        const list = await getInvoices();
+        setInvoices(list.filter(inv => inv.child_id === studentId));
+      } else {
+        await createTransaction({
+          pkg_id: modalTarget.pkgId,
+          pkg_title: modalTarget.title,
+          amount: modalTarget.amount,
+          student_id: studentId,
+          student_name: studentName,
+          student_email: "",
+          receipt_path: uploaded.path,
+          transfer_note: `TUTORHUB ${modalTarget.pkgId.toUpperCase()} ${studentId}`,
+        });
+        await reload();
+      }
+      closeModal();
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : "Không thể gửi biên lai.");
+    } finally {
+      setSubmitting(false);
     }
-    setSubmitting(false);
-    closeModal();
   };
 
   // ── Derived ─────────────────────────────────────────────────────────────────
@@ -460,6 +479,9 @@ function PaymentsContent() {
                         </span>
                       </div>
                     </div>
+                    {submitError && (
+                      <p className="text-sm text-red-600" role="alert">{submitError}</p>
+                    )}
                   </div>
                   )}
 
@@ -495,7 +517,7 @@ function PaymentsContent() {
                     <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
                     <p className="leading-relaxed">
                       <strong>Lưu ý:</strong> Nhập đúng nội dung chuyển khoản để hệ thống xác nhận nhanh hơn.
-                      Admin sẽ đối soát trong vòng 1–4 giờ (giờ hành chính).
+                      Giáo viên phụ trách sẽ đối soát biên lai.
                     </p>
                   </div>
                 </div>

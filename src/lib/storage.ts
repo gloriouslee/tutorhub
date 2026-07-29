@@ -437,6 +437,18 @@ export async function getTeacherMaterials<T = Record<string, unknown>>(
   if (error) { console.error("getTeacherMaterials:", error); return []; }
   return (data ?? []).map(r => r.data as T);
 }
+
+/** Filtered material catalog for the signed-in student.
+ * Raw teacher_materials rows contain paid URLs and are intentionally not
+ * selectable by student JWTs. */
+export async function getStudentMaterials<T = Record<string, unknown>>(): Promise<T[]> {
+  const response = await fetch("/api/student/materials", {
+    cache: "no-store",
+    credentials: "same-origin",
+  });
+  if (!response.ok) throw new Error("Không thể tải tài liệu học viên.");
+  return response.json() as Promise<T[]>;
+}
 // Replace this teacher's catalog without a delete-first window. New/updated
 // rows are persisted before stale rows are removed, so a failed upsert cannot
 // erase the teacher's existing catalog.
@@ -758,6 +770,7 @@ export interface PurchaseTransaction {
   student_email: string;
   class_id?: string;
   teacher_id?: string;
+  receipt_path?: string;
   transfer_note: string;
   status: TxStatus;
   created_at: string;
@@ -790,7 +803,11 @@ export async function createTransaction(
   const response = await fetch("/api/payments/transactions", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ pkg_id: tx.pkg_id, transfer_note: tx.transfer_note }),
+    body: JSON.stringify({
+      pkg_id: tx.pkg_id,
+      transfer_note: tx.transfer_note,
+      receipt_path: tx.receipt_path,
+    }),
   });
   const result = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(result.error || "Không thể tạo giao dịch.");
@@ -919,6 +936,53 @@ export function isLessonVisibleToStudent(lesson: CurriculumLesson, studentId: st
 
 export async function getCurriculum(classId: string): Promise<CurriculumChapter[]> {
   return kvGet<CurriculumChapter[]>(`tutorhub_curriculum_${classId}`, []);
+}
+
+/** Published, assigned and answer-free curriculum for the signed-in student. */
+export async function getStudentCurriculum(classId: string): Promise<CurriculumChapter[]> {
+  const response = await fetch(
+    `/api/student/curriculum/${encodeURIComponent(classId)}`,
+    { cache: "no-store", credentials: "same-origin" },
+  );
+  if (!response.ok) return [];
+  return response.json() as Promise<CurriculumChapter[]>;
+}
+
+export interface StudentLessonProgress {
+  lesson_id: string;
+  completed: boolean;
+  notes: string;
+  updated_at: string;
+}
+
+export async function getStudentLessonProgress(
+  resourceId: string,
+): Promise<StudentLessonProgress[]> {
+  const response = await fetch(
+    `/api/student/progress?resource_id=${encodeURIComponent(resourceId)}`,
+    { cache: "no-store", credentials: "same-origin" },
+  );
+  if (!response.ok) return [];
+  return response.json() as Promise<StudentLessonProgress[]>;
+}
+
+export async function saveStudentLessonProgress(
+  resourceId: string,
+  lessonId: string,
+  patch: { completed?: boolean; notes?: string },
+): Promise<StudentLessonProgress> {
+  const response = await fetch("/api/student/progress", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      resource_id: resourceId,
+      lesson_id: lessonId,
+      completed: patch.completed === true,
+      notes: patch.notes ?? "",
+    }),
+  });
+  if (!response.ok) throw new Error("Không thể lưu tiến độ học tập.");
+  return response.json() as Promise<StudentLessonProgress>;
 }
 
 export async function saveCurriculum(classId: string, curriculum: CurriculumChapter[]): Promise<void> {
@@ -1105,6 +1169,27 @@ export async function updateInvoiceStatus(
 }
 
 /** Giáo viên phát hành hóa đơn học phí cho một học sinh trong lớp (idempotent theo id). */
+export async function submitInvoiceReceipt(
+  invoiceId: string,
+  childId: string | undefined,
+  receiptPath: string,
+): Promise<void> {
+  const response = await fetch("/api/payments/invoices", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      invoice_id: invoiceId,
+      child_id: childId,
+      action: "submit_receipt",
+      receipt_path: receiptPath,
+    }),
+  });
+  if (!response.ok) {
+    const result = await response.json().catch(() => ({}));
+    throw new Error(result.error || "Không thể gửi biên lai học phí.");
+  }
+}
+
 export async function issueTuitionInvoice(params: {
   classId: string;
   className: string;
@@ -1178,6 +1263,7 @@ export interface StudentAccount {
   grade: string;
   phone: string;
   username: string;
+  avatar_url?: string;
   created_at: string;
   profile_complete?: boolean;
 }
@@ -1317,13 +1403,11 @@ export async function deleteClassMaterial(materialId: string): Promise<void> {
 }
 
 export async function incrementMaterialDownload(materialId: string): Promise<void> {
-  const { data } = await supabase
-    .from("class_materials")
-    .select("download_count")
-    .eq("id", materialId)
-    .maybeSingle();
-  const current = (data?.download_count ?? 0) as number;
-  await supabase.from("class_materials").update({ download_count: current + 1 }).eq("id", materialId);
+  const response = await fetch(
+    `/api/class-materials/${encodeURIComponent(materialId)}/download`,
+    { method: "POST" },
+  );
+  if (!response.ok) throw new Error("Không thể ghi nhận lượt tải.");
 }
 
 // ── Homework file attachments (localStorage) ──────────────────────────────────

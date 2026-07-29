@@ -10,6 +10,7 @@ import type {
   StoredExamResult,
 } from "@/lib/storage";
 import { calcAutoScore, calcMaxScore, type StudentAnswer, type TrueFalseScale } from "@/lib/exam-scoring";
+import sanitizeHtml from "sanitize-html";
 export type { StudentAnswer };
 
 export function getServiceKey(): string | null {
@@ -111,14 +112,48 @@ export type SanitizedQuestion = Omit<
   "correct_option" | "correct_value" | "statements" | "answer_html" | "explanation_html"
 > & { statements?: { text: string }[] };
 
-export function sanitizeQuestions(questions: ExamQuestion[]): SanitizedQuestion[] {
+function cleanExamHtml(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  return sanitizeHtml(value, {
+    allowedTags: [
+      ...sanitizeHtml.defaults.allowedTags,
+      "img", "u", "s", "sub", "sup",
+    ],
+    allowedAttributes: {
+      ...sanitizeHtml.defaults.allowedAttributes,
+      a: ["href", "target", "rel"],
+      img: ["src", "alt", "width", "height"],
+      span: ["class"],
+      p: ["class"],
+    },
+    allowedSchemes: ["http", "https", "data"],
+    allowProtocolRelative: false,
+  });
+}
+
+export function sanitizeQuestions(
+  questions: ExamQuestion[],
+  includeAnswers = false,
+): SanitizedQuestion[] {
   return questions.map(q => {
     const { correct_option, correct_value, statements, answer_html, explanation_html, ...safe } = q;
-    void correct_option; void correct_value; void answer_html; void explanation_html;
-    return {
+    const sanitized = {
       ...safe,
-      ...(statements ? { statements: statements.map(st => ({ text: st.text })) } : {}),
+      content_html: cleanExamHtml(safe.content_html) ?? "",
+      options: safe.options?.map(option => cleanExamHtml(option) ?? ""),
+      ...(statements ? {
+        statements: statements.map(st => includeAnswers
+          ? { text: cleanExamHtml(st.text) ?? "", correct: st.correct }
+          : { text: cleanExamHtml(st.text) ?? "" }),
+      } : {}),
+      ...(includeAnswers ? {
+        correct_option,
+        correct_value,
+        answer_html: cleanExamHtml(answer_html),
+        explanation_html: cleanExamHtml(explanation_html),
+      } : {}),
     };
+    return sanitized as SanitizedQuestion;
   });
 }
 

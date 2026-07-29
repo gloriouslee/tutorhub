@@ -1,13 +1,42 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   PlayCircle, FileText, Pencil, Download, CheckCircle2,
   ChevronDown, ChevronRight, BookOpen, Clock, StickyNote,
-  MessageSquare, Check, ArrowLeft, Lock, Eye,
+  Check, ArrowLeft, Lock, Eye, ExternalLink,
 } from "lucide-react";
 import { LessonIcon, TypeBadge, type OwnedCourse } from "./materialsShared";
+import { getStudentLessonProgress, saveStudentLessonProgress } from "@/lib/storage";
+
+function safeMediaUrl(value?: string) {
+  if (!value) return null;
+  if (value.startsWith("/api/files?")) return value;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" || url.protocol === "http:" ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+function youtubeEmbedUrl(value?: string) {
+  const safe = safeMediaUrl(value);
+  if (!safe || safe.startsWith("/")) return null;
+  try {
+    const url = new URL(safe);
+    const host = url.hostname.replace(/^www\./, "");
+    const id = host === "youtu.be"
+      ? url.pathname.split("/").filter(Boolean)[0]
+      : (host === "youtube.com" || host === "m.youtube.com")
+        ? url.searchParams.get("v") || url.pathname.match(/^\/(?:embed|shorts)\/([^/]+)/)?.[1]
+        : null;
+    return id ? `https://www.youtube-nocookie.com/embed/${encodeURIComponent(id)}` : null;
+  } catch {
+    return null;
+  }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Player view (owned courses)
@@ -42,10 +71,17 @@ function PlayerViewInner({ course, isPackageLocked, onBack }: { course: OwnedCou
   const firstAccessible = effectiveLessons.find(l => l.status !== "locked") ?? effectiveLessons[0];
   const [selectedId, setSelectedId] = useState(firstAccessible.id);
   const [openChapters, setOpenChapters] = useState<string[]>([course.chapters[0].id]);
-  const [activeTab, setActiveTab] = useState<"files" | "discuss">("files");
   const [completedIds, setCompletedIds] = useState<string[]>(
     effectiveLessons.filter(l => l.status === "done").map(l => l.id)
   );
+  const [notes, setNotes] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    getStudentLessonProgress(course.id).then(items => {
+      setCompletedIds(items.filter(item => item.completed).map(item => item.lesson_id));
+      setNotes(Object.fromEntries(items.map(item => [item.lesson_id, item.notes ?? ""])));
+    });
+  }, [course.id]);
 
   const selected = effectiveLessons.find(l => l.id === selectedId)!;
   const selectedIdx = effectiveLessons.findIndex(l => l.id === selectedId);
@@ -55,8 +91,12 @@ function PlayerViewInner({ course, isPackageLocked, onBack }: { course: OwnedCou
   const toggleChapter = (id: string) =>
     setOpenChapters(prev => prev.includes(id) ? prev.filter(c => c !== id) : [...prev, id]);
 
-  const markDone = () => {
+  const markDone = async () => {
     if (!completedIds.includes(selectedId)) setCompletedIds(prev => [...prev, selectedId]);
+    await saveStudentLessonProgress(course.id, selectedId, {
+      completed: true,
+      notes: notes[selectedId] ?? "",
+    });
     if (nextLesson) setSelectedId(nextLesson.id);
   };
 
@@ -100,12 +140,22 @@ function PlayerViewInner({ course, isPackageLocked, onBack }: { course: OwnedCou
           )}
           {selected.type === "video" ? (
             <div className="bg-black flex items-center justify-center relative" style={{ height: 280 }}>
-              <div className="flex flex-col items-center gap-3">
-                <div className="w-14 h-14 rounded-full border-2 border-white/40 bg-white/10 flex items-center justify-center cursor-pointer hover:bg-white/20 transition-colors">
-                  <PlayCircle className="h-7 w-7 text-white ml-0.5" />
+              {youtubeEmbedUrl(selected.videoUrl) ? (
+                <iframe
+                  className="h-full w-full"
+                  src={youtubeEmbedUrl(selected.videoUrl)!}
+                  title={selected.title}
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  allowFullScreen
+                />
+              ) : safeMediaUrl(selected.videoUrl) ? (
+                <video className="h-full w-full" controls preload="metadata" src={safeMediaUrl(selected.videoUrl)!} />
+              ) : (
+                <div className="flex flex-col items-center gap-3 text-white/60">
+                  <PlayCircle className="h-10 w-10" />
+                  <span className="text-sm">Giáo viên chưa đính kèm video</span>
                 </div>
-                <span className="text-white/60 text-sm">{selected.title}</span>
-              </div>
+              )}
               {selected.duration && (
                 <div className="absolute bottom-3 right-4 flex items-center gap-1.5 text-white/50 text-xs">
                   <Clock className="h-3 w-3" />{selected.duration}
@@ -151,27 +201,26 @@ function PlayerViewInner({ course, isPackageLocked, onBack }: { course: OwnedCou
               <div className="flex items-center gap-1.5 text-sm font-medium text-foreground mb-2">
                 <StickyNote className="h-3.5 w-3.5" />Ghi chú
               </div>
-              <textarea className="w-full h-24 rounded-lg border border-border bg-muted/20 px-3 py-2 text-sm resize-none outline-none focus:ring-2 focus:ring-primary text-foreground placeholder:text-muted-foreground"
-                placeholder="Ghi chú của bạn về bài học này..." />
+              <textarea
+                className="w-full h-24 rounded-lg border border-border bg-muted/20 px-3 py-2 text-sm resize-none outline-none focus:ring-2 focus:ring-primary text-foreground placeholder:text-muted-foreground"
+                placeholder="Ghi chú của bạn về bài học này..."
+                value={notes[selectedId] ?? ""}
+                onChange={event => setNotes(prev => ({ ...prev, [selectedId]: event.target.value }))}
+                onBlur={() => void saveStudentLessonProgress(course.id, selectedId, {
+                  completed: isDone(selectedId),
+                  notes: notes[selectedId] ?? "",
+                })}
+              />
             </div>
 
             <div className="flex border-b border-border px-6 mt-4">
-              {[
-                { key: "files",   label: "Tài liệu kèm theo", icon: BookOpen },
-                { key: "discuss", label: "Thảo luận",         icon: MessageSquare },
-              ].map(tab => (
-                <button key={tab.key} onClick={() => setActiveTab(tab.key as typeof activeTab)}
-                  className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
-                    activeTab === tab.key ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
-                  }`}>
-                  <tab.icon className="h-3.5 w-3.5" />{tab.label}
-                </button>
-              ))}
+              <div className="flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px border-primary text-primary">
+                <BookOpen className="h-3.5 w-3.5" />Tài liệu kèm theo
+              </div>
             </div>
 
             <div className="flex-1 px-6 py-4">
-              {activeTab === "files" && (
-                <div className="space-y-2">
+              <div className="space-y-2">
                   {selected.attachments && selected.attachments.length > 0 ? (
                     selected.attachments.map((att, i) => (
                       <div key={i} className="flex items-center gap-3 p-3 rounded-lg border border-border bg-muted/20 hover:bg-muted/40 transition-colors">
@@ -184,19 +233,23 @@ function PlayerViewInner({ course, isPackageLocked, onBack }: { course: OwnedCou
                           <p className="text-sm font-medium text-foreground truncate">{att.name}</p>
                           <p className="text-xs text-muted-foreground">{att.size}</p>
                         </div>
-                        <Button size="sm" variant="outline" className="h-8 gap-1.5 text-xs shrink-0">
-                          <Download className="h-3.5 w-3.5" /> Tải về
-                        </Button>
+                        {safeMediaUrl(selected.fileUrl) ? (
+                          <Button size="sm" variant="outline" className="h-8 gap-1.5 text-xs shrink-0" asChild>
+                            <a href={safeMediaUrl(selected.fileUrl)!} target="_blank" rel="noopener noreferrer">
+                              <Download className="h-3.5 w-3.5" /> Tải về
+                            </a>
+                          </Button>
+                        ) : (
+                          <span className="text-xs text-muted-foreground flex items-center gap-1">
+                            <ExternalLink className="h-3 w-3" /> Chưa có file
+                          </span>
+                        )}
                       </div>
                     ))
                   ) : (
                     <div className="text-center py-8 text-muted-foreground text-sm">Không có tài liệu đính kèm</div>
                   )}
-                </div>
-              )}
-              {activeTab === "discuss" && (
-                <div className="text-center py-8 text-muted-foreground text-sm">Chức năng thảo luận đang được phát triển</div>
-              )}
+              </div>
             </div>
 
             <div className="flex items-center gap-2 px-6 pb-5 pt-2 border-t border-border">

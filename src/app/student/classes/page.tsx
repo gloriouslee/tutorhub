@@ -1,13 +1,12 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo } from "react";
 import Link from "next/link";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { LearningModeBadge, SectionHeader } from "@/components/shared";
-import { getOnlineLink } from "@/lib/storage";
 import { BookOpen, Clock, Video, MapPin, Users, Search, ChevronRight, GraduationCap } from "lucide-react";
 import { useStudentContext } from "@/hooks/useStudentContext";
 import StudentDiscoveryCatalog from "@/components/student/StudentDiscoveryCatalog";
@@ -28,17 +27,6 @@ export default function StudentClassesPage() {
   const { studentName, myClasses } = useStudentContext();
   const [search,      setSearch]      = useState("");
   const [modeFilter,  setModeFilter]  = useState<ModeFilter>("all");
-  const [onlineLinks, setOnlineLinks] = useState<Record<string, string>>({});
-
-  useEffect(() => {
-    (async () => {
-      const links: Record<string, string> = {};
-      for (const cls of myClasses) {
-        links[cls.id] = (await getOnlineLink(cls.id)) ?? cls.zoom_link ?? "";
-      }
-      setOnlineLinks(links);
-    })();
-  }, [myClasses]);
 
   const displayed = useMemo(() => myClasses.filter(cls => {
     const matchSearch = cls.class_name.toLowerCase().includes(search.toLowerCase())
@@ -98,7 +86,7 @@ export default function StudentClassesPage() {
           ) : (
             displayed.map((cls, i) => {
               const studentCount = cls.student_ids?.length ?? 0;
-              const liveLink     = onlineLinks[cls.id] || "";
+              const liveLink = cls.zoom_link ?? "";
 
               return (
                 <Link key={cls.id} href={`/student/classes/${cls.id}`} className="block group">

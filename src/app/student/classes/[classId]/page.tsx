@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { LearningModeBadge, ProgressBar } from "@/components/shared";
 import { getSubmissionsByStudent, type SubmissionRecord } from "@/lib/supabase/submissions";
-import { kvGet, getTeacherHomework, getHwSubmissions, getAllTeacherAttendance, getClassScheduleOverride, getOnlineLink, getStudentPackages, getCurriculum, getClassMaterials, getExamResult, getExamScoresByStudent, incrementMaterialDownload, isLessonVisibleToStudent, isAssignedToStudent, type StudentPackage, type CurriculumSession, type StoredClassMaterial, type StoredExamScore } from "@/lib/storage";
+import { kvGet, getTeacherHomework, getAllTeacherAttendance, getClassScheduleOverride, getStudentPackages, getStudentCurriculum, getStudentLessonProgress, saveStudentLessonProgress, getClassMaterials, getExamResult, getExamScoresByStudent, incrementMaterialDownload, isAssignedToStudent, type StudentPackage, type CurriculumSession, type StoredClassMaterial, type StoredExamScore } from "@/lib/storage";
 import CurriculumView from "@/components/student/CurriculumView";
 import type { Class } from "@/types";
 import {
@@ -103,9 +103,9 @@ const LESSON_TYPE_META: Record<string, { label: string; icon: React.ElementType;
   exam:     { label: "Bài kiểm tra",   icon: GraduationCap,   color: "text-violet-600 dark:text-violet-400" },
 };
 
-function StudentCurriculumSessionPreview({ session, classId, studentId }: { session: CurriculumSession; classId: string; studentId: string }) {
+function StudentCurriculumSessionPreview({ session, classId }: { session: CurriculumSession; classId: string }) {
   const [open, setOpen] = useState(false);
-  const published = session.lessons.filter(l => isLessonVisibleToStudent(l, studentId));
+  const published = session.lessons;
   if (published.length === 0) return null;
   return (
     <div className="border border-border/60 rounded-lg overflow-hidden text-xs">
@@ -146,22 +146,6 @@ function StudentCurriculumSessionPreview({ session, classId, studentId }: { sess
       )}
     </div>
   );
-}
-
-// ── localStorage: per-student watched lectures ────────────────────────────────
-function loadWatched(studentId: string): Set<string> {
-  try { return new Set(JSON.parse(localStorage.getItem(`tutorhub_watched_${studentId}`) ?? "[]")); } catch { return new Set(); }
-}
-function saveWatched(studentId: string, s: Set<string>) {
-  localStorage.setItem(`tutorhub_watched_${studentId}`, JSON.stringify([...s]));
-}
-
-// ── KV: submissions fallback ─────────────────────────────────────────────────
-function loadLocalSubs(classId: string, studentId: string): Promise<SubmissionRecord[]> {
-  return getHwSubmissions<SubmissionRecord>({
-    classIds: [classId],
-    studentIds: [studentId],
-  });
 }
 
 type ClassInfo = Class;
@@ -231,7 +215,6 @@ export default function StudentClassDetailPage() {
   };
   const [watched,      setWatched]      = useState<Set<string>>(new Set());
   const [submissions,  setSubmissions]  = useState<SubmissionRecord[]>([]);
-  const [onlineLink,   setOnlineLink]   = useState<string>("");
   const [myPackage,    setMyPackage]    = useState<StudentPackage | null>(null);
   const [savedAttendance, setSavedAttendance] = useState<SavedAttendanceRecord[]>([]);
   const [curriculumByDate, setCurriculumByDate] = useState<Record<string, CurriculumSession>>({});
@@ -262,9 +245,6 @@ export default function StudentClassDetailPage() {
     getExamScoresByStudent(studentId).then(setStoredScores);
   }, [classId, studentId]);
 
-  useEffect(() => {
-    getStudentPackages(classId).then(pkgs => setStudentPkg(pkgs[studentId]));
-  }, [classId, studentId]);
   useEffect(() => { getClassMaterials(classId).then(setUploadedMaterials); }, [classId]);
   const materials = useMemo(() => {
     const realMats = uploadedMaterials.filter(m => {
@@ -275,20 +255,20 @@ export default function StudentClassDetailPage() {
   }, [uploadedMaterials, studentPkg, curriculumMaterials]);
 
   useEffect(() => {
-    setWatched(loadWatched(studentId));
-    getOnlineLink(classId).then(link => setOnlineLink(link ?? ""));
     // Load submissions for homework status
-    getSubmissionsByStudent(studentId).then(async remote => {
-      if (remote.length > 0) { setSubmissions(remote); return; }
-      const local = await loadLocalSubs(classId, studentId);
-      setSubmissions(local.filter(s => s.student_id === studentId));
-    });
+    getSubmissionsByStudent(studentId).then(setSubmissions);
     // Load my package for this class
-    getStudentPackages(classId).then(pkgs => setMyPackage(pkgs[studentId] ?? null));
+    getStudentPackages(classId).then(pkgs => {
+      setMyPackage(pkgs[studentId] ?? null);
+      setStudentPkg(pkgs[studentId]);
+    });
+    getStudentLessonProgress(classId).then(progress => {
+      setWatched(new Set(progress.filter(item => item.completed).map(item => item.lesson_id)));
+    });
     // Load attendance records
     loadSavedAttendance(classId, studentId).then(setSavedAttendance);
     // Load curriculum → build date map + đẩy bài tập / bài giảng / video chữa bài / tài liệu về các tab
-    getCurriculum(classId).then(async chapters => {
+    getStudentCurriculum(classId).then(async chapters => {
       const today = new Date().toISOString().slice(0, 10);
       const byDate: Record<string, CurriculumSession> = {};
       const currHomeworkLoaders: Array<() => Promise<HomeworkItem>> = [];
@@ -302,7 +282,6 @@ export default function StudentClassDetailPage() {
         for (const s of ch.sessions) {
           if (s.date) byDate[s.date] = s;
           for (const lesson of s.lessons) {
-            if (!isLessonVisibleToStudent(lesson, studentId)) continue;
             const created = s.date ?? today;
             if (lesson.type === "homework") {
               currHomeworkLoaders.push(async () => ({
@@ -456,7 +435,7 @@ export default function StudentClassDetailPage() {
   const chipCls = (active: boolean) =>
     `px-3 py-1.5 text-xs font-semibold rounded-xl transition-all ${active ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:bg-accent"}`;
 
-  // Completion: per-student localStorage tracking
+  // Completion is synchronized with the signed-in student's server-side progress.
   const watchedCount    = publishedLectures.filter(l => watched.has(l.id)).length;
   const completionPct   = publishedLectures.length > 0
     ? Math.round((watchedCount / publishedLectures.length) * 100)
@@ -481,14 +460,14 @@ export default function StudentClassDetailPage() {
     : null;
 
   const enrolledCount = (cls.student_ids ?? []).length;
-  const showZoom      = !!(onlineLink || cls.zoom_link);
+  const showZoom = Boolean(cls.zoom_link);
 
   // Mark lecture watched + open video
   function handleWatchLecture(lecId: string, videoUrl: string | null) {
     const next = new Set(watched);
     next.add(lecId);
     setWatched(next);
-    saveWatched(studentId, next);
+    void saveStudentLessonProgress(classId, lecId, { completed: true });
     if (videoUrl) window.open(videoUrl, "_blank", "noopener,noreferrer");
   }
 
@@ -804,7 +783,7 @@ export default function StudentClassDetailPage() {
                   <Button
                     variant="gradient"
                     className="w-full shadow-lg shadow-primary/20"
-                    onClick={() => window.open(onlineLink || cls.zoom_link!, "_blank", "noopener,noreferrer")}
+                    onClick={() => window.open(cls.zoom_link!, "_blank", "noopener,noreferrer")}
                   >
                     <Video className="h-4 w-4 mr-2" />Tham gia phòng học Online
                   </Button>
@@ -861,7 +840,7 @@ export default function StudentClassDetailPage() {
                                 <p className="text-xs text-blue-800 dark:text-blue-300 leading-relaxed">{upNote}</p>
                               </div>
                             )}
-                            {upCurrSession && <StudentCurriculumSessionPreview session={upCurrSession} classId={classId} studentId={CURRENT_STUDENT_ID} />}
+                            {upCurrSession && <StudentCurriculumSessionPreview session={upCurrSession} classId={classId} />}
                           </div>
                         )}
                       </div>
@@ -934,7 +913,7 @@ export default function StudentClassDetailPage() {
 
                               {/* Curriculum session content */}
                               {currSession && (
-                                <StudentCurriculumSessionPreview session={currSession} classId={classId} studentId={CURRENT_STUDENT_ID} />
+                                <StudentCurriculumSessionPreview session={currSession} classId={classId} />
                               )}
 
                               {/* Homework for this session */}
@@ -975,13 +954,12 @@ export default function StudentClassDetailPage() {
           {activeTab === "curriculum" && (
             <CurriculumView
               classId={classId}
-              studentId={CURRENT_STUDENT_ID}
               watched={watched}
               onWatch={(id) => {
                 const next = new Set(watched);
                 next.add(id);
                 setWatched(next);
-                saveWatched(studentId, next);
+                void saveStudentLessonProgress(classId, id, { completed: true });
               }}
               submissions={submissions.map(s => ({ homework_id: s.homework_id }))}
             />

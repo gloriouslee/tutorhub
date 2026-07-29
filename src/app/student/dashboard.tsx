@@ -11,9 +11,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { LearningModeBadge } from "@/components/shared";
 import {
-  getNotifications, getTeacherHomework, getExamScoresByStudent,
-  getCurriculum, getExamResult, getAllTeacherAttendance,
-  isAssignedToStudent, isLessonVisibleToStudent,
+  getNotifications, getNotificationStates, getTeacherHomework, getExamScoresByStudent,
+  getStudentCurriculum, getExamResult, getAllTeacherAttendance,
+  isAssignedToStudent,
   type TeacherAttendanceRecord,
 } from "@/lib/storage";
 import { getSubmissionsByStudent } from "@/lib/supabase/submissions";
@@ -115,7 +115,7 @@ export default function StudentDashboard() {
     const curriculaPromise = Promise.all(
       myClasses.map(async (cls) => ({
         classId: cls.id,
-        chapters: await getCurriculum(cls.id).catch(() => []),
+        chapters: await getStudentCurriculum(cls.id).catch(() => []),
       })),
     );
     const examResultsPromise = curriculaPromise.then(async (curricula) => {
@@ -179,19 +179,16 @@ export default function StudentDashboard() {
       setAttendanceChartData(buildAttendanceChart(records));
     });
 
-    // Notifications — trừ các thông báo đã đọc/đã xóa (giống trang thông báo)
-    const parseSet = (key: string): Set<string> => {
-      try { return new Set<string>(JSON.parse(localStorage.getItem(key) ?? "[]")); }
-      catch { return new Set<string>(); }
-    };
-    getNotifications().then(all => {
-      const readIds    = parseSet("tutorhub_notif_read");
-      const deletedIds = parseSet("tutorhub_notif_deleted");
+    // Notifications — trạng thái đọc/xóa được lưu theo tài khoản trên server.
+    Promise.all([getNotifications(), getNotificationStates()]).then(([all, states]) => {
+      const classIds = new Set(myClasses.map(item => item.id));
       setUnreadCount(all.filter(n =>
-        (n.target_role === "student" || n.target_role === "all")
+        (
+          n.target_role === "all"
+          || (n.target_role === "student" && (!n.target_class_id || classIds.has(n.target_class_id)))
+        )
         && !n.is_read
-        && !readIds.has(n.id)
-        && !deletedIds.has(n.id)
+        && !states[n.id]
       ).length);
     });
 
@@ -218,7 +215,6 @@ export default function StudentDashboard() {
         for (const ch of chapters) {
           for (const s of ch.sessions) {
             for (const lesson of s.lessons) {
-              if (!isLessonVisibleToStudent(lesson, studentId)) continue;
               if (lesson.type === "homework") {
                 currItems.push({
                   id: lesson.id,

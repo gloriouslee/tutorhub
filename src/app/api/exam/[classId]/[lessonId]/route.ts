@@ -79,7 +79,7 @@ export async function GET(
       ...base,
       submitted: true,
       result,
-      questions: showSolution ? questions : sanitizeQuestions(questions),
+      questions: sanitizeQuestions(questions, showSolution),
     });
   }
 

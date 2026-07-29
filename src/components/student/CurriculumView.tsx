@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { getCurriculum, isLessonVisibleToStudent, type CurriculumLesson } from "@/lib/storage";
+import { getStudentCurriculum, type CurriculumLesson } from "@/lib/storage";
 import {
   ChevronDown, ChevronRight, PlayCircle, FileText,
   ClipboardList, Video, CheckCircle2, ExternalLink,
@@ -50,7 +50,6 @@ function ytEmbedSrc(id: string): string {
 
 interface Props {
   classId: string;
-  studentId: string;
   watched: Set<string>;
   onWatch: (id: string, url?: string) => void;
   submissions: { homework_id: string }[];
@@ -58,15 +57,14 @@ interface Props {
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export default function CurriculumView({ classId, studentId, watched, onWatch, submissions }: Props) {
-  const isVisible = (l: CurriculumLesson) => isLessonVisibleToStudent(l, studentId);
-  const [chapters,     setChapters]     = useState<Awaited<ReturnType<typeof getCurriculum>>>([]);
+export default function CurriculumView({ classId, watched, onWatch, submissions }: Props) {
+  const [chapters,     setChapters]     = useState<Awaited<ReturnType<typeof getStudentCurriculum>>>([]);
   const [expanded,     setExpanded]     = useState<Set<string>>(new Set());
   const [activeLesson, setActiveLesson] = useState<CurriculumLesson | null>(null);
 
   useEffect(() => {
     (async () => {
-      const data = await getCurriculum(classId);
+      const data = await getStudentCurriculum(classId);
       setChapters(data);
       const ids = new Set<string>();
       if (data[0]) {
@@ -78,7 +76,12 @@ export default function CurriculumView({ classId, studentId, watched, onWatch, s
   }, [classId]);
 
   function toggle(id: string) {
-    setExpanded(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+    setExpanded(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   }
 
   function isCompleted(lesson: CurriculumLesson): boolean {
@@ -120,7 +123,7 @@ export default function CurriculumView({ classId, studentId, watched, onWatch, s
     );
   }
 
-  const allPublished  = chapters.flatMap(ch => ch.sessions.flatMap(s => s.lessons.filter(isVisible)));
+  const allPublished  = chapters.flatMap(ch => ch.sessions.flatMap(s => s.lessons));
   const completedCount = allPublished.filter(l => isCompleted(l)).length;
   const totalCount     = allPublished.length;
   const pct            = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
@@ -205,7 +208,7 @@ export default function CurriculumView({ classId, studentId, watched, onWatch, s
         <div className="lg:flex-1 lg:overflow-y-auto divide-y divide-border/40">
           {chapters.map((chapter, ci) => {
             const chExpanded = expanded.has(chapter.id);
-            const chLessons  = chapter.sessions.flatMap(s => s.lessons.filter(isVisible));
+            const chLessons  = chapter.sessions.flatMap(s => s.lessons);
             const chDone     = chLessons.filter(l => isCompleted(l)).length;
 
             return (
@@ -227,7 +230,7 @@ export default function CurriculumView({ classId, studentId, watched, onWatch, s
                 {/* Sessions */}
                 {chExpanded && chapter.sessions.map((session, si) => {
                   const sExpanded  = expanded.has(session.id);
-                  const pubLessons = session.lessons.filter(isVisible);
+              const pubLessons = session.lessons;
                   const sDone      = pubLessons.filter(l => isCompleted(l)).length;
                   if (pubLessons.length === 0) return null;
 

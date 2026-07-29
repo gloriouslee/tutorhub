@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { SectionHeader } from "@/components/shared";
 import {
-  getInvoices, updateInvoiceStatus, getTeacherSettings, addNotification,
+  getInvoices, submitInvoiceReceipt, getTeacherSettings,
   type TuitionInvoice, type TeacherSettings,
 } from "@/lib/storage";
 import { useParentContext } from "@/hooks/useParentContext";
@@ -29,7 +29,6 @@ export default function ParentPaymentsPage() {
   useEffect(() => {
     const tid = children.flatMap(ch => (ch as { classes?: { tutor_id?: string }[] }).classes ?? []).find(c => c.tutor_id)?.tutor_id;
     if (tid) getTeacherSettings(tid).then(setTeacherQR);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [children]);
 
   const load = async () => setInvoices((await getInvoices()).filter(inv => childIds.includes(inv.child_id)));
@@ -71,23 +70,33 @@ export default function ParentPaymentsPage() {
   const handleConfirm = async () => {
     if (!modalInvoice || !receiptFile) return;
     setSubmitting(true);
-    await new Promise(r => setTimeout(r, 600));
-    if (modalInvoice.id === "ALL") {
-      // Chỉ đụng hóa đơn của các con mình — gọi theo từng child id
-      for (const cid of childIds) {
-        await updateInvoiceStatus("ALL", "pending_verification", "parent", cid);
+    try {
+      const targetChildIds = modalInvoice.id === "ALL"
+        ? childIds.filter(id => pendingInvoices.some(invoice => invoice.child_id === id))
+        : [modalInvoice.child_id];
+      for (const childId of targetChildIds) {
+        const form = new FormData();
+        form.append("file", receiptFile);
+        form.append("child_id", childId);
+        const uploadResponse = await fetch("/api/payments/receipts", {
+          method: "POST",
+          body: form,
+        });
+        const uploaded = await uploadResponse.json().catch(() => ({})) as { path?: string };
+        if (!uploadResponse.ok || !uploaded.path) {
+          throw new Error("Không thể tải biên lai lên.");
+        }
+        await submitInvoiceReceipt(
+          modalInvoice.id === "ALL" ? "ALL" : modalInvoice.id,
+          childId,
+          uploaded.path,
+        );
       }
-    } else {
-      await updateInvoiceStatus(modalInvoice.id, "pending_verification", "parent");
+      await load();
+      closeModal();
+    } finally {
+      setSubmitting(false);
     }
-    await addNotification({
-      title: "Phụ huynh nộp học phí",
-      content: `${parentName} đã gửi biên lai học phí (${formatCurrency(modalInvoice.amount)}) — chờ xác nhận.`,
-      target_role: "admin", category: "system", sent_by: parentName,
-    });
-    await load();
-    setSubmitting(false);
-    closeModal();
   };
 
   const transferNote = modalInvoice

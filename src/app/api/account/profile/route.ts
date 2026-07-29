@@ -20,7 +20,7 @@ export async function GET(req: NextRequest) {
   const [studentResult, profileResult] = await Promise.all([
     admin
       .from("students")
-      .select("id,full_name,email,dob,school,grade,created_at")
+      .select("id,full_name,email,dob,school,grade,avatar_url,created_at")
       .eq("id", actor.studentId)
       .maybeSingle(),
     admin
@@ -44,6 +44,7 @@ export async function GET(req: NextRequest) {
     grade: student.grade ?? "",
     phone,
     username: actor.email ?? student.email ?? "",
+    avatar_url: student.avatar_url ?? "",
     profile_complete: isCompleteStudentProfile({
       full_name: student.full_name,
       dob: student.dob,
@@ -104,6 +105,16 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: "invalid_grade" }, { status: 400 });
     }
     studentPatch.grade = normalizedGrade;
+  }
+  if (body.avatar_url !== undefined) {
+    if (typeof body.avatar_url !== "string" || body.avatar_url.length > 1_000) {
+      return NextResponse.json({ error: "invalid_avatar_url" }, { status: 400 });
+    }
+    const expectedPrefix = `/api/files?bucket=avatars&path=${encodeURIComponent(`${actor.userId}/`)}`;
+    if (!body.avatar_url.startsWith(expectedPrefix)) {
+      return NextResponse.json({ error: "invalid_avatar_url" }, { status: 400 });
+    }
+    studentPatch.avatar_url = body.avatar_url;
   }
 
   let phone: string | undefined;

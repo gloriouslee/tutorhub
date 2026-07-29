@@ -3,6 +3,7 @@ import { getRequestIdentity } from "@/lib/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isNonEmptyString } from "@/lib/validation";
 import { hasValidMutationOrigin } from "@/lib/request-security";
+import { logEvent } from "@/lib/logger";
 
 type Invoice = {
   id: string;
@@ -85,13 +86,67 @@ export async function PATCH(req: NextRequest) {
   if (!["submit_receipt", "mark_paid"].includes(body.action)) {
     return NextResponse.json({ error: "invalid_action" }, { status: 400 });
   }
-  const { data, error } = await createAdminClient().rpc("mutate_invoice_secure", {
-    p_action: body.action,
-    p_invoice_id: body.invoice_id,
-    p_child_id: typeof body.child_id === "string" ? body.child_id : null,
-    p_actor_id: actor.userId,
-    p_invoice: null,
-  });
+  const admin = createAdminClient();
+  let data: unknown;
+  let error: { message: string } | null;
+  if (body.action === "submit_receipt") {
+    if (!isNonEmptyString(body.receipt_path, 260)) {
+      return NextResponse.json({ error: "receipt_required" }, { status: 400 });
+    }
+    const invoices = await readInvoices();
+    const childId = body.invoice_id === "ALL"
+      ? (typeof body.child_id === "string" ? body.child_id : "")
+      : (invoices.find(invoice => invoice.id === body.invoice_id)?.child_id ?? "");
+    if (!childId || !body.receipt_path.startsWith(`${childId}/`)) {
+      return NextResponse.json({ error: "invalid_receipt" }, { status: 400 });
+    }
+    const result = await admin.rpc("submit_invoice_receipt_secure", {
+      p_invoice_id: body.invoice_id,
+      p_child_id: childId,
+      p_actor_id: actor.userId,
+      p_receipt_path: body.receipt_path,
+    });
+    data = result.data;
+    error = result.error;
+
+    if (!error) {
+      const targetInvoices = invoices.filter(invoice =>
+        invoice.child_id === childId
+        && (body.invoice_id === "ALL" ? invoice.status === "pending" : invoice.id === body.invoice_id),
+      );
+      const classIds = [...new Set(targetInvoices.map(invoice => invoice.class_id).filter(Boolean))] as string[];
+      if (classIds.length > 0) {
+        const rows = classIds.map(classId => ({
+          id: crypto.randomUUID(),
+          title: "Học viên gửi biên lai học phí",
+          content: `${actor.displayName} đã gửi biên lai học phí, đang chờ xác nhận.`,
+          target_role: "teacher",
+          target_class_id: classId,
+          category: "system",
+          sent_by: actor.displayName,
+          sender_user_id: actor.userId,
+          is_read: false,
+        }));
+        const { error: notificationError } = await admin.from("notifications").insert(rows);
+        if (notificationError) {
+          logEvent("warn", "invoice.notification_failed", {
+            actor_id: actor.userId,
+            error: notificationError.message,
+          });
+        }
+      }
+    }
+  } else {
+    const result = await admin.rpc("mutate_invoice_secure", {
+      p_action: body.action,
+      p_invoice_id: body.invoice_id,
+      p_child_id: typeof body.child_id === "string" ? body.child_id : null,
+      p_actor_id: actor.userId,
+      p_invoice: null,
+    });
+    data = result.data;
+    error = result.error;
+  }
   if (error) {
     const forbidden = error.message.includes("forbidden");
     return NextResponse.json(
@@ -99,7 +154,7 @@ export async function PATCH(req: NextRequest) {
       { status: forbidden ? 403 : 409 },
     );
   }
-  return NextResponse.json({ success: data === true });
+  return NextResponse.json({ success: true, result: data });
 }
 
 export async function POST(req: NextRequest) {

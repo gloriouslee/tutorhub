@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { type CurriculumLesson, type ExamQuestion } from "@/lib/storage";
+import { saveStudentLessonProgress, type CurriculumLesson, type ExamQuestion } from "@/lib/storage";
 import { Button } from "@/components/ui/button";
 import "katex/dist/katex.min.css";
 import { renderMathInHtml } from "@/lib/mathRender";
@@ -39,18 +39,6 @@ type ExamResult = {
   teacher_feedback?: string;
   graded_at?: string;
 };
-
-// Mark lesson as watched (for curriculum progress)
-function markExamComplete(studentId: string, lessonId: string) {
-  if (!studentId) return;
-  try {
-    const raw = localStorage.getItem(`tutorhub_watched_${studentId}`);
-    const watched: string[] = raw ? JSON.parse(raw) : [];
-    if (!watched.includes(lessonId)) {
-      localStorage.setItem(`tutorhub_watched_${studentId}`, JSON.stringify([...watched, lessonId]));
-    }
-  } catch { /* ignore */ }
-}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -903,7 +891,6 @@ export default function ExamPage() {
   }
 
   async function submit() {
-    const sid = studentId || "anon";
     // Thời lượng làm bài + lần làm thứ mấy (best-effort, gửi kèm khi nộp)
     const duration_seconds = startedAtRef.current
       ? Math.max(0, Math.round((Date.now() - startedAtRef.current) / 1000))
@@ -929,7 +916,7 @@ export default function ExamPage() {
     if (Array.isArray(data.questions) && data.questions.length > 0) {
       setQuestions(data.questions as ExamQuestion[]);
     }
-    markExamComplete(sid, lessonId);
+    await saveStudentLessonProgress(classId, lessonId, { completed: true });
     setResult(data.result as ExamResult);
     setSubmitted(true);
     setShowConfirm(false);

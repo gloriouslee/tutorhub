@@ -10,34 +10,14 @@ import {
   getScheduleNotifications,
   markScheduleNotificationsRead,
   getNotifications,
+  getNotificationStates,
+  markNotificationState,
+  markNotificationsRead,
   type ScheduleNotification,
 } from "@/lib/storage";
 import { Bell, Check, CheckCircle2, AlertTriangle, Info, BookOpen, Calendar, Trash2 } from "lucide-react";
 import { useStudentContext } from "@/hooks/useStudentContext";
 import { Notification } from "@/types";
-
-// ── localStorage helpers ──────────────────────────────────────────────────────
-const READ_KEY    = "tutorhub_notif_read";
-const DELETED_KEY = "tutorhub_notif_deleted";
-
-function getReadIds(): Set<string> {
-  try { return new Set(JSON.parse(localStorage.getItem(READ_KEY) ?? "[]")); } catch { return new Set(); }
-}
-function addReadId(id: string) {
-  const s = getReadIds(); s.add(id);
-  localStorage.setItem(READ_KEY, JSON.stringify([...s]));
-}
-function markAllReadIds(ids: string[]) {
-  const s = getReadIds(); ids.forEach(id => s.add(id));
-  localStorage.setItem(READ_KEY, JSON.stringify([...s]));
-}
-function getDeletedIds(): Set<string> {
-  try { return new Set(JSON.parse(localStorage.getItem(DELETED_KEY) ?? "[]")); } catch { return new Set(); }
-}
-function addDeletedId(id: string) {
-  const s = getDeletedIds(); s.add(id);
-  localStorage.setItem(DELETED_KEY, JSON.stringify([...s]));
-}
 
 // ── Relative time ─────────────────────────────────────────────────────────────
 function relativeTime(isoString: string): string {
@@ -101,15 +81,18 @@ export default function StudentNotificationsPage() {
 
   useEffect(() => {
     getScheduleNotifications().then(setScheduleNotifs);
-    setReadIds(getReadIds());
-    setDeletedIds(getDeletedIds());
-    getNotifications().then(all =>
+    Promise.all([getNotifications(), getNotificationStates()]).then(([all, states]) => {
+      setReadIds(new Set(Object.keys(states)));
+      setDeletedIds(new Set(
+        Object.entries(states)
+          .filter(([, state]) => state.isDeleted)
+          .map(([id]) => id),
+      ));
       setNotifs(all.filter(n =>
         n.target_role === "all" ||
-        // Thông báo cho học sinh: broadcast (không gắn lớp) hoặc thuộc lớp của mình
         (n.target_role === "student" && (!n.target_class_id || myClassIds.includes(n.target_class_id)))
-      ))
-    );
+      ));
+    });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [myClassIds.join(",")]);
 
@@ -132,22 +115,28 @@ export default function StudentNotificationsPage() {
   });
 
   const handleMarkAllRead = async () => {
-    await markScheduleNotificationsRead();
+    const broadcastIds = broadcastNotifs.map(n => n.id);
+    await Promise.all([
+      markScheduleNotificationsRead(),
+      markNotificationsRead(broadcastIds),
+    ]);
     setScheduleNotifs(prev => prev.map(n => ({ ...n, is_read: true })));
-    markAllReadIds(unified.map(n => n.id));
-    setReadIds(getReadIds());
+    setReadIds(prev => new Set([...prev, ...broadcastIds]));
   };
 
-  const handleMarkRead = (id: string) => {
-    setScheduleNotifs(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
-    addReadId(id);
-    setReadIds(getReadIds());
+  const handleMarkRead = async (notification: UnifiedNotif) => {
+    if (notification.source === "schedule") {
+      await markScheduleNotificationsRead();
+      setScheduleNotifs(prev => prev.map(n => ({ ...n, is_read: true })));
+      return;
+    }
+    await markNotificationState(notification.id);
+    setReadIds(prev => new Set(prev).add(notification.id));
   };
 
-  const handleDelete = (id: string) => {
-    addDeletedId(id);
-    setDeletedIds(getDeletedIds());
-    setScheduleNotifs(prev => prev.filter(n => n.id !== id));
+  const handleDelete = async (id: string) => {
+    await markNotificationState(id, true);
+    setDeletedIds(prev => new Set(prev).add(id));
   };
 
   return (
@@ -218,7 +207,7 @@ export default function StudentNotificationsPage() {
               return (
                 <Card
                   key={n.id}
-                  onClick={() => { if (unread) handleMarkRead(n.id); }}
+                  onClick={() => { if (unread) void handleMarkRead(n); }}
                   className={`transition-all duration-200 animate-fade-in cursor-pointer ${
                     unread
                       ? "border-primary/30 shadow-md bg-primary/5 dark:bg-primary/10"
@@ -302,19 +291,21 @@ export default function StudentNotificationsPage() {
                       {unread && (
                         <button
                           title="Đánh dấu đã đọc"
-                          onClick={e => { e.stopPropagation(); handleMarkRead(n.id); }}
+                          onClick={e => { e.stopPropagation(); void handleMarkRead(n); }}
                           className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 transition-all"
                         >
                           <Check className="h-3.5 w-3.5" />
                         </button>
                       )}
-                      <button
-                        title="Xóa thông báo"
-                        onClick={e => { e.stopPropagation(); handleDelete(n.id); }}
-                        className="p-1.5 rounded-lg text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/10 transition-all"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
+                      {n.source === "broadcast" && (
+                        <button
+                          title="Xóa thông báo"
+                          onClick={e => { e.stopPropagation(); void handleDelete(n.id); }}
+                          className="p-1.5 rounded-lg text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/10 transition-all"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      )}
                     </div>
                   </CardContent>
                 </Card>

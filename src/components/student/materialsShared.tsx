@@ -4,7 +4,7 @@ import type React from "react";
 import { Badge } from "@/components/ui/badge";
 import { formatCurrency } from "@/lib/utils";
 import type { StudentPackage } from "@/lib/storage";
-import { getTeacherMaterials } from "@/lib/storage";
+import { getStudentMaterials } from "@/lib/storage";
 import {
   PlayCircle,
   FileText,
@@ -35,6 +35,8 @@ export interface Lesson {
   description?: string;
   attachments?: Attachment[];
   isPreview?: boolean;
+  videoUrl?: string;
+  fileUrl?: string;
 }
 
 export interface Chapter {
@@ -58,6 +60,8 @@ export interface PaidLesson {
   type: LessonType;
   duration?: string;
   isPreview: boolean;
+  videoUrl?: string;
+  fileUrl?: string;
 }
 
 export interface PaidChapter {
@@ -83,6 +87,7 @@ export interface PaidPackage {
 
 export interface TeacherCourse {
   id: string;
+  access_granted?: boolean;
   classId?: string;
   packages: StudentPackage[];
   type?: "class" | "paid_package";
@@ -102,6 +107,8 @@ export interface TeacherCourse {
     lessons: Array<
       PaidLesson & {
         description?: string;
+        videoUrl?: string;
+        fileUrl?: string;
         fileName?: string;
         fileSize?: string;
       }
@@ -112,7 +119,7 @@ export interface TeacherCourse {
 
 export async function loadTeacherCourses(): Promise<TeacherCourse[]> {
   try {
-    return await getTeacherMaterials<TeacherCourse>();
+    return await getStudentMaterials<TeacherCourse>();
   } catch {
     return [];
   }
@@ -140,6 +147,8 @@ export function teacherCourseToOwnedCourse(
         status: "active",
         description: lesson.description,
         isPreview: lesson.isPreview,
+        videoUrl: lesson.videoUrl,
+        fileUrl: lesson.fileUrl,
         attachments: lesson.fileName
           ? [{
               name: lesson.fileName,

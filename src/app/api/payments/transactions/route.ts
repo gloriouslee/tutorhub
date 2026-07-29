@@ -118,6 +118,12 @@ export async function POST(req: NextRequest) {
   if (!isNonEmptyString(body.pkg_id, 100)) {
     return NextResponse.json({ error: "invalid_product" }, { status: 400 });
   }
+  if (
+    !isNonEmptyString(body.receipt_path, 260)
+    || !body.receipt_path.startsWith(`${actor.studentId}/`)
+  ) {
+    return NextResponse.json({ error: "invalid_receipt" }, { status: 400 });
+  }
   const product = await resolveProduct(body.pkg_id);
   if (!product) {
     return NextResponse.json({ error: "product_not_found" }, { status: 404 });
@@ -140,6 +146,7 @@ export async function POST(req: NextRequest) {
       student_email: actor.email,
       class_id: product.classId,
       teacher_id: product.teacherId,
+      receipt_path: body.receipt_path,
       transfer_note: transferNote,
       status: "pending",
     })
@@ -157,6 +164,26 @@ export async function POST(req: NextRequest) {
     actor_id: actor.userId,
     transaction_id: id,
   });
+  const { error: notificationError } = await createAdminClient()
+    .from("notifications")
+    .insert({
+      id: crypto.randomUUID(),
+      title: "Học viên gửi biên lai mua tài liệu",
+      content: `${actor.displayName} đã gửi biên lai cho “${product.title}”.`,
+      target_role: "teacher",
+      target_class_id: product.classId,
+      category: "system",
+      sent_by: actor.displayName,
+      sender_user_id: actor.userId,
+      is_read: false,
+    });
+  if (notificationError) {
+    logEvent("warn", "payment.notification_failed", {
+      actor_id: actor.userId,
+      transaction_id: id,
+      error: notificationError.message,
+    });
+  }
   return NextResponse.json(data, { status: 201 });
 }
 

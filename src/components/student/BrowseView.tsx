@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { getGrantedPackages, getStudentPackages, getCourseRating, getCourseReviews } from "@/lib/storage";
+import { getStudentPackagesForClasses, getCourseRating, getCourseReviews } from "@/lib/storage";
 import { useStudentContext } from "@/hooks/useStudentContext";
 import type { StudentPackage, CourseReview } from "@/lib/storage";
 import {
@@ -65,19 +65,26 @@ export default function BrowseView({ onSelectCourse }: { onSelectCourse: (c: Own
   const reloadRatings = useCallback(async (pkgIds: string[]) => {
     const map: Record<string, { rating: number; reviewCount: number }> = {};
     const reviews: Record<string, CourseReview | undefined> = {};
-    for (const id of pkgIds) {
-      map[id] = await getCourseRating(id);
-      reviews[id] = (await getCourseReviews(id)).find(r => r.student_id === CURRENT_STUDENT_ID);
-    }
+    const results = await Promise.all(pkgIds.map(async id => {
+      const [rating, courseReviews] = await Promise.all([
+        getCourseRating(id),
+        getCourseReviews(id),
+      ]);
+      return { id, rating, review: courseReviews.find(r => r.student_id === CURRENT_STUDENT_ID) };
+    }));
+    results.forEach(result => {
+      map[result.id] = result.rating;
+      reviews[result.id] = result.review;
+    });
     setRatings(map);
     setMyReviews(reviews);
   }, [CURRENT_STUDENT_ID]);
 
   useEffect(() => {
-    getGrantedPackages(CURRENT_STUDENT_ID).then(setGrantedPkgIds);
     (async () => {
       const tc = await loadTeacherCourses();
       setTeacherCourses(tc);
+      setGrantedPkgIds(tc.filter(course => course.access_granted).map(course => course.id));
       const map: Record<string, StudentPackage | null> = {};
       const classCourses = tc.filter(
         (course) =>
@@ -86,10 +93,12 @@ export default function BrowseView({ onSelectCourse }: { onSelectCourse: (c: Own
           && !!course.classId
           && myClassIds.includes(course.classId),
       );
-      for (const course of classCourses) {
-        const pkgs = await getStudentPackages(course.classId!);
-        map[course.id] = pkgs[CURRENT_STUDENT_ID] ?? null;
-      }
+      const packageRows = await getStudentPackagesForClasses(
+        classCourses.map(course => course.classId!),
+      );
+      classCourses.forEach(course => {
+        map[course.id] = packageRows[course.classId!]?.[CURRENT_STUDENT_ID] ?? null;
+      });
       setStudentPkgs(map);
       const allIds = tc
         .filter(course => course.type === "paid_package" && course.published)

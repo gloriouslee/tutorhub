@@ -18,25 +18,11 @@ import {
   getSubmissionsByStudent,
   type SubmissionRecord,
 } from "@/lib/supabase/submissions";
-import { getTeacherHomework, getHwSubmissions, upsertHwSubmission, getCurriculum, getExamResult, isLessonVisibleToStudent, isAssignedToStudent } from "@/lib/storage";
+import { getTeacherHomework, getStudentCurriculum, getExamResult, isAssignedToStudent } from "@/lib/storage";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const ACCEPTED = ".pdf,.doc,.docx,.jpg,.jpeg,.png";
 const MAX_MB   = 10;
-
-// ── localStorage fallback ─────────────────────────────────────────────────────
-async function loadLocalSubs(studentId: string): Promise<SubmissionRecord[]> {
-  try {
-    return await getHwSubmissions<SubmissionRecord>({
-      studentIds: [studentId],
-    });
-  } catch {
-    return [];
-  }
-}
-async function saveLocalSub(sub: SubmissionRecord, classId?: string) {
-  await upsertHwSubmission({ ...sub, class_id: classId });
-}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function daysLeft(due: string) {
@@ -91,13 +77,12 @@ export default function StudentHomeworkPage() {
 
     // Load curriculum bài tập: nộp file (type "homework") + làm câu hỏi (type "exam")
     Promise.all(myClassIds.map(cid =>
-      getCurriculum(cid).then(async chapters => {
+      getStudentCurriculum(cid).then(async chapters => {
         const items: HomeworkItem[] = [];
         const today = new Date().toISOString().slice(0, 10);
         for (const ch of chapters) {
           for (const s of ch.sessions) {
             for (const lesson of s.lessons) {
-              if (!isLessonVisibleToStudent(lesson, STUDENT_ID)) continue;
               if (lesson.type === "homework") {
                 items.push({
                   id: lesson.id, class_id: cid, title: lesson.title,
@@ -138,13 +123,7 @@ export default function StudentHomeworkPage() {
   }, [myClassIds.join(",")]);
 
   useEffect(() => {
-    getSubmissionsByStudent(STUDENT_ID).then(async remote => {
-      if (remote.length > 0) {
-        setSubmissions(remote);
-      } else {
-        setSubmissions(await loadLocalSubs(STUDENT_ID));
-      }
-    });
+    getSubmissionsByStudent(STUDENT_ID).then(setSubmissions);
   }, [STUDENT_ID]);
 
   // Per-homework submission lookup
@@ -234,35 +213,44 @@ export default function StudentHomeworkPage() {
     e.preventDefault();
     if (!file || !selectedHw) return;
     setUploadState("uploading");
+    setErrorMsg("");
 
-    const uploaded = await uploadSubmissionFile(
-      selectedHw.class_id,
-      selectedHw.id,
-      STUDENT_ID,
-      file,
-    );
-    const subData: Omit<SubmissionRecord, "id"> = {
-      class_id:    selectedHw.class_id,
-      homework_id:  selectedHw.id,
-      student_id:   STUDENT_ID,
-      student_name: STUDENT_NAME,
-      file_url:     uploaded?.url,
-      file_name:    file.name,
-      file_size:    file.size,
-      status:       "submitted",
-      submitted_at: new Date().toISOString(),
-    };
+    try {
+      const uploaded = await uploadSubmissionFile(
+        selectedHw.class_id,
+        selectedHw.id,
+        STUDENT_ID,
+        file,
+      );
+      if (!uploaded?.url) {
+        throw new Error("Không thể tải file bài làm lên. Vui lòng thử lại.");
+      }
 
-    const saved = await insertSubmission(subData);
-    const finalSub: SubmissionRecord = saved ?? { ...subData, id: `local-${Date.now()}` };
-    if (!saved) await saveLocalSub(finalSub, selectedHw.class_id);
+      const saved = await insertSubmission({
+        class_id: selectedHw.class_id,
+        homework_id: selectedHw.id,
+        student_id: STUDENT_ID,
+        student_name: STUDENT_NAME,
+        file_url: uploaded.url,
+        file_name: file.name,
+        file_size: file.size,
+        status: "submitted",
+        submitted_at: new Date().toISOString(),
+      });
+      if (!saved) {
+        throw new Error("File đã tải lên nhưng chưa thể ghi nhận bài nộp. Vui lòng thử lại.");
+      }
 
-    setSubmissions(prev => [
-      ...prev.filter(s => !(s.homework_id === selectedHw.id && s.student_id === STUDENT_ID)),
-      finalSub,
-    ]);
-    setUploadState("success");
-    setTimeout(closeModal, 1400);
+      setSubmissions(prev => [
+        ...prev.filter(s => !(s.homework_id === selectedHw.id && s.student_id === STUDENT_ID)),
+        saved,
+      ]);
+      setUploadState("success");
+      setTimeout(closeModal, 1400);
+    } catch (error) {
+      setErrorMsg(error instanceof Error ? error.message : "Không thể nộp bài. Vui lòng thử lại.");
+      setUploadState("idle");
+    }
   }
 
   return (
