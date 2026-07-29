@@ -48,9 +48,21 @@ export interface ParseResult {
 
 const QUESTION_RE = /^\s*Câu\s+(\d+)\s*[.:]?\s*(.*)$/i;
 const SECTION_RE  = /^\s*(Phần|PHẦN)\s+/;
-// Tiêu đề phần kiểu số La Mã: "I. …", "II) …", "III: …" (I–X, có nội dung theo sau).
+// Tiêu đề phần kiểu số La Mã: "I. …", "II) …", "III:…" (I–X, có nội dung theo sau,
+// cho phép không có dấu cách sau dấu chấm — "II.Thí sinh…").
 // Không đụng tới đáp án (A./B./C./D. hay a)/b)/c)/d)) nên an toàn.
-const ROMAN_SECTION_RE = /^\s*(?:VIII|VII|VI|IV|IX|III|II|I|V|X)\s*[.):]\s+\S/;
+const ROMAN_SECTION_RE = /^\s*(?:VIII|VII|VI|IV|IX|III|II|I|V|X)\s*[.):]\s*\S/;
+// Tiêu đề phần La Mã (chỉ số nhiều chữ, KHÔNG nhập nhằng với biến I/V/X) bị dính
+// GIỮA dòng (VD ngay sau đáp án "D. … . II. Thí sinh…") → tách ra dòng riêng.
+// Yêu cầu sau số La Mã là chữ HOA (tiêu đề) → tách "II.Thí sinh…" nhưng KHÔNG
+// phá câu tham chiếu như "…phần II. của đồ thị" (sau dấu chấm là chữ thường).
+const INLINE_ROMAN_SECTION_RE = /\s((?:VIII|VII|VI|IV|IX|III|II)\s*[.):]\s*\p{Lu}.*)$/u;
+function splitInlineRomanSection(line: string): string[] {
+  const m = line.match(INLINE_ROMAN_SECTION_RE);
+  if (!m || m.index === undefined) return [line];
+  const before = line.slice(0, m.index).trimEnd();
+  return before ? [before, m[1].trim()] : [line];
+}
 const SOLUTION_RE = /^\s*(Lời\s*giải|LỜI\s*GIẢI)\s*[.:]?\s*$/i;
 // "*A. text" | "A. text" — chữ HOA + dấu chấm (trắc nghiệm)
 const MCQ_OPT_RE  = /(^|\s)(\*?)([A-D])\.\s+/g;
@@ -163,7 +175,7 @@ function parseOneQuestion(index: number, rawBody: string): ParsedQuestion {
 
 export function parseExamText(raw: string): ParseResult {
   const text = raw.replace(/\r\n/g, "\n").replace(/ /g, " ");
-  const lines = text.split("\n");
+  const lines = text.split("\n").flatMap(splitInlineRomanSection);
 
   const sections: string[] = [];
   const sectionsAt: { index: number; text: string }[] = [];
