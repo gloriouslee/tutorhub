@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SectionHeader } from "@/components/shared";
 import {
-  getEnrollments, approveEnrollment, rejectEnrollment, getClasses, addNotification,
+  getEnrollments, approveEnrollment, rejectEnrollment, getClasses,
   type EnrollmentRequest, type EnrollmentStatus,
 } from "@/lib/storage";
 import type { Class } from "@/types";
@@ -20,8 +20,8 @@ import {
 const PKG_LABEL: Record<string, string> = { online: "Gói Online", advanced: "Gói Nâng cao", offline: "Gói Offline" };
 
 const STATUS_CONFIG: Record<EnrollmentStatus, { label: string; color: string; icon: React.ElementType }> = {
-  pending:  { label: "Chờ duyệt", color: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",   icon: Clock },
-  approved: { label: "Đã duyệt",  color: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400", icon: CheckCircle2 },
+  pending:  { label: "Chờ xử lý", color: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",   icon: Clock },
+  approved: { label: "Đã tạo tài khoản",  color: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400", icon: CheckCircle2 },
   rejected: { label: "Từ chối",   color: "bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400",           icon: XCircle },
 };
 
@@ -81,14 +81,6 @@ function ApproveModal({ enrollment, classes, onClose, onDone }: ApproveModalProp
         account_username:  username.trim(),
         account_password:  password.trim(),
       });
-      // Đẩy thông báo về giáo viên: có học viên mới được xếp vào lớp
-      const cls = classes.find(c => c.id === assignedClassId);
-      await addNotification({
-        title: "Học viên mới được xếp lớp",
-        content: `${enrollment.full_name} vừa được duyệt & xếp vào lớp ${cls?.class_name ?? assignedClassId}.`,
-        target_role: "teacher",
-        category: "system",
-      });
       onDone();
     } catch (err: unknown) {
       const raw = err instanceof Error ? err.message : "";
@@ -111,7 +103,7 @@ function ApproveModal({ enrollment, classes, onClose, onDone }: ApproveModalProp
         {/* Header */}
         <div className="flex items-center justify-between p-5 border-b border-border/50 shrink-0">
           <h3 className="font-bold text-lg flex items-center gap-2">
-            <CheckCircle2 className="h-5 w-5 text-emerald-500" /> Duyệt đơn đăng ký
+            <CheckCircle2 className="h-5 w-5 text-emerald-500" /> Tạo tài khoản học viên
           </h3>
           <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full" onClick={onClose}>
             <X className="h-4 w-4" />
@@ -149,14 +141,14 @@ function ApproveModal({ enrollment, classes, onClose, onDone }: ApproveModalProp
           {/* Class assignment */}
           <div className="space-y-2">
             <label className="text-sm font-semibold flex items-center gap-2">
-              <BookOpen className="h-4 w-4 text-primary" /> Phân bổ lớp học
+              <BookOpen className="h-4 w-4 text-primary" /> Lớp học viên muốn đăng ký
             </label>
             {requestedClass && requestedClass.id !== assignedClassId && (
               <div className="flex items-center gap-2 text-xs text-amber-600 bg-amber-50 dark:bg-amber-900/10 px-3 py-1.5 rounded-lg border border-amber-200 dark:border-amber-800/50">
                 <AlertCircle className="h-3.5 w-3.5 shrink-0" />
                 Lớp đăng ký: <strong>{requestedClass.class_name}</strong>
                 <ArrowRight className="h-3 w-3" />
-                Sẽ vào: <strong>{assignedClass?.class_name}</strong>
+                Chuyển giáo viên lớp: <strong>{assignedClass?.class_name}</strong>
               </div>
             )}
             <select
@@ -171,6 +163,9 @@ function ApproveModal({ enrollment, classes, onClose, onDone }: ApproveModalProp
                 </option>
               ))}
             </select>
+            <p className="text-xs text-muted-foreground">
+              Admin chỉ tạo tài khoản. Yêu cầu vào lớp sẽ được chuyển đến giáo viên phụ trách để duyệt hoặc phân bổ sang lớp khác.
+            </p>
           </div>
 
           {/* Account creation */}
@@ -221,7 +216,7 @@ function ApproveModal({ enrollment, classes, onClose, onDone }: ApproveModalProp
             {submitting ? (
               <><span className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full inline-block mr-2" />Đang xử lý...</>
             ) : (
-              <><CheckCircle2 className="h-4 w-4 mr-2" />Duyệt & Tạo tài khoản</>
+              <><CheckCircle2 className="h-4 w-4 mr-2" />Tạo tài khoản & chuyển giáo viên</>
             )}
           </Button>
         </div>
@@ -320,17 +315,17 @@ export default function AdminEnrollmentsPage() {
 
   const FILTERS: { value: Filter; label: string }[] = [
     { value: "all",      label: `Tất cả (${enrollments.length})` },
-    { value: "pending",  label: `Chờ duyệt (${pendingCount})` },
-    { value: "approved", label: "Đã duyệt" },
+    { value: "pending",  label: `Chờ xử lý (${pendingCount})` },
+    { value: "approved", label: "Đã tạo tài khoản" },
     { value: "rejected", label: "Từ chối" },
   ];
 
   return (
-    <PortalLayout role="admin" userName="Admin User" pageTitle="Đăng ký nhập học">
+    <PortalLayout role="admin" userName="Admin User" pageTitle="Tài khoản học viên mới">
       <div className="max-w-5xl mx-auto space-y-6">
         <SectionHeader
-          title="Đơn đăng ký nhập học"
-          subtitle="Xem xét, phân lớp và cấp tài khoản học viên mới"
+          title="Hồ sơ tạo tài khoản học viên"
+          subtitle="Xác minh hồ sơ và cấp tài khoản; giáo viên phụ trách duyệt lớp"
           action={
             <div className="flex gap-2">
               <Button size="sm" variant="outline" className="gap-1.5" onClick={reload}>
@@ -343,8 +338,8 @@ export default function AdminEnrollmentsPage() {
         {/* Stats */}
         <div className="grid grid-cols-3 gap-4">
           {[
-            { label: "Chờ duyệt",  value: pendingCount,  icon: Clock,        color: "text-amber-500 bg-amber-100 dark:bg-amber-900/30" },
-            { label: "Đã duyệt",   value: approvedCount, icon: CheckCircle2, color: "text-emerald-500 bg-emerald-100 dark:bg-emerald-900/30" },
+            { label: "Chờ xử lý",  value: pendingCount,  icon: Clock,        color: "text-amber-500 bg-amber-100 dark:bg-amber-900/30" },
+            { label: "Đã tạo tài khoản", value: approvedCount, icon: CheckCircle2, color: "text-emerald-500 bg-emerald-100 dark:bg-emerald-900/30" },
             { label: "Tổng đơn",   value: enrollments.length, icon: FileText, color: "text-primary bg-primary/10" },
           ].map(stat => (
             <Card key={stat.label}>
@@ -496,7 +491,7 @@ export default function AdminEnrollmentsPage() {
                           <div className="text-xs bg-emerald-50 dark:bg-emerald-900/10 px-3 py-2 rounded-lg border border-emerald-200 dark:border-emerald-800/50 space-y-1">
                             <div className="flex items-center gap-1.5 text-emerald-700 dark:text-emerald-400 font-semibold">
                               <Key className="h-3.5 w-3.5 shrink-0" /> Thông tin tài khoản
-                              <span className="ml-auto text-muted-foreground font-normal">Duyệt: {enr.reviewed_at ? fmtDate(enr.reviewed_at) : ""}</span>
+                                <span className="ml-auto text-muted-foreground font-normal">Tạo: {enr.reviewed_at ? fmtDate(enr.reviewed_at) : ""}</span>
                             </div>
                             <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-foreground">
                               <div>
@@ -510,7 +505,7 @@ export default function AdminEnrollmentsPage() {
                             </div>
                             {enr.assigned_class_id && (
                               <div>
-                                <span className="text-muted-foreground">Lớp được phân: </span>
+                                <span className="text-muted-foreground">Yêu cầu lớp đã chuyển đến giáo viên: </span>
                                 <strong>{classes.find(c => c.id === enr.assigned_class_id)?.class_name ?? enr.assigned_class_id}</strong>
                               </div>
                             )}
@@ -531,7 +526,7 @@ export default function AdminEnrollmentsPage() {
                             className="h-8 gap-1.5 text-xs bg-emerald-600 hover:bg-emerald-700"
                             onClick={() => setApproveTarget(enr)}
                           >
-                            <CheckCircle2 className="h-3.5 w-3.5" /> Duyệt
+                            <CheckCircle2 className="h-3.5 w-3.5" /> Tạo tài khoản
                           </Button>
                           <Button
                             size="sm"

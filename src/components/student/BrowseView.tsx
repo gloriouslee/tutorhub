@@ -22,6 +22,7 @@ import {
 import PreviewPlayerModal from "./PreviewPlayerModal";
 import PackageModal from "./PackageModal";
 import ReviewModal from "./ReviewModal";
+import StudentDiscoveryCatalog from "./StudentDiscoveryCatalog";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Browse view
@@ -196,6 +197,8 @@ export default function BrowseView({ onSelectCourse }: { onSelectCourse: (c: Own
           })}
         </div>
       </section>
+
+      <StudentDiscoveryCatalog mode="materials" />
 
       {/* ── Gói tài liệu trả phí ── */}
       <section className="space-y-4">

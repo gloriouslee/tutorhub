@@ -77,3 +77,31 @@ test("exam client has no client-side grading or direct retry deletion", async ()
   assert.match(examPage, /\/retry/);
   assert.match(examPage, /\/submit/);
 });
+
+test("class registration is student-created and teacher-reviewed", async () => {
+  const collectionRoute = await read(
+    "src/app/api/class-registration-requests/route.ts",
+  );
+  assert.match(collectionRoute, /actor\?\.role !== "student"/);
+  assert.match(collectionRoute, /actor\.studentId/);
+  assert.match(collectionRoute, /hasValidMutationOrigin/);
+  assert.match(collectionRoute, /\.from\("class_registration_requests"\)/);
+  assert.match(collectionRoute, /\.eq\("tutor_id", actor\.teacherId\)/);
+
+  const reviewRoute = await read(
+    "src/app/api/class-registration-requests/[id]/route.ts",
+  );
+  assert.match(reviewRoute, /actor\?\.role !== "teacher"/);
+  assert.match(reviewRoute, /review_class_registration_request_secure/);
+  assert.match(reviewRoute, /p_teacher_id: actor\.teacherId/);
+  assert.match(reviewRoute, /hasValidMutationOrigin/);
+  assert.doesNotMatch(reviewRoute, /role !== "admin"/);
+});
+
+test("class catalog only exposes sanitized published outlines", async () => {
+  const catalogRoute = await read("src/app/api/class-catalog/route.ts");
+  assert.match(catalogRoute, /actor\?\.role !== "student"/);
+  assert.match(catalogRoute, /lesson\.is_published === true/);
+  assert.match(catalogRoute, /\.eq\("published", true\)/);
+  assert.doesNotMatch(catalogRoute, /video_url|file_url|exam_content/);
+});

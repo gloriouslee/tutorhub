@@ -65,7 +65,7 @@ const navConfig: Record<UserRole, NavItem[]> = {
     { label: "Học viên",   href: "/admin/students",         icon: GraduationCap },
     { label: "Giáo viên",  href: "/admin/teachers",         icon: Users },
     { label: "Lớp học",    href: "/admin/classes",          icon: BookOpen },
-    { label: "Đăng ký HV", href: "/admin/enrollments",      icon: GraduationCap },
+    { label: "Tài khoản mới", href: "/admin/enrollments",   icon: GraduationCap },
     { label: "Báo cáo",    href: "/admin/reports",          icon: BarChart3 },
     { label: "Thông báo",  href: "/admin/notifications",    icon: Bell },
     { label: "Tài khoản",  href: "/admin/users",            icon: Shield },
@@ -164,11 +164,21 @@ async function computeBadges(
   if (role === "teacher") {
     const { unread } = await unreadBroadcasts("teacher", "tutorhub_teacher_notif_read", "tutorhub_teacher_notif_deleted");
     if (unread > 0) result["/teacher/notifications"] = unread;
+    const registrationResponse = await fetch(
+      "/api/class-registration-requests?status=pending",
+      { cache: "no-store", credentials: "same-origin" },
+    ).catch(() => null);
+    if (registrationResponse?.ok) {
+      const registrations = await registrationResponse.json() as unknown[];
+      if (registrations.length > 0) {
+        result["/teacher/classes"] = registrations.length;
+      }
+    }
   }
 
   if (role === "admin") {
     const { getEnrollments } = await import("@/lib/storage");
-    // Chỉ còn hàng đợi duyệt đăng ký học viên; học phí & giao dịch do giáo viên duyệt.
+    // Admin chỉ xử lý hồ sơ tạo tài khoản; giáo viên duyệt yêu cầu vào lớp.
     const enrollments = await getEnrollments().catch(() => []);
     const pendingEnroll = enrollments.filter(e => e.status === "pending").length;
     if (pendingEnroll > 0) result["/admin/enrollments"] = pendingEnroll;

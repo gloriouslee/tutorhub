@@ -35,7 +35,8 @@
 -- TABLES (42)
 --   Core (11):    profiles, parents, teachers, students, classes, payments,
 --                 attendance, notifications, homework, submissions, materials
---   Domain (3):   enrollment_requests, purchase_transactions, app_exam_scores
+--   Domain (4):   enrollment_requests, class_registration_requests,
+--                 purchase_transactions, app_exam_scores
 --   KV (14):      kv_curriculum, kv_schedules, kv_online_links, kv_tuition,
 --                 kv_student_packages, kv_session_notes, kv_class_extra_students,
 --                 kv_exam_results, kv_exam_submissions, kv_exam_scores,
@@ -53,7 +54,8 @@
 --                     teaches_class, enrolled_in_class, parent_has_student,
 --                     teaches_student, is_my_child
 --   Trigger fn (1):   handle_new_user  (+ trigger on_auth_user_created)
---   Secure RPC (7):   consume_rate_limit, approve_enrollment_request_secure,
+--   Secure RPC (8):   consume_rate_limit, approve_enrollment_request_secure,
+--                     review_class_registration_request_secure,
 --                     delete_enrollment_request_secure, submit_exam_result_secure,
 --                     retry_exam_secure, replace_admin_entity_rows_secure,
 --                     mutate_invoice_secure
@@ -430,6 +432,30 @@ create table if not exists public.enrollment_requests (
 comment on column public.enrollment_requests.package is
   'Gói học viên đăng ký: online | advanced | offline';
 
+create table if not exists public.class_registration_requests (
+  id                 uuid primary key default gen_random_uuid(),
+  student_id         text not null references public.students(id) on delete cascade,
+  requested_class_id text not null references public.classes(id) on delete cascade,
+  assigned_class_id  text references public.classes(id) on delete set null,
+  source             text not null default 'class'
+                     check (source in ('class', 'material')),
+  resource_id        text,
+  student_note       text,
+  teacher_note       text,
+  status             text not null default 'pending'
+                     check (status in ('pending', 'approved', 'rejected', 'cancelled')),
+  reviewed_by        uuid references public.profiles(id) on delete set null,
+  created_at         timestamptz not null default now(),
+  reviewed_at        timestamptz
+);
+create unique index if not exists class_registration_one_pending_idx
+  on public.class_registration_requests (student_id, requested_class_id)
+  where status = 'pending';
+create index if not exists class_registration_requested_status_idx
+  on public.class_registration_requests (requested_class_id, status, created_at desc);
+create index if not exists class_registration_student_idx
+  on public.class_registration_requests (student_id, created_at desc);
+
 create table if not exists public.purchase_transactions (
   id            text primary key,
   pkg_id        text not null,
@@ -714,11 +740,11 @@ begin
   if request_row.status <> 'pending' then
     raise exception 'enrollment_not_pending';
   end if;
-  perform 1
-  from public.classes
-  where id::text = p_assigned_class_id
-  for update;
-  if not found then raise exception 'class_not_found'; end if;
+  if p_assigned_class_id is not null and not exists (
+    select 1 from public.classes where id = p_assigned_class_id
+  ) then
+    raise exception 'class_not_found';
+  end if;
 
   insert into public.profiles (
     id, email, full_name, role, must_reset_password
@@ -745,26 +771,15 @@ begin
       school = excluded.school,
       grade = excluded.grade;
 
-  update public.classes
-  set student_ids =
-    case
-      when student_id_value = any(coalesce(student_ids, '{}'::text[]))
-      then student_ids
-      else array_append(coalesce(student_ids, '{}'::text[]), student_id_value)
-    end
-  where id::text = p_assigned_class_id;
-
-  if request_row.package is not null then
-    insert into public.kv_student_packages(id, value, updated_at)
-    values (
-      p_assigned_class_id,
-      jsonb_build_object(student_id_value, request_row.package),
-      now()
+  if p_assigned_class_id is not null then
+    insert into public.class_registration_requests (
+      student_id, requested_class_id, source, student_note
+    ) values (
+      student_id_value, p_assigned_class_id, 'class', request_row.note
     )
-    on conflict (id) do update
-    set value = coalesce(public.kv_student_packages.value, '{}'::jsonb)
-                || jsonb_build_object(student_id_value, request_row.package),
-        updated_at = now();
+    on conflict (student_id, requested_class_id)
+      where status = 'pending'
+    do nothing;
   end if;
 
   update public.enrollment_requests
@@ -776,6 +791,94 @@ begin
       reject_reason = null
   where id::text = p_enrollment_id;
   return student_id_value;
+end;
+$$;
+
+create or replace function public.review_class_registration_request_secure(
+  p_request_id uuid,
+  p_action text,
+  p_assigned_class_id text,
+  p_teacher_id text,
+  p_actor_id uuid,
+  p_teacher_note text default null
+)
+returns table(student_id text, assigned_class_id text, student_ids text[])
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  request_row public.class_registration_requests%rowtype;
+  destination public.classes%rowtype;
+begin
+  if not exists (
+    select 1 from public.profiles
+    where id = p_actor_id and role = 'teacher'
+  ) or not exists (
+    select 1 from public.teachers
+    where id = p_teacher_id and user_id = p_actor_id
+  ) then
+    raise exception 'forbidden';
+  end if;
+
+  select * into request_row
+  from public.class_registration_requests
+  where id = p_request_id
+  for update;
+  if not found then raise exception 'registration_not_found'; end if;
+  if request_row.status <> 'pending' then
+    raise exception 'registration_not_pending';
+  end if;
+  if not exists (
+    select 1 from public.classes
+    where id = request_row.requested_class_id and tutor_id = p_teacher_id
+  ) then
+    raise exception 'forbidden';
+  end if;
+
+  if p_action = 'reject' then
+    update public.class_registration_requests
+    set status = 'rejected',
+        teacher_note = nullif(trim(p_teacher_note), ''),
+        reviewed_by = p_actor_id,
+        reviewed_at = now()
+    where id = p_request_id;
+    return;
+  end if;
+  if p_action <> 'approve' or p_assigned_class_id is null then
+    raise exception 'invalid_action';
+  end if;
+
+  select * into destination
+  from public.classes
+  where id = p_assigned_class_id and tutor_id = p_teacher_id
+  for update;
+  if not found then raise exception 'destination_class_not_owned'; end if;
+  if destination.max_students is not null
+     and coalesce(array_length(destination.student_ids, 1), 0) >= destination.max_students
+     and not request_row.student_id = any(coalesce(destination.student_ids, '{}'::text[])) then
+    raise exception 'class_full';
+  end if;
+
+  update public.classes
+  set student_ids = case
+    when request_row.student_id = any(coalesce(classes.student_ids, '{}'::text[]))
+      then classes.student_ids
+    else array_append(coalesce(classes.student_ids, '{}'::text[]), request_row.student_id)
+  end
+  where id = p_assigned_class_id
+  returning classes.student_ids into destination.student_ids;
+
+  update public.class_registration_requests
+  set status = 'approved',
+      assigned_class_id = p_assigned_class_id,
+      teacher_note = nullif(trim(p_teacher_note), ''),
+      reviewed_by = p_actor_id,
+      reviewed_at = now()
+  where id = p_request_id;
+
+  return query
+    select request_row.student_id, p_assigned_class_id, destination.student_ids;
 end;
 $$;
 
@@ -1098,6 +1201,7 @@ grant execute on function public.is_my_child(text)           to authenticated, s
 -- Secure RPCs: service_role only.
 revoke all on function public.consume_rate_limit(text, text, integer, integer)                 from public, anon, authenticated;
 revoke all on function public.approve_enrollment_request_secure(text, text, uuid, uuid)         from public, anon, authenticated;
+revoke all on function public.review_class_registration_request_secure(uuid, text, text, text, uuid, text) from public, anon, authenticated;
 revoke all on function public.delete_enrollment_request_secure(text, uuid)                      from public, anon, authenticated;
 revoke all on function public.submit_exam_result_secure(text, text, text, jsonb, boolean)       from public, anon, authenticated;
 revoke all on function public.retry_exam_secure(text, text, text)                               from public, anon, authenticated;
@@ -1105,6 +1209,7 @@ revoke all on function public.replace_admin_entity_rows_secure(text, jsonb, uuid
 revoke all on function public.mutate_invoice_secure(text, text, text, uuid, jsonb)              from public, anon, authenticated;
 grant execute on function public.consume_rate_limit(text, text, integer, integer)               to service_role;
 grant execute on function public.approve_enrollment_request_secure(text, text, uuid, uuid)      to service_role;
+grant execute on function public.review_class_registration_request_secure(uuid, text, text, text, uuid, text) to service_role;
 grant execute on function public.delete_enrollment_request_secure(text, uuid)                   to service_role;
 grant execute on function public.submit_exam_result_secure(text, text, text, jsonb, boolean)    to service_role;
 grant execute on function public.retry_exam_secure(text, text, text)                            to service_role;
@@ -1277,8 +1382,10 @@ create policy app_exam_scores_scoped_select on public.app_exam_scores
     or public.get_my_role() = 'admin'
   );
 
--- enrollment_requests and purchase_transactions are API-only (service_role):
+-- enrollment_requests, class_registration_requests and purchase_transactions
+-- are API-only (service_role):
 -- no authenticated/anon grants or policies -> default deny.
+grant select, insert, update, delete on public.class_registration_requests to service_role;
 
 -- ── KV: curriculum (answer keys; never selectable by students/parents) ───────
 grant select, insert, update, delete on public.kv_curriculum to authenticated;

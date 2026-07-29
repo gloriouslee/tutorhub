@@ -74,7 +74,6 @@ const NotesTab = dynamic(() => import("@/components/teacher/NotesTab"), {
 const StudentsTab = dynamic(() => import("@/components/teacher/StudentsTab"), {
   loading: DeferredPanelFallback,
 });
-const AddStudentModal = dynamic(() => import("@/components/teacher/AddStudentModal"));
 const HomeworkModal = dynamic(() => import("@/components/teacher/HomeworkModal"));
 const SessionNotesPanel = dynamic(() => import("@/components/teacher/SessionNotesPanel"));
 const UploadModal = dynamic(() => import("@/components/teacher/UploadModal"));
@@ -160,31 +159,8 @@ export default function TeacherClassDetailPage() {
 
   // Extra students added by teacher (persisted to localStorage)
   const [extraStudentIds, setExtraStudentIds] = useState<string[]>([]);
-  const [addStudentModal, setAddStudentModal] = useState(false);
   const [studentSearch, setStudentSearch] = useState("");
   const [students, setStudents] = useState<Student[]>([]);
-
-  // Approved enrolled students from Supabase — only those assigned to THIS class.
-  // Id dùng `enr_${e.id}` cho khớp với id mà approveEnrollment ghi vào classes.student_ids.
-  const [approvedEnrollments, setApprovedEnrollments] = useState<{ id: string; full_name: string; email: string; school: string; grade: string; created_at?: string }[]>([]);
-  useEffect(() => {
-    import("@/lib/storage").then(({ getEnrollments }) =>
-      getEnrollments().then(list => {
-        setApprovedEnrollments(
-          list
-            .filter(e => e.status === "approved" && e.assigned_class_id === classId)
-            .map(e => ({
-              id: `enr_${e.id}`,
-              full_name: e.full_name,
-              email: e.email,
-              school: e.school ?? "",
-              grade: e.grade ?? "",
-              created_at: e.created_at,
-            }))
-        );
-      })
-    );
-  }, [classId]);
 
   // DB class row (Supabase) — nguồn chính cho danh sách student_ids của lớp
   const [dbStudentIds, setDbStudentIds] = useState<string[] | null>(null);
@@ -402,7 +378,6 @@ export default function TeacherClassDetailPage() {
     const ids = [...new Set([
       ...(dbStudentIds ?? cls.student_ids ?? []),
       ...extraStudentIds,
-      ...approvedEnrollments.map(e => e.id),
     ])];
     async function loadComments() {
       const loaded: Record<string, any[]> = {};
@@ -412,7 +387,7 @@ export default function TeacherClassDetailPage() {
       setComments(loaded);
     }
     loadComments();
-  }, [cls, dbStudentIds, extraStudentIds, approvedEnrollments]);
+  }, [cls, dbStudentIds, extraStudentIds]);
 
   async function handleSaveOnlineLink() {
     await saveOnlineLink(classId, onlineLinkDraft);
@@ -493,7 +468,6 @@ export default function TeacherClassDetailPage() {
   const allEnrolledIds = [...new Set([
     ...(dbStudentIds ?? cls.student_ids ?? []),
     ...extraStudentIds,
-    ...approvedEnrollments.map(e => e.id),
   ])];
   // Progress from real data: distinct homework submissions / homework count (null → hiển thị "—")
   const progressFor = (studentId: string): number | null => {
@@ -510,17 +484,7 @@ export default function TeacherClassDetailPage() {
     join_date: s.created_at?.slice(0, 10) || toLocalDateKey(new Date()),
     progress: progressFor(s.id),
   }));
-  const enrolledClassStudents = approvedEnrollments
-    .filter(e => allEnrolledIds.includes(e.id) && !students.some(s => s.id === e.id))
-    .map(e => ({
-      id: e.id, user_id: e.id, full_name: e.full_name, email: e.email,
-      dob: "", school: e.school, grade: e.grade, learning_type: "online" as const,
-      parent_id: undefined, avatar_url: undefined, created_at: e.created_at ?? "",
-      package: (studentPackages[e.id] ?? "online") as StudentPackage,
-      join_date: e.created_at ? e.created_at.slice(0, 10) : toLocalDateKey(new Date()),
-      progress: progressFor(e.id),
-    }));
-  const classStudents = [...storedClassStudents, ...enrolledClassStudents];
+  const classStudents = storedClassStudents;
 
   async function handleRemoveStudent(student: { id: string; full_name: string }) {
     if (!window.confirm(`Xóa ${student.full_name} khỏi lớp?`)) return;
@@ -735,11 +699,13 @@ export default function TeacherClassDetailPage() {
           {/* ── Students ── */}
           {activeTab === "students" && (
             <StudentsTab
+              classId={classId}
+              teacherClasses={myClasses}
               classStudents={classStudents}
               studentSearch={studentSearch}
               setStudentSearch={setStudentSearch}
               comments={comments}
-              onAddStudent={() => setAddStudentModal(true)}
+              onRosterChanged={setDbStudentIds}
               onSetPackage={handleSetPackage}
               onOpenComment={setCommentModalStudent}
               onRemoveStudent={handleRemoveStudent}
@@ -795,15 +761,6 @@ export default function TeacherClassDetailPage() {
               .catch(() => {});
             setSessionNotesPanel(null);
           }}
-        />
-      )}
-      {addStudentModal && (
-        <AddStudentModal
-          classId={classId}
-          enrolledIds={allEnrolledIds}
-          approvedEnrollments={approvedEnrollments}
-          onAdd={newIds => setExtraStudentIds(prev => [...new Set([...prev, ...newIds])])}
-          onClose={() => setAddStudentModal(false)}
         />
       )}
     </PortalLayout>

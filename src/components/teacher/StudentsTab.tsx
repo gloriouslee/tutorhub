@@ -1,12 +1,14 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { ProgressBar } from "@/components/shared";
 import { type StudentPackage } from "@/lib/storage";
-import { Users, Plus, Trash2, MessageSquare } from "lucide-react";
+import type { ClassRegistrationRequest } from "@/lib/class-registration-types";
+import { Users, Trash2, MessageSquare, Clock, CheckCircle2, XCircle, ArrowRight } from "lucide-react";
 import { PACKAGE_TYPES } from "./classDetail.types";
 
 export default function StudentsTab({
@@ -14,7 +16,9 @@ export default function StudentsTab({
   studentSearch,
   setStudentSearch,
   comments,
-  onAddStudent,
+  classId,
+  teacherClasses,
+  onRosterChanged,
   onSetPackage,
   onOpenComment,
   onRemoveStudent,
@@ -23,13 +27,187 @@ export default function StudentsTab({
   studentSearch: string;
   setStudentSearch: (v: string) => void;
   comments: Record<string, { text: string; date: string; rating: number }[]>;
-  onAddStudent: () => void;
+  classId: string;
+  teacherClasses: { id: string; class_name: string; subject: string }[];
+  onRosterChanged: (studentIds: string[]) => void;
   onSetPackage: (studentId: string, pkg: StudentPackage) => void;
   onOpenComment: (student: any) => void;
   onRemoveStudent: (student: any) => void;
 }) {
+  const [requests, setRequests] = useState<ClassRegistrationRequest[]>([]);
+  const [destinations, setDestinations] = useState<Record<string, string>>({});
+  const [loadingRequests, setLoadingRequests] = useState(true);
+  const [reviewingId, setReviewingId] = useState("");
+  const [requestError, setRequestError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    fetch(
+      `/api/class-registration-requests?class_id=${encodeURIComponent(classId)}&status=pending`,
+      { cache: "no-store", credentials: "same-origin" },
+    )
+      .then(async (response) => {
+        if (!response.ok) throw new Error("request_failed");
+        return response.json() as Promise<ClassRegistrationRequest[]>;
+      })
+      .then((items) => {
+        if (!active) return;
+        setRequests(items);
+        setDestinations(
+          Object.fromEntries(items.map((item) => [item.id, classId])),
+        );
+      })
+      .catch(() => {
+        if (active) setRequestError("Không thể tải yêu cầu đăng ký.");
+      })
+      .finally(() => {
+        if (active) setLoadingRequests(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [classId]);
+
+  async function review(
+    request: ClassRegistrationRequest,
+    action: "approve" | "reject",
+  ) {
+    setReviewingId(request.id);
+    setRequestError("");
+    try {
+      const response = await fetch(
+        `/api/class-registration-requests/${encodeURIComponent(request.id)}`,
+        {
+          method: "PATCH",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action,
+            assigned_class_id:
+              action === "approve" ? destinations[request.id] ?? classId : null,
+          }),
+        },
+      );
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(String(result.error ?? "review_failed"));
+      }
+      setRequests((items) => items.filter((item) => item.id !== request.id));
+      const roster = result.result?.student_ids;
+      if (
+        action === "approve"
+        && destinations[request.id] === classId
+        && Array.isArray(roster)
+      ) {
+        onRosterChanged(roster.map(String));
+      }
+    } catch (error) {
+      const code = error instanceof Error ? error.message : "";
+      setRequestError(
+        code === "class_full"
+          ? "Lớp được chọn đã đủ sĩ số."
+          : "Không thể xử lý yêu cầu. Vui lòng thử lại.",
+      );
+    } finally {
+      setReviewingId("");
+    }
+  }
+
   return (
     <div className="space-y-6">
+      <Card className="border-amber-200 bg-amber-50/50 dark:border-amber-900 dark:bg-amber-950/10">
+        <CardContent className="p-5">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <div>
+              <h3 className="flex items-center gap-2 font-bold">
+                <Clock className="h-4 w-4 text-amber-600" />
+                Yêu cầu đăng ký lớp
+              </h3>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Duyệt vào lớp này hoặc phân bổ học viên sang một lớp khác bạn phụ trách.
+              </p>
+            </div>
+            {requests.length > 0 && (
+              <Badge className="bg-amber-100 text-amber-700">
+                {requests.length} chờ duyệt
+              </Badge>
+            )}
+          </div>
+
+          {loadingRequests ? (
+            <p className="py-4 text-sm text-muted-foreground">Đang tải yêu cầu…</p>
+          ) : requests.length === 0 ? (
+            <p className="rounded-xl border border-dashed border-amber-200 bg-background/60 p-4 text-sm text-muted-foreground">
+              Hiện không có yêu cầu đăng ký đang chờ.
+            </p>
+          ) : (
+            <div className="space-y-3">
+              {requests.map((request) => (
+                <div
+                  key={request.id}
+                  className="rounded-xl border border-border bg-background p-4"
+                >
+                  <div className="flex flex-col gap-4 lg:flex-row lg:items-center">
+                    <div className="min-w-0 flex-1">
+                      <p className="font-semibold">{request.student?.full_name}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {[request.student?.email, request.student?.school, request.student?.grade]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Đăng ký từ {request.source === "material" ? "tài liệu lớp học" : "danh mục lớp"}
+                      </p>
+                    </div>
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                      <select
+                        value={destinations[request.id] ?? classId}
+                        onChange={(event) =>
+                          setDestinations((current) => ({
+                            ...current,
+                            [request.id]: event.target.value,
+                          }))
+                        }
+                        className="h-9 min-w-52 rounded-lg border border-input bg-background px-3 text-sm"
+                      >
+                        {teacherClasses.map((item) => (
+                          <option key={item.id} value={item.id}>
+                            {item.class_name} · {item.subject}
+                          </option>
+                        ))}
+                      </select>
+                      {destinations[request.id] !== classId && (
+                        <ArrowRight className="hidden h-4 w-4 text-muted-foreground sm:block" />
+                      )}
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="text-red-600"
+                        disabled={reviewingId === request.id}
+                        onClick={() => review(request, "reject")}
+                      >
+                        <XCircle className="mr-1.5 h-4 w-4" /> Từ chối
+                      </Button>
+                      <Button
+                        size="sm"
+                        disabled={reviewingId === request.id}
+                        onClick={() => review(request, "approve")}
+                      >
+                        <CheckCircle2 className="mr-1.5 h-4 w-4" />
+                        {reviewingId === request.id ? "Đang xử lý…" : "Duyệt"}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          {requestError && (
+            <p className="mt-3 text-sm text-red-600">{requestError}</p>
+          )}
+        </CardContent>
+      </Card>
+
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h3 className="text-lg font-bold text-foreground">Danh sách học viên</h3>
@@ -45,7 +223,6 @@ export default function StudentsTab({
             />
             <Users className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           </div>
-          <Button variant="outline" onClick={onAddStudent}><Plus className="h-4 w-4 mr-2" /> Thêm học viên</Button>
         </div>
       </div>
 

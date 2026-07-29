@@ -10,6 +10,7 @@ import { LearningModeBadge, SectionHeader } from "@/components/shared";
 import { getOnlineLink } from "@/lib/storage";
 import { BookOpen, Clock, Video, MapPin, Users, Search, ChevronRight, GraduationCap } from "lucide-react";
 import { useStudentContext } from "@/hooks/useStudentContext";
+import StudentDiscoveryCatalog from "@/components/student/StudentDiscoveryCatalog";
 
 const DAY_VI: Record<string, string> = {
   Monday: "Thứ Hai", Tuesday: "Thứ Ba", Wednesday: "Thứ Tư",
@@ -209,6 +210,10 @@ export default function StudentClassesPage() {
               );
             })
           )}
+        </div>
+
+        <div className="border-t border-border pt-8">
+          <StudentDiscoveryCatalog mode="classes" />
         </div>
       </div>
     </PortalLayout>
