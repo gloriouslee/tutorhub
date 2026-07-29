@@ -48,6 +48,9 @@ export interface ParseResult {
 
 const QUESTION_RE = /^\s*Câu\s+(\d+)\s*[.:]?\s*(.*)$/i;
 const SECTION_RE  = /^\s*(Phần|PHẦN)\s+/;
+// Tiêu đề phần kiểu số La Mã: "I. …", "II) …", "III: …" (I–X, có nội dung theo sau).
+// Không đụng tới đáp án (A./B./C./D. hay a)/b)/c)/d)) nên an toàn.
+const ROMAN_SECTION_RE = /^\s*(?:VIII|VII|VI|IV|IX|III|II|I|V|X)\s*[.):]\s+\S/;
 const SOLUTION_RE = /^\s*(Lời\s*giải|LỜI\s*GIẢI)\s*[.:]?\s*$/i;
 // "*A. text" | "A. text" — chữ HOA + dấu chấm (trắc nghiệm)
 const MCQ_OPT_RE  = /(^|\s)(\*?)([A-D])\.\s+/g;
@@ -172,7 +175,7 @@ export function parseExamText(raw: string): ParseResult {
   for (const line of lines) {
     // "Phần ..." ở bất kỳ đâu = ranh giới nhóm: đóng câu hiện tại,
     // không để tiêu đề phần lọt vào lời giải câu trước
-    if (SECTION_RE.test(line)) {
+    if (SECTION_RE.test(line) || ROMAN_SECTION_RE.test(line)) {
       if (current) { blocks.push(current); current = null; }
       sections.push(line.trim());
       sectionsAt.push({ index: blocks.length, text: line.trim() });
