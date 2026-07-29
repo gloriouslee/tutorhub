@@ -1023,13 +1023,13 @@ export async function getStudentPackagesForClasses(
   if (classIds.length === 0) return {};
   const { data, error } = await supabase
     .from("kv_student_packages")
-    .select("id,data")
+    .select("id,value")
     .in("id", [...classIds]);
   if (error) throw error;
   return Object.fromEntries(
     (data ?? []).map(row => [
       String(row.id),
-      (row.data ?? {}) as Record<string, StudentPackage>,
+      (row.value ?? {}) as Record<string, StudentPackage>,
     ]),
   );
 }

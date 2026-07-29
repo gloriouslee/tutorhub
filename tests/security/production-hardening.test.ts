@@ -348,6 +348,9 @@ test("teacher portal data is class-scoped and notification state is durable", as
   assert.match(migration, /public\.teaches_class\(class_id\)/);
   assert.match(migration, /data, submitted_at/);
   assert.doesNotMatch(migration, /hw_submissions \([\s\S]{0,120}created_at/);
+  assert.match(migration, /curriculum\.value/);
+  assert.match(migration, /set value = value/);
+  assert.doesNotMatch(migration, /curriculum\.data|set data = data/);
   assert.match(entityRoute, /item\.sender_user_id = actor\.userId/);
   assert.match(notificationPage, /getNotificationStates/);
   assert.doesNotMatch(notificationPage, /tutorhub_teacher_notif_read|localStorage/);
@@ -366,6 +369,7 @@ test("teacher profile, schedule and submissions use canonical stores", async () 
   assert.match(settingsPage, /\/api\/teacher\/profile/);
   assert.match(storage, /\.from\("classes"\)[\s\S]{0,200}\.update\(\{ schedule \}\)/);
   assert.match(storage, /\.update\(\{ zoom_link: link\.trim\(\) \|\| null \}\)/);
+  assert.match(storage, /\.from\("kv_student_packages"\)[\s\S]{0,100}\.select\("id,value"\)/);
   assert.match(submissionStore, /\.from\("hw_submissions"\)/);
   assert.doesNotMatch(submissionStore, /\.from\("submissions"\)/);
 });

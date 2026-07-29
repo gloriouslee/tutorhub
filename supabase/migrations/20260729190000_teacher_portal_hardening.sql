@@ -107,7 +107,7 @@ left join public.teacher_homework homework
   on homework.id = submission.homework_id
 left join public.kv_curriculum curriculum
   on jsonb_path_exists(
-    curriculum.data,
+    curriculum.value,
     '$[*].sessions[*].lessons[*] ? (@.id == $lesson_id)',
     jsonb_build_object('lesson_id', submission.homework_id)
   )
@@ -142,11 +142,11 @@ create policy homework_attachments_teacher_write on public.homework_attachments
 -- Profile data now lives in teachers/profiles. Keep only payment configuration
 -- in the student/parent-readable settings blob.
 update public.kv_teacher_settings
-set data = data
+set value = value
   - 'full_name'
   - 'email'
   - 'phone'
   - 'specialization'
   - 'bio'
   - 'avatar_url'
-where data ?| array['full_name','email','phone','specialization','bio','avatar_url'];
+where value ?| array['full_name','email','phone','specialization','bio','avatar_url'];
