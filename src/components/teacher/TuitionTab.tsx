@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import {
   getClassTuition, saveClassTuition, recordTuitionPayment, deleteTuitionPayment,
-  getInvoices, issueTuitionInvoice, confirmInvoicePaid, getAllTeacherAttendance, addNotification,
+  getInvoices, issueTuitionInvoice, confirmInvoicePaid, getAllTeacherAttendance,
   type ClassTuitionConfig, type StudentTuitionData, type TuitionPaymentRecord,
   type TuitionInvoice, type TuitionDiscount, type TeacherAttendanceRecord,
   type PackagePrices,
@@ -272,33 +272,38 @@ function StudentCard({ student, config, period, classId, className, invoice, att
   async function issueInvoice() {
     if (busy || fee.net <= 0) return;
     setBusy(true);
-    await issueTuitionInvoice({ classId, className, studentId: student.id, amount: fee.net, period, dueDate: `${period}-15` });
-    setBusy(false);
-    onUpdate();
+    try {
+      await issueTuitionInvoice({ classId, className, studentId: student.id, amount: fee.net, period, dueDate: `${period}-15` });
+      onUpdate();
+    } catch {
+      alert("Không thể phát hành học phí.");
+    } finally {
+      setBusy(false);
+    }
   }
   async function confirmReceipt() {
     if (busy || !invoice || invoice.status !== "pending_verification") return;
     setBusy(true);
-    const fresh = (await getInvoices()).find(i => i.id === invoice.id);
-    if (fresh && fresh.status === "pending_verification") {
-      await confirmInvoicePaid(invoice.id);
-      const invPeriod = invoice.period ?? period;
-      const freshConfig = await getClassTuition(classId);
-      const freshData = freshConfig.students[student.id] ?? { payments: [] };
-      if (paidInPeriod(freshData, invPeriod) < invoice.amount) {
-        await recordTuitionPayment(classId, student.id, {
-          amount: invoice.amount, period: invPeriod, paid_at: new Date().toISOString(),
-          method: "transfer", note: "Xác nhận từ biên lai học sinh",
-        });
+    try {
+      const fresh = (await getInvoices()).find(i => i.id === invoice.id);
+      if (fresh && fresh.status === "pending_verification") {
+        await confirmInvoicePaid(invoice.id);
+        const invPeriod = invoice.period ?? period;
+        const freshConfig = await getClassTuition(classId);
+        const freshData = freshConfig.students[student.id] ?? { payments: [] };
+        if (paidInPeriod(freshData, invPeriod) < invoice.amount) {
+          await recordTuitionPayment(classId, student.id, {
+            amount: invoice.amount, period: invPeriod, paid_at: new Date().toISOString(),
+            method: "transfer", note: "Xác nhận từ biên lai học sinh",
+          });
+        }
       }
-      await addNotification({
-        title: "Đã thu học phí",
-        content: `Giáo viên đã xác nhận thu ${formatCurrency(invoice.amount)} học phí từ ${name}.`,
-        target_role: "admin", category: "system",
-      });
+      onUpdate();
+    } catch {
+      alert("Không thể xác nhận biên lai. Vui lòng tải lại để kiểm tra trạng thái.");
+    } finally {
+      setBusy(false);
     }
-    setBusy(false);
-    onUpdate();
   }
 
   const statusBadge = fee.net === 0
@@ -520,14 +525,19 @@ export default function TuitionTab({ classId, className, students }: Props) {
   async function issueAll() {
     if (bulkBusy) return;
     setBulkBusy(true);
-    for (const st of students) {
-      if (invoiceFor(st.id)) continue;
-      const net = netFor(st);
-      if (net <= 0) continue;
-      await issueTuitionInvoice({ classId, className: clsName, studentId: st.id, amount: net, period, dueDate: `${period}-15` });
+    try {
+      await Promise.all(students.map(async st => {
+        if (invoiceFor(st.id)) return;
+        const net = netFor(st);
+        if (net <= 0) return;
+        await issueTuitionInvoice({ classId, className: clsName, studentId: st.id, amount: net, period, dueDate: `${period}-15` });
+      }));
+      reload();
+    } catch {
+      alert("Một số hóa đơn chưa được phát hành. Vui lòng tải lại để kiểm tra.");
+    } finally {
+      setBulkBusy(false);
     }
-    setBulkBusy(false);
-    reload();
   }
 
   const missingCount = students.filter(st => !invoiceFor(st.id) && netFor(st) > 0).length;

@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { LearningModeBadge } from "@/components/shared";
 import {
-  getStudentComments, saveStudentComment,
+  getStudentCommentsMany, saveStudentComment,
   getClassScheduleOverride,
   getOnlineLink, saveOnlineLink,
   getCurriculum, type CurriculumSession as CurriculumSessionData,
@@ -380,11 +380,7 @@ export default function TeacherClassDetailPage() {
       ...extraStudentIds,
     ])];
     async function loadComments() {
-      const loaded: Record<string, any[]> = {};
-      for (const id of ids) {
-        loaded[id] = await getStudentComments(id);
-      }
-      setComments(loaded);
+      setComments(await getStudentCommentsMany(ids));
     }
     loadComments();
   }, [cls, dbStudentIds, extraStudentIds]);
@@ -405,15 +401,14 @@ export default function TeacherClassDetailPage() {
       const nextManual = updated.filter(h => h.class_id === classId && h.source !== "curriculum");
       const nextIds = new Set(nextManual.map(h => h.id));
       // Bài bị bỏ khỏi danh sách so với lần trước → xóa từng row.
-      for (const h of prevManual) {
-        if (!nextIds.has(h.id)) await removeTeacherHomework(h.id);
-      }
-      // Bài thêm mới / cập nhật → upsert từng row.
-      for (const h of nextManual) {
-        await upsertTeacherHomework(h);
-      }
-    } catch {}
-    setHomeworks(updated);
+      await Promise.all([
+        ...prevManual.filter(h => !nextIds.has(h.id)).map(h => removeTeacherHomework(h.id)),
+        ...nextManual.map(h => upsertTeacherHomework(h)),
+      ]);
+      setHomeworks(updated);
+    } catch {
+      alert("Không thể lưu bài tập. Dữ liệu cũ vẫn được giữ nguyên.");
+    }
   }
 
   function handleSaveHomework(hw: Homework) {

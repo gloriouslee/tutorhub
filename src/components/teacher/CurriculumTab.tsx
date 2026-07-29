@@ -543,14 +543,11 @@ export default function CurriculumTab({ classId, schedule, students = [], gradeL
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const map: Record<string, StoredExamResult[]> = {};
-      for (const ch of chapters) {
-        for (const s of ch.sessions) {
-          for (const l of s.lessons) {
-            if (l.type === "exam") map[l.id] = await getAllExamResults(classId, l.id);
-          }
-        }
-      }
+      const exams = chapters.flatMap(ch => ch.sessions).flatMap(session => session.lessons).filter(lesson => lesson.type === "exam");
+      const entries = await Promise.all(
+        exams.map(async exam => [exam.id, await getAllExamResults(classId, exam.id)] as const),
+      );
+      const map = Object.fromEntries(entries) as Record<string, StoredExamResult[]>;
       if (!cancelled) setExamResultsMap(map);
     })();
     return () => { cancelled = true; };

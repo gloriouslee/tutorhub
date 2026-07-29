@@ -242,6 +242,7 @@ export default function StudentHomeworkPage() {
       file,
     );
     const subData: Omit<SubmissionRecord, "id"> = {
+      class_id:    selectedHw.class_id,
       homework_id:  selectedHw.id,
       student_id:   STUDENT_ID,
       student_name: STUDENT_NAME,

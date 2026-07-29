@@ -74,16 +74,16 @@ interface Course {
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function loadCourses(): Promise<Course[]> {
+async function loadCourses(teacherId: string): Promise<Course[]> {
   if (typeof window === "undefined") return [];
   try {
-    return await getTeacherMaterials<Course>();
+    return await getTeacherMaterials<Course>(teacherId);
   } catch {}
   return [];
 }
-function saveCourses(courses: Course[], teacherId: string) {
-  if (!teacherId) return;
-  saveTeacherMaterials(courses, teacherId).catch(() => {});
+async function saveCourses(courses: Course[], teacherId: string) {
+  if (!teacherId) throw new Error("teacher_not_ready");
+  await saveTeacherMaterials(courses, teacherId);
 }
 
 function uid() { return Math.random().toString(36).slice(2, 9); }
@@ -605,7 +605,7 @@ function CourseEditor({
   onClose,
 }: {
   course: Course;
-  onUpdate: (updated: Course) => void;
+  onUpdate: (updated: Course) => Promise<void>;
   onClose: () => void;
 }) {
   const { myClasses } = useTeacherContext();
@@ -665,10 +665,13 @@ function CourseEditor({
 
   const handleSave = async () => {
     setSaveState("saving");
-    await new Promise(r => setTimeout(r, 600)); // simulate API
-    onUpdate(draft);
-    setSaveState("saved");
-    setTimeout(() => setSaveState("idle"), 2500);
+    try {
+      await onUpdate(draft);
+      setSaveState("saved");
+      setTimeout(() => setSaveState("idle"), 2500);
+    } catch {
+      setSaveState("error");
+    }
   };
 
   const totalLessons = draft.chapters.flatMap(c => c.lessons).length;
@@ -698,6 +701,7 @@ function CourseEditor({
             {saveState === "saving" ? "Đang lưu..." : "Lưu"}
           </Button>
           {saveState === "saved" && <CheckCircle2 className="h-4 w-4 text-emerald-500" />}
+          {saveState === "error" && <span className="text-xs text-red-500">Lưu thất bại, dữ liệu cũ vẫn được giữ nguyên.</span>}
         </div>
       </div>
 
@@ -1097,29 +1101,45 @@ export default function TeacherMaterialsPage() {
   const [editing, setEditing] = useState<Course | null>(null);
 
   useEffect(() => {
-    loadCourses().then(list => { setCourses(list); setLoaded(true); });
-  }, []);
+    if (!teacherId) return;
+    setLoaded(false);
+    loadCourses(teacherId).then(list => { setCourses(list); setLoaded(true); });
+  }, [teacherId]);
 
-  const createCourse = () => {
+  const createCourse = async () => {
     if (!loaded) return;
     const c: Course = {
-      id: uid(), title: "", subject: "Toán học", grade: 12,
+      id: `mat_${crypto.randomUUID()}`, title: "", subject: "Toán học", grade: 12,
       type: "class", description: "", chapters: [], published: false,
       packages: ["online", "advanced", "offline"], includes: [],
     };
-    setCourses(prev => { const next = [c, ...prev]; saveCourses(next, teacherId); return next; });
-    setEditing(c);
+    const next = [c, ...courses];
+    try {
+      await saveCourses(next, teacherId);
+      setCourses(next);
+      setEditing(c);
+    } catch {
+      alert("Không thể tạo tài liệu. Dữ liệu cũ vẫn được giữ nguyên.");
+    }
   };
 
-  const updateCourse = (updated: Course) => {
-    if (!loaded) return;
-    setCourses(prev => { const next = prev.map(c => c.id === updated.id ? updated : c); saveCourses(next, teacherId); return next; });
+  const updateCourse = async (updated: Course) => {
+    if (!loaded) throw new Error("not_loaded");
+    const next = courses.map(c => c.id === updated.id ? updated : c);
+    await saveCourses(next, teacherId);
+    setCourses(next);
   };
 
-  const deleteCourse = (id: string) => {
+  const deleteCourse = async (id: string) => {
     if (!loaded) return;
-    setCourses(prev => { const next = prev.filter(c => c.id !== id); saveCourses(next, teacherId); return next; });
-    if (editing?.id === id) setEditing(null);
+    const next = courses.filter(c => c.id !== id);
+    try {
+      await saveCourses(next, teacherId);
+      setCourses(next);
+      if (editing?.id === id) setEditing(null);
+    } catch {
+      alert("Không thể xóa tài liệu. Dữ liệu cũ vẫn được giữ nguyên.");
+    }
   };
 
   return (
@@ -1128,7 +1148,7 @@ export default function TeacherMaterialsPage() {
         {editing ? (
           <CourseEditor
             course={editing}
-            onUpdate={updated => { updateCourse(updated); setEditing(updated); }}
+            onUpdate={async updated => { await updateCourse(updated); setEditing(updated); }}
             onClose={() => setEditing(null)}
           />
         ) : (

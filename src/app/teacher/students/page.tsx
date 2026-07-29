@@ -11,7 +11,7 @@ import { SectionHeader, ProgressBar } from "@/components/shared";
 import type { Class, Student } from "@/types";
 import {
   getStudentComments, saveStudentComment,
-  getStudentPackages, type StudentPackage,
+  getStudentPackagesForClasses, type StudentPackage,
   getAllExamScores, getExamScoresByStudent, saveExamScore, deleteExamScore, type StoredExamScore,
   getAllTeacherAttendance, getHwSubmissions, getStudents, getTeacherHomework,
 } from "@/lib/storage";
@@ -817,9 +817,7 @@ export default function TeacherStudentsPage() {
 
   useEffect(() => {
     async function loadPackages() {
-      const map: Record<string, Record<string, StudentPackage>> = {};
-      for (const cls of myClasses) map[cls.id] = await getStudentPackages(cls.id);
-      setPackagesMap(map);
+      setPackagesMap(await getStudentPackagesForClasses(myClasses.map(cls => cls.id)));
     }
     loadPackages();
     getAllTeacherAttendance({ classIds: myClasses.map(c => c.id) })

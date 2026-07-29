@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { SectionHeader } from "@/components/shared";
 import {
   getInvoices, confirmInvoicePaid, recordTuitionPayment,
-  getTransactions, updateTransactionStatus, addNotification,
+  getTransactions, updateTransactionStatus,
   type TuitionInvoice, type PurchaseTransaction,
 } from "@/lib/storage";
 import { formatCurrency } from "@/lib/utils";
@@ -43,38 +43,35 @@ export default function TeacherApprovalsPage() {
   async function confirmInvoice(inv: TuitionInvoice) {
     if (busy) return;
     setBusy(inv.id);
-    if (inv.class_id) {
-      // Ghi nhận thanh toán theo lớp — hàm này tự đồng bộ hóa đơn sang "đã đóng"
-      await recordTuitionPayment(inv.class_id, inv.child_id, {
-        amount: inv.amount, period: periodOf(inv), paid_at: new Date().toISOString(),
-        method: "transfer", note: "Xác nhận biên lai học sinh (Duyệt thu)",
-      });
-    } else {
-      await confirmInvoicePaid(inv.id);
+    try {
+      if (inv.class_id) {
+        // Ghi nhận thanh toán theo lớp — hàm này tự đồng bộ hóa đơn sang "đã đóng"
+        await recordTuitionPayment(inv.class_id, inv.child_id, {
+          amount: inv.amount, period: periodOf(inv), paid_at: new Date().toISOString(),
+          method: "transfer", note: "Xác nhận biên lai học sinh (Duyệt thu)",
+        });
+      } else {
+        await confirmInvoicePaid(inv.id);
+      }
+      reload();
+    } catch {
+      alert("Không thể xác nhận khoản thu. Vui lòng tải lại để kiểm tra trạng thái.");
+    } finally {
+      setBusy(null);
     }
-    await addNotification({
-      title: "Đã thu học phí",
-      content: `Giáo viên đã xác nhận thu ${formatCurrency(inv.amount)} học phí từ ${inv.child_id} (${inv.title}).`,
-      target_role: "admin", category: "system", sent_by: teacherName || "Giáo viên",
-    });
-    reload();
-    setBusy(null);
   }
 
   async function actTx(txId: string, action: "approved" | "rejected") {
     if (busy) return;
     setBusy(txId);
-    await updateTransactionStatus(txId, action);
-    const tx = txs.find(t => t.id === txId);
-    if (tx) {
-      await addNotification({
-        title: action === "approved" ? "Đã duyệt giao dịch tài liệu" : "Đã từ chối giao dịch tài liệu",
-        content: `Giáo viên ${action === "approved" ? "duyệt" : "từ chối"} giao dịch mua "${tx.pkg_title}" (${formatCurrency(tx.amount)}) của ${tx.student_name}.`,
-        target_role: "admin", category: "system", sent_by: teacherName || "Giáo viên",
-      });
+    try {
+      await updateTransactionStatus(txId, action);
+      reload();
+    } catch {
+      alert("Không thể cập nhật giao dịch. Vui lòng tải lại để kiểm tra trạng thái.");
+    } finally {
+      setBusy(null);
     }
-    reload();
-    setBusy(null);
   }
 
   return (

@@ -21,6 +21,7 @@ export type AccountContext =
     }
   | {
       role: "teacher";
+      userId: string;
       teacherId: string;
       teacherName: string;
       classes: Class[];

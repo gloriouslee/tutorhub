@@ -26,6 +26,37 @@ export async function GET(req: NextRequest) {
   const admin = createAdminClient();
   if (bucket === "avatars") {
     allowed ||= segments[0] === actor.userId;
+    if (!allowed && (actor.role === "student" || actor.role === "parent")) {
+      const { data: ownerTeacher } = await admin
+        .from("teachers")
+        .select("id")
+        .eq("user_id", segments[0])
+        .maybeSingle();
+      if (ownerTeacher?.id && actor.role === "student" && actor.studentId) {
+        const { data } = await admin
+          .from("classes")
+          .select("id")
+          .eq("tutor_id", ownerTeacher.id)
+          .contains("student_ids", [actor.studentId])
+          .limit(1);
+        allowed ||= Boolean(data?.length);
+      } else if (ownerTeacher?.id && actor.role === "parent" && actor.parentId) {
+        const { data: children } = await admin
+          .from("students")
+          .select("id")
+          .eq("parent_id", actor.parentId);
+        const childIds = (children ?? []).map(child => String(child.id));
+        if (childIds.length > 0) {
+          const { data } = await admin
+            .from("classes")
+            .select("id")
+            .eq("tutor_id", ownerTeacher.id)
+            .overlaps("student_ids", childIds)
+            .limit(1);
+          allowed ||= Boolean(data?.length);
+        }
+      }
+    }
   } else {
     const classId = segments[0];
     // Classes live either in `classes` (admin-created) or `teacher_extra_classes`

@@ -122,6 +122,7 @@ export interface Notification {
   created_at: string;
   category?: NotificationCategory;
   sent_by?: string;
+  sender_user_id?: string;
   target_class_id?: string;
   target_class_name?: string;
 }

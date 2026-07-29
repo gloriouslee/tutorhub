@@ -9,7 +9,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { SectionHeader } from "@/components/shared";
 import { getTeacherSettings, saveTeacherSettings, type TeacherSettings } from "@/lib/storage";
 import { useTeacherContext } from "@/hooks/useTeacherContext";
-import { uploadClassFile } from "@/lib/upload";
+import { uploadProfileAsset } from "@/lib/upload";
 import {
   QrCode, UploadCloud, Link2, Check, Loader2, Building2, X,
   User, Camera, Mail, Phone, GraduationCap, FileText,
@@ -30,19 +30,21 @@ export default function TeacherSettingsPage() {
 
   useEffect(() => {
     if (!teacherId) return;
-    getTeacherSettings(teacherId).then(s => {
+    Promise.all([
+      getTeacherSettings(teacherId),
+      fetch("/api/teacher/profile", { cache: "no-store" }).then(async response => {
+        if (!response.ok) throw new Error("profile_unavailable");
+        return response.json() as Promise<TeacherSettings>;
+      }),
+    ]).then(([payment, profile]) => {
       setSettings({
-        full_name: s.full_name ?? teacherName ?? "",
-        specialization: s.specialization ?? "",
-        bio: s.bio ?? "",
-        avatar_url: s.avatar_url ?? undefined,
-        email: s.email ?? "",
-        phone: s.phone ?? "",
-        ...s,
+        ...payment,
+        ...profile,
+        full_name: profile.full_name ?? teacherName ?? "",
       });
-      if (s.qr_image_url) setMode(/^https?:\/\//.test(s.qr_image_url) && !s.qr_image_url.includes("/storage/") ? "link" : "upload");
+      if (payment.qr_image_url) setMode(/^https?:\/\//.test(payment.qr_image_url) && !payment.qr_image_url.includes("/storage/") ? "link" : "upload");
       setLoaded(true);
-    });
+    }).catch(() => setLoaded(true));
   }, [teacherId, teacherName]);
 
   function set<K extends keyof TeacherSettings>(key: K, val: TeacherSettings[K]) {
@@ -54,7 +56,7 @@ export default function TeacherSettingsPage() {
     setUploading(true);
     setUploadError("");
     try {
-      const up = await uploadClassFile(file, teacherId, "materials");
+      const up = await uploadProfileAsset(file, "payment-qr");
       set("qr_image_url", up.url);
     } catch (e) {
       setUploadError(e instanceof Error ? e.message : "Lỗi tải ảnh lên");
@@ -66,13 +68,11 @@ export default function TeacherSettingsPage() {
 
   async function handleAvatar(file: File) {
     setAvatarUploading(true);
-    // Hiển thị ngay bằng blob tạm, upload phía sau
-    set("avatar_url", URL.createObjectURL(file));
     try {
-      const up = await uploadClassFile(file, teacherId, "materials");
+      const up = await uploadProfileAsset(file, "avatar");
       set("avatar_url", up.url);
-    } catch {
-      /* offline — giữ blob tạm cho phiên hiện tại */
+    } catch (error) {
+      setUploadError(error instanceof Error ? error.message : "Lỗi tải ảnh lên");
     } finally {
       setAvatarUploading(false);
       if (avatarRef.current) avatarRef.current.value = "";
@@ -82,9 +82,30 @@ export default function TeacherSettingsPage() {
   async function handleSave() {
     setSaving(true);
     try {
-      await saveTeacherSettings(teacherId, settings);
+      const paymentSettings: TeacherSettings = {
+        qr_image_url: settings.qr_image_url,
+        bank_name: settings.bank_name,
+        account_holder: settings.account_holder,
+        account_number: settings.account_number,
+        payment_note: settings.payment_note,
+      };
+      const profileResponse = await fetch("/api/teacher/profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          full_name: settings.full_name,
+          phone: settings.phone,
+          specialization: settings.specialization,
+          bio: settings.bio,
+          avatar_url: settings.avatar_url,
+        }),
+      });
+      if (!profileResponse.ok) throw new Error("profile_update_failed");
+      await saveTeacherSettings(teacherId, paymentSettings);
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
+    } catch {
+      setUploadError("Không thể lưu cài đặt. Vui lòng kiểm tra thông tin và thử lại.");
     } finally {
       setSaving(false);
     }
@@ -157,7 +178,7 @@ export default function TeacherSettingsPage() {
                 <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5 mb-1.5">
                   <Mail className="h-3.5 w-3.5" /> Email
                 </label>
-                <Input type="email" value={settings.email ?? ""} onChange={e => set("email", e.target.value)} placeholder="VD: gv@tutorhub.vn" />
+                <Input type="email" value={settings.email ?? ""} readOnly className="bg-muted/40" />
               </div>
               <div>
                 <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5 mb-1.5">

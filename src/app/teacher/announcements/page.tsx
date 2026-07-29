@@ -28,7 +28,7 @@ const CATEGORY_OPTIONS: { value: NotificationCategory; label: string; Icon: Reac
 ];
 
 export default function TeacherAnnouncementsPage() {
-  const { teacherName, myClasses } = useTeacherContext();
+  const { userId, teacherName, myClasses } = useTeacherContext();
   const teacherInitials = (teacherName || "Giáo viên")
     .split(/\s+/)
     .filter(Boolean)
@@ -55,10 +55,10 @@ export default function TeacherAnnouncementsPage() {
   const load = useCallback(async () => {
     const all = await getNotifications();
     setNotifications(
-      all.filter(n => n.sent_by === teacherName)
+      all.filter(n => n.sender_user_id === userId)
          .sort((a, b) => b.created_at.localeCompare(a.created_at))
     );
-  }, [teacherName]);
+  }, [userId]);
 
   useEffect(() => { load(); }, [load]);
 

@@ -2,6 +2,7 @@ import type { Class } from "@/types";
 import { useAccountContext } from "@/hooks/useAccountContext";
 
 export interface TeacherContext {
+  userId: string;
   teacherId: string;
   teacherName: string;
   myClasses: Class[];
@@ -9,6 +10,7 @@ export interface TeacherContext {
 }
 
 const EMPTY_CONTEXT: TeacherContext = {
+  userId: "",
   teacherId: "",
   teacherName: "",
   myClasses: [],
@@ -20,6 +22,7 @@ export function useTeacherContext(): TeacherContext {
   if (context?.role !== "teacher") return { ...EMPTY_CONTEXT, ready };
 
   return {
+    userId: context.userId,
     teacherId: context.teacherId,
     teacherName: context.teacherName,
     myClasses: context.classes ?? [],

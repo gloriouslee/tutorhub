@@ -97,7 +97,14 @@ async function unreadBroadcasts(
 ): Promise<{ unread: number; readIds: Set<string>; deletedIds: Set<string> }> {
   const readIds    = parseSet(readKey);
   const deletedIds = parseSet(deletedKey);
-  const { getNotifications } = await import("@/lib/storage");
+  const { getNotifications, getNotificationStates } = await import("@/lib/storage");
+  if (targetRole === "teacher") {
+    const states = await getNotificationStates().catch(() => ({}));
+    for (const [id, state] of Object.entries(states)) {
+      readIds.add(id);
+      if (state.isDeleted) deletedIds.add(id);
+    }
+  }
   const all = await getNotifications();
   const unread = all.filter(n =>
     (n.target_role === targetRole || n.target_role === "all")

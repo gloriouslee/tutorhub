@@ -66,6 +66,7 @@ export default function HomeworkModal({
         const uploaded = await uploadClassFile(file, classId, "homework");
         attachment = {
           homework_id: hwId,
+          class_id: classId,
           file_url: uploaded.url,
           file_name: uploaded.name,
           file_size: uploaded.size,

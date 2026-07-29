@@ -321,3 +321,49 @@ test("admin profile is backed by the authenticated account", async () => {
   assert.match(page, /resetAccountContextCache/);
   assert.match(sidebar, /\/admin\/profile/);
 });
+
+test("teacher materials are tenant-scoped and never replaced delete-first", async () => {
+  const storage = await read("src/lib/storage.ts");
+  const page = await read("src/app/teacher/materials/page.tsx");
+
+  assert.match(storage, /if \(teacherId\) query = query\.eq\("teacher_id", teacherId\)/);
+  assert.match(storage, /\.upsert\(rows, \{ onConflict: "id" \}\)/);
+  assert.match(storage, /saveTeacherMaterials\(delete stale\)/);
+  assert.doesNotMatch(storage, /delete\(\)\.eq\("teacher_id", teacherId\)[\s\S]{0,200}if \(list\.length === 0\)/);
+  assert.match(page, /getTeacherMaterials<Course>\(teacherId\)/);
+  assert.doesNotMatch(page, /simulate API|saveTeacherMaterials\(courses, teacherId\)\.catch/);
+});
+
+test("teacher portal data is class-scoped and notification state is durable", async () => {
+  const migration = await read(
+    "supabase/migrations/20260729190000_teacher_portal_hardening.sql",
+  );
+  const entityRoute = await read("src/app/api/data/entities/[entity]/route.ts");
+  const notificationPage = await read("src/app/teacher/notifications/page.tsx");
+
+  assert.match(migration, /public\.teaches_student\(id\)/);
+  assert.match(migration, /sender_user_id = auth\.uid\(\)/);
+  assert.match(migration, /public\.enrolled_in_class\(target_class_id\)/);
+  assert.match(migration, /create table if not exists public\.notification_reads/);
+  assert.match(migration, /public\.teaches_class\(class_id\)/);
+  assert.match(entityRoute, /item\.sender_user_id = actor\.userId/);
+  assert.match(notificationPage, /getNotificationStates/);
+  assert.doesNotMatch(notificationPage, /tutorhub_teacher_notif_read|localStorage/);
+});
+
+test("teacher profile, schedule and submissions use canonical stores", async () => {
+  const profileRoute = await read("src/app/api/teacher/profile/route.ts");
+  const storage = await read("src/lib/storage.ts");
+  const submissionStore = await read("src/lib/supabase/submissions.ts");
+  const settingsPage = await read("src/app/teacher/settings/page.tsx");
+
+  assert.match(profileRoute, /actor\?\.role !== "teacher"/);
+  assert.match(profileRoute, /hasValidMutationOrigin/);
+  assert.match(profileRoute, /\.from\("teachers"\)\.update/);
+  assert.match(profileRoute, /updateUserById/);
+  assert.match(settingsPage, /\/api\/teacher\/profile/);
+  assert.match(storage, /\.from\("classes"\)[\s\S]{0,200}\.update\(\{ schedule \}\)/);
+  assert.match(storage, /\.update\(\{ zoom_link: link\.trim\(\) \|\| null \}\)/);
+  assert.match(submissionStore, /\.from\("hw_submissions"\)/);
+  assert.doesNotMatch(submissionStore, /\.from\("submissions"\)/);
+});

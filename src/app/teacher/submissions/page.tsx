@@ -10,14 +10,15 @@ import { useTeacherContext } from "@/hooks/useTeacherContext";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   Search, CheckCircle2, Clock, FileText, ChevronDown, ChevronUp,
-  Star, MessageSquare, BarChart2, Download, Image, Upload, X, Paperclip,
+  Star, MessageSquare, BarChart2, Download, Image as ImageIcon, Upload, X, Paperclip,
 } from "lucide-react";
 import {
   getSubmissionsByHomeworks,
   updateGrade as supabaseUpdateGrade,
+  uploadSubmissionFile,
   type SubmissionRecord,
 } from "@/lib/supabase/submissions";
-import { getTeacherHomework, getHwSubmissions, upsertHwSubmission, addNotification, getStudents } from "@/lib/storage";
+import { getTeacherHomework, getHwSubmissions, addNotification, getStudents } from "@/lib/storage";
 
 // ── Data types ────────────────────────────────────────────────────────────────
 // Use SubmissionRecord from Supabase lib; extend with student_name for display
@@ -27,11 +28,6 @@ async function loadSubmissions(classIds: string[]): Promise<Submission[]> {
   try {
     return await getHwSubmissions<Submission>({ classIds });
   } catch { return []; }
-}
-
-// Upsert the graded submission as its own per-row record.
-async function updateSubmission(sub: Submission, classId?: string): Promise<void> {
-  await upsertHwSubmission({ ...sub, class_id: (sub as { class_id?: string }).class_id ?? classId });
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -151,42 +147,49 @@ function TeacherSubmissionsPageInner() {
     if (isNaN(score) || score < 0 || score > 10) return;
     const feedback = feedbackInput.trim();
 
-    // Persist a small feedback attachment alongside the grade.
     const existing = submissions.find(s => s.id === subId);
+    if (!existing) return;
+    const hw = myHomework.find(h => h.id === existing.homework_id);
+    if (!hw?.class_id) {
+      alert("Không xác định được lớp của bài nộp.");
+      return;
+    }
     let teacherFileUrl  = existing?.teacher_file_url;
     let teacherFileName = existing?.teacher_file_name;
     if (teacherFile) {
-      if (teacherFile.size > 2 * 1024 * 1024) {
-        alert("File quá lớn để lưu (tối đa 2MB)");
+      const uploaded = await uploadSubmissionFile(
+        hw.class_id,
+        existing.homework_id,
+        existing.student_id,
+        teacherFile,
+      );
+      if (!uploaded) {
+        alert("Không thể tải file nhận xét lên.");
         return;
       }
-      teacherFileUrl = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result as string);
-        reader.onerror = () => reject(reader.error);
-        reader.readAsDataURL(teacherFile);
-      });
+      teacherFileUrl = uploaded.url;
       teacherFileName = teacherFile.name;
     }
 
     const patch = { score, feedback: feedback || undefined, status: "graded" as const, graded_at: new Date().toISOString(), teacher_file_url: teacherFileUrl, teacher_file_name: teacherFileName };
-    setSubmissions(prev => prev.map(s => (s.id === subId ? { ...s, ...patch } : s)));
-    const hw = existing ? myHomework.find(h => h.id === existing.homework_id) : undefined;
-    if (existing) {
-      try { await updateSubmission({ ...existing, ...patch }, hw?.class_id); } catch {}
+    const saved = await supabaseUpdateGrade(subId, score, feedback, teacherFileUrl, teacherFileName);
+    if (!saved) {
+      alert("Không thể lưu điểm. Dữ liệu cũ vẫn được giữ nguyên.");
+      return;
     }
+    setSubmissions(prev => prev.map(s => (s.id === subId ? { ...s, ...patch } : s)));
     setGrading(null);
     setTeacherFile(null);
 
-    await supabaseUpdateGrade(subId, score, feedback, teacherFileUrl, teacherFileName);
-
     // Báo cho học sinh: bài tập đã được chấm
-    if (existing) {
+    try {
       await addNotification({
         title: "Bài tập đã được chấm",
         content: `"${hw?.title ?? "Bài tập"}" đã được chấm: ${score}/10${feedback ? " — có nhận xét của giáo viên." : "."}`,
         target_role: "student", target_class_id: hw?.class_id, category: "graded",
       });
+    } catch {
+      alert("Điểm đã được lưu nhưng chưa gửi được thông báo cho học sinh.");
     }
   }
 
@@ -332,7 +335,7 @@ function TeacherSubmissionsPageInner() {
                         {sub.file_name && (
                           <div className="ml-11 flex items-center gap-2 text-xs text-muted-foreground bg-muted/30 rounded-lg px-3 py-2 border border-border/50">
                             {/\.(jpg|jpeg|png)$/i.test(sub.file_name)
-                              ? <Image className="h-3.5 w-3.5 text-blue-500 shrink-0" />
+                              ? <ImageIcon className="h-3.5 w-3.5 text-blue-500 shrink-0" />
                               : <FileText className="h-3.5 w-3.5 text-red-500 shrink-0" />}
                             <span className="truncate flex-1">{sub.file_name}</span>
                             {sub.file_url ? (

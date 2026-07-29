@@ -15,7 +15,7 @@ const ENTITY_FIELDS: Record<string, Set<string>> = {
   ]),
   notifications: new Set([
     "id", "title", "content", "category", "target_role", "target_class_id",
-    "sent_by", "is_read", "created_at",
+    "sent_by", "sender_user_id", "is_read", "created_at",
   ]),
 };
 
@@ -104,10 +104,12 @@ export async function POST(
       return NextResponse.json({ error: "forbidden" }, { status: 403 });
     }
     item.sent_by = actor.displayName;
+    item.sender_user_id = actor.userId;
   } else if (actor.role !== "admin") {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   } else if (entity === "notifications") {
     item.sent_by = actor.displayName;
+    item.sender_user_id = actor.userId;
   }
 
   const { data, error } = await admin

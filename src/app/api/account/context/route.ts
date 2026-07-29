@@ -72,6 +72,7 @@ export async function GET(req: NextRequest) {
     }
     return NextResponse.json({
       role: identity.role,
+      userId: identity.userId,
       teacherId: identity.teacherId,
       teacherName: identity.displayName,
       classes: (classes ?? []).map((item) => ({

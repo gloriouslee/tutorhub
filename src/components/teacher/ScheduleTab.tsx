@@ -53,17 +53,19 @@ function ScheduleEditor({ classId, className, initialSchedule, onSaved }: {
     setSaveState("saving");
     try {
       await saveClassScheduleOverride(classId, rows);
-
-      const scheduleText = rows.map(r => `${r.day} ${r.start_time}–${r.end_time}`).join(", ");
-      await pushScheduleNotification({
-        class_id: classId,
-        class_name: className,
-        message: notifMessage.trim() || `Lịch học lớp ${className} đã được cập nhật: ${scheduleText}.`,
-      });
-
       onSaved?.(rows);
       setSaveState("success");
       setDirty(false);
+      const scheduleText = rows.map(r => `${r.day} ${r.start_time}–${r.end_time}`).join(", ");
+      try {
+        await pushScheduleNotification({
+          class_id: classId,
+          class_name: className,
+          message: notifMessage.trim() || `Lịch học lớp ${className} đã được cập nhật: ${scheduleText}.`,
+        });
+      } catch {
+        alert("Lịch học đã được lưu nhưng chưa gửi được thông báo.");
+      }
       setShowNotifField(false);
       setNotifMessage("");
       setTimeout(() => setSaveState("idle"), 3000);

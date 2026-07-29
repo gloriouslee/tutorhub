@@ -428,28 +428,57 @@ export async function upsertHwSubmission<T extends { id: string; homework_id: st
   if (error) { console.error("upsertHwSubmission:", error); throw error; }
 }
 
-export async function getTeacherMaterials<T = Record<string, unknown>>(): Promise<T[]> {
-  const { data, error } = await supabase.from("teacher_materials").select("data");
+export async function getTeacherMaterials<T = Record<string, unknown>>(
+  teacherId?: string,
+): Promise<T[]> {
+  let query = supabase.from("teacher_materials").select("data");
+  if (teacherId) query = query.eq("teacher_id", teacherId);
+  const { data, error } = await query;
   if (error) { console.error("getTeacherMaterials:", error); return []; }
   return (data ?? []).map(r => r.data as T);
 }
-// Replace this teacher's catalog with the provided list.
+// Replace this teacher's catalog without a delete-first window. New/updated
+// rows are persisted before stale rows are removed, so a failed upsert cannot
+// erase the teacher's existing catalog.
 export async function saveTeacherMaterials<T extends { id: string; classId?: string; published?: boolean }>(
   list: T[],
   teacherId: string,
 ): Promise<void> {
-  const del = await supabase.from("teacher_materials").delete().eq("teacher_id", teacherId);
-  if (del.error) { console.error("saveTeacherMaterials(delete):", del.error); throw del.error; }
-  if (list.length === 0) return;
-  const rows = list.map(c => ({
+  const unique = [...new Map(list.map(item => [item.id, item])).values()];
+  const rows = unique.map(c => ({
     id: c.id,
     teacher_id: teacherId,
     class_id: c.classId ?? null,
     published: !!c.published,
     data: c,
   }));
-  const { error } = await supabase.from("teacher_materials").insert(rows);
-  if (error) { console.error("saveTeacherMaterials(insert):", error); throw error; }
+  if (rows.length > 0) {
+    const { error } = await supabase
+      .from("teacher_materials")
+      .upsert(rows, { onConflict: "id" });
+    if (error) {
+      console.error("saveTeacherMaterials(upsert):", error);
+      throw error;
+    }
+  }
+
+  const { data: currentRows, error: currentError } = await supabase
+    .from("teacher_materials")
+    .select("id")
+    .eq("teacher_id", teacherId);
+  if (currentError) throw currentError;
+  const keepIds = new Set(unique.map(item => item.id));
+  const staleIds = (currentRows ?? []).map(row => String(row.id)).filter(id => !keepIds.has(id));
+  if (staleIds.length === 0) return;
+  const { error: deleteError } = await supabase
+    .from("teacher_materials")
+    .delete()
+    .eq("teacher_id", teacherId)
+    .in("id", staleIds);
+  if (deleteError) {
+    console.error("saveTeacherMaterials(delete stale):", deleteError);
+    throw deleteError;
+  }
 }
 
 // Per-parent messages (one jsonb row per parent).
@@ -487,6 +516,45 @@ export async function upsertNotification(
 
 export async function deleteNotification(id: string): Promise<void> {
   return deleteEntity("notifications", id);
+}
+
+export async function getNotificationStates(): Promise<Record<string, { isDeleted: boolean }>> {
+  const { data, error } = await supabase
+    .from("notification_reads")
+    .select("notification_id,is_deleted");
+  if (error) throw error;
+  return Object.fromEntries(
+    (data ?? []).map(row => [
+      String(row.notification_id),
+      { isDeleted: row.is_deleted === true },
+    ]),
+  );
+}
+
+export async function markNotificationState(
+  notificationId: string,
+  isDeleted = false,
+): Promise<void> {
+  const { error } = await supabase
+    .from("notification_reads")
+    .upsert(
+      { notification_id: notificationId, is_deleted: isDeleted, read_at: new Date().toISOString() },
+      { onConflict: "notification_id,user_id" },
+    );
+  if (error) throw error;
+}
+
+export async function markNotificationsRead(notificationIds: readonly string[]): Promise<void> {
+  if (notificationIds.length === 0) return;
+  const rows = notificationIds.map(notificationId => ({
+    notification_id: notificationId,
+    is_deleted: false,
+    read_at: new Date().toISOString(),
+  }));
+  const { error } = await supabase
+    .from("notification_reads")
+    .upsert(rows, { onConflict: "notification_id,user_id" });
+  if (error) throw error;
 }
 
 export interface NewNotification {
@@ -547,6 +615,28 @@ export async function getStudentComments(studentId: string): Promise<{ text: str
   return (data ?? []).map(r => ({ text: r.comment_text, date: r.comment_date, rating: r.rating }));
 }
 
+export async function getStudentCommentsMany(
+  studentIds: readonly string[],
+): Promise<Record<string, { text: string; date: string; rating: number }[]>> {
+  if (studentIds.length === 0) return {};
+  const { data, error } = await supabase
+    .from("student_comments")
+    .select("student_id,comment_text,comment_date,rating")
+    .in("student_id", [...studentIds])
+    .order("comment_date", { ascending: false });
+  if (error) throw error;
+  const grouped: Record<string, { text: string; date: string; rating: number }[]> = {};
+  for (const row of data ?? []) {
+    const studentId = String(row.student_id);
+    (grouped[studentId] ??= []).push({
+      text: row.comment_text,
+      date: row.comment_date,
+      rating: row.rating,
+    });
+  }
+  return grouped;
+}
+
 export async function saveStudentComment(studentId: string, commentsList: { text: string; date: string; rating: number }[]): Promise<void> {
   // Replace-all semantics: callers pass the full updated list for the student.
   const del = await supabase.from("student_comments").delete().eq("student_id", studentId);
@@ -598,11 +688,21 @@ export async function setClassTeacherOverride(classId: string, teacherId: string
 // ── Schedule overrides (localStorage) ───────────────────────────────────────
 
 export async function getClassScheduleOverride(classId: string): Promise<ClassSchedule[] | null> {
-  return kvGet<ClassSchedule[] | null>(`tutorhub_schedule_${classId}`, null);
+  const { data, error } = await supabase
+    .from("classes")
+    .select("schedule")
+    .eq("id", classId)
+    .maybeSingle();
+  if (error) throw error;
+  return Array.isArray(data?.schedule) ? data.schedule as ClassSchedule[] : null;
 }
 
 export async function saveClassScheduleOverride(classId: string, schedule: ClassSchedule[]): Promise<void> {
-  await kvSet(`tutorhub_schedule_${classId}`, schedule);
+  const { error } = await supabase
+    .from("classes")
+    .update({ schedule })
+    .eq("id", classId);
+  if (error) throw error;
 }
 
 // ── Schedule-change notifications (localStorage) ─────────────────────────────
@@ -917,6 +1017,23 @@ export async function getStudentPackages(classId: string): Promise<Record<string
   return kvGet<Record<string, StudentPackage>>(`tutorhub_student_packages_${classId}`, {});
 }
 
+export async function getStudentPackagesForClasses(
+  classIds: readonly string[],
+): Promise<Record<string, Record<string, StudentPackage>>> {
+  if (classIds.length === 0) return {};
+  const { data, error } = await supabase
+    .from("kv_student_packages")
+    .select("id,data")
+    .in("id", [...classIds]);
+  if (error) throw error;
+  return Object.fromEntries(
+    (data ?? []).map(row => [
+      String(row.id),
+      (row.data ?? {}) as Record<string, StudentPackage>,
+    ]),
+  );
+}
+
 export async function saveStudentPackages(classId: string, packages: Record<string, StudentPackage>): Promise<void> {
   await kvSet(`tutorhub_student_packages_${classId}`, packages);
 }
@@ -924,13 +1041,23 @@ export async function saveStudentPackages(classId: string, packages: Record<stri
 // ── Online meeting link per class (localStorage) ─────────────────────────────
 
 export async function getOnlineLink(classId: string): Promise<string | null> {
-  return kvGet<string | null>(`tutorhub_online_link_${classId}`, null);
+  const { data, error } = await supabase
+    .from("classes")
+    .select("zoom_link")
+    .eq("id", classId)
+    .maybeSingle();
+  if (error) throw error;
+  return typeof data?.zoom_link === "string" ? data.zoom_link : null;
 }
 
 // Lưu "" khi giáo viên xóa link (khác với null = chưa từng đặt) — để trang
 // không hồi sinh zoom_link mặc định sau khi link đã bị xóa chủ động.
 export async function saveOnlineLink(classId: string, link: string): Promise<void> {
-  await kvSet<string>(`tutorhub_online_link_${classId}`, link.trim());
+  const { error } = await supabase
+    .from("classes")
+    .update({ zoom_link: link.trim() || null })
+    .eq("id", classId);
+  if (error) throw error;
 }
 
 // ── Shared tuition invoices (localStorage) ───────────────────────────────────
@@ -1203,6 +1330,7 @@ export async function incrementMaterialDownload(materialId: string): Promise<voi
 
 export interface HomeworkAttachment {
   homework_id: string;
+  class_id: string;
   file_url: string;
   file_name: string;
   file_size: string;

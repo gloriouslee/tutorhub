@@ -45,3 +45,25 @@ export async function uploadClassFile(
     file_type: getFileType(file.name),
   };
 }
+
+export async function uploadProfileAsset(
+  file: File,
+  kind: "avatar" | "payment-qr",
+): Promise<UploadedFile> {
+  const supabase = createClient();
+  const { data: authData, error: authError } = await supabase.auth.getUser();
+  if (authError || !authData.user) throw new Error("authentication_required");
+  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+  const path = `${authData.user.id}/${kind}/${Date.now()}_${safeName}`;
+  const { error } = await supabase.storage
+    .from("avatars")
+    .upload(path, file, { upsert: false, contentType: file.type });
+  if (error) throw new Error(error.message);
+  return {
+    url: `/api/files?bucket=avatars&path=${encodeURIComponent(path)}`,
+    path,
+    name: file.name,
+    size: formatSize(file.size),
+    file_type: getFileType(file.name),
+  };
+}

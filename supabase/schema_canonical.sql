@@ -367,6 +367,7 @@ create table if not exists public.notifications (
   target_role     text check (target_role in ('student','parent','teacher','admin','all')) not null,
   target_class_id text,
   sent_by         text,
+  sender_user_id  uuid references auth.users(id) on delete set null,
   is_read         boolean default false,
   created_at      timestamptz default now()
 );
@@ -449,6 +450,16 @@ create table if not exists public.class_registration_requests (
   reviewed_by        uuid references public.profiles(id) on delete set null,
   created_at         timestamptz not null default now(),
   reviewed_at        timestamptz
+);
+create index if not exists notifications_sender_created_idx on public.notifications (sender_user_id, created_at desc);
+create index if not exists notifications_target_class_created_idx on public.notifications (target_role, target_class_id, created_at desc);
+
+create table if not exists public.notification_reads (
+  notification_id text not null references public.notifications(id) on delete cascade,
+  user_id         uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  is_deleted      boolean not null default false,
+  read_at         timestamptz not null default now(),
+  primary key (notification_id, user_id)
 );
 create unique index if not exists class_registration_one_pending_idx
   on public.class_registration_requests (student_id, requested_class_id)
@@ -593,6 +604,7 @@ create index if not exists class_materials_class_idx on public.class_materials (
 create table if not exists public.homework_attachments (
   id          text primary key,
   homework_id text not null,
+  class_id    text references public.classes(id) on delete cascade,
   file_url    text not null,
   file_name   text,
   file_size   text,
@@ -1120,7 +1132,8 @@ create policy students_scoped_select on public.students
   using (
     user_id::text = auth.uid()::text
     or parent_id::text = public.my_parent_id()
-    or public.get_my_role() in ('teacher', 'admin')
+    or public.get_my_role() = 'admin'
+    or (public.get_my_role() = 'teacher' and public.teaches_student(id))
   );
 drop policy if exists parents_scoped_select on public.parents;
 create policy parents_scoped_select on public.parents
@@ -1252,9 +1265,33 @@ create policy notifications_role_select on public.notifications
   for select to authenticated
   using (
     public.get_my_role() = 'admin'
-    or target_role = 'all'
-    or target_role = public.get_my_role()
+    or sender_user_id = auth.uid()
+    or (
+      (target_role = 'all' or target_role = public.get_my_role())
+      and (
+        target_class_id is null
+        or (public.get_my_role() = 'teacher' and public.teaches_class(target_class_id))
+        or (public.get_my_role() = 'student' and public.enrolled_in_class(target_class_id))
+        or (
+          public.get_my_role() = 'parent'
+          and exists (
+            select 1 from public.classes c
+            join public.students s on s.id = any(c.student_ids)
+            where c.id = notifications.target_class_id
+              and s.parent_id = public.my_parent_id()
+          )
+        )
+      )
+    )
   );
+
+alter table public.notification_reads enable row level security;
+grant select, insert, update, delete on public.notification_reads to authenticated;
+drop policy if exists notification_reads_owner on public.notification_reads;
+create policy notification_reads_owner on public.notification_reads
+  for all to authenticated
+  using (user_id = auth.uid())
+  with check (user_id = auth.uid());
 drop policy if exists app_exam_scores_scoped_select on public.app_exam_scores;
 create policy app_exam_scores_scoped_select on public.app_exam_scores
   for select to authenticated
@@ -1437,12 +1474,22 @@ create policy class_materials_student_download on public.class_materials
 grant select, insert, update, delete on public.homework_attachments to authenticated;
 drop policy if exists homework_attachments_read on public.homework_attachments;
 create policy homework_attachments_read on public.homework_attachments
-  for select to authenticated using (true);
+  for select to authenticated using (
+    public.get_my_role() = 'admin'
+    or public.teaches_class(class_id)
+    or public.enrolled_in_class(class_id)
+    or exists (
+      select 1 from public.classes c
+      join public.students s on s.id = any(c.student_ids)
+      where c.id = homework_attachments.class_id
+        and s.parent_id = public.my_parent_id()
+    )
+  );
 drop policy if exists homework_attachments_teacher_write on public.homework_attachments;
 create policy homework_attachments_teacher_write on public.homework_attachments
   for all to authenticated
-  using (public.get_my_role() in ('teacher', 'admin'))
-  with check (public.get_my_role() in ('teacher', 'admin'));
+  using (public.get_my_role() = 'admin' or public.teaches_class(class_id))
+  with check (public.get_my_role() = 'admin' or public.teaches_class(class_id));
 
 -- ── Per-row: class_teacher_overrides ─────────────────────────────────────────
 grant select, insert, update, delete on public.class_teacher_overrides to authenticated;

@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/client";
 // ── Types ─────────────────────────────────────────────────────────────────────
 export interface SubmissionRecord {
   id: string;
+  class_id?: string;
   homework_id: string;
   student_id: string;
   student_name?: string;
@@ -51,14 +52,22 @@ export async function uploadSubmissionFile(
 export async function insertSubmission(
   sub: Omit<SubmissionRecord, "id">
 ): Promise<SubmissionRecord | null> {
+  if (!sub.class_id) return null;
   const supabase = createClient();
+  const record: SubmissionRecord = { ...sub, id: `sub_${crypto.randomUUID()}` };
   const { data, error } = await supabase
-    .from("submissions")
-    .insert(sub)
-    .select()
+    .from("hw_submissions")
+    .insert({
+      id: record.id,
+      class_id: record.class_id,
+      homework_id: record.homework_id,
+      student_id: record.student_id,
+      data: record,
+    })
+    .select("data")
     .single();
   if (error) { console.error("Insert submission error:", error.message); return null; }
-  return data;
+  return data.data as SubmissionRecord;
 }
 
 export async function getSubmissionsByStudent(
@@ -66,12 +75,12 @@ export async function getSubmissionsByStudent(
 ): Promise<SubmissionRecord[]> {
   const supabase = createClient();
   const { data, error } = await supabase
-    .from("submissions")
-    .select("*")
+    .from("hw_submissions")
+    .select("data")
     .eq("student_id", studentId)
-    .order("submitted_at", { ascending: false });
+    .order("created_at", { ascending: false });
   if (error || !data?.length) return [];
-  return data;
+  return data.map(row => row.data as SubmissionRecord);
 }
 
 export async function getSubmissionsByHomeworks(
@@ -80,12 +89,12 @@ export async function getSubmissionsByHomeworks(
   if (!homeworkIds.length) return [];
   const supabase = createClient();
   const { data, error } = await supabase
-    .from("submissions")
-    .select("*")
+    .from("hw_submissions")
+    .select("data")
     .in("homework_id", homeworkIds)
-    .order("submitted_at", { ascending: false });
+    .order("created_at", { ascending: false });
   if (error || !data?.length) return [];
-  return data;
+  return data.map(row => row.data as SubmissionRecord);
 }
 
 export async function updateGrade(
@@ -96,16 +105,24 @@ export async function updateGrade(
   teacherFileName?: string,
 ): Promise<boolean> {
   const supabase = createClient();
+  const { data: existing, error: loadError } = await supabase
+    .from("hw_submissions")
+    .select("data")
+    .eq("id", submissionId)
+    .maybeSingle();
+  if (loadError || !existing?.data) return false;
+  const updated = {
+    ...(existing.data as SubmissionRecord),
+    score,
+    feedback: feedback.trim() || undefined,
+    status: "graded" as const,
+    graded_at: new Date().toISOString(),
+    teacher_file_url: teacherFileUrl,
+    teacher_file_name: teacherFileName,
+  };
   const { error } = await supabase
-    .from("submissions")
-    .update({
-      score,
-      feedback: feedback.trim() || null,
-      status: "graded",
-      graded_at: new Date().toISOString(),
-      teacher_file_url: teacherFileUrl ?? null,
-      teacher_file_name: teacherFileName ?? null,
-    })
+    .from("hw_submissions")
+    .update({ data: updated })
     .eq("id", submissionId);
   if (error) console.error("Update grade error:", error.message);
   return !error;

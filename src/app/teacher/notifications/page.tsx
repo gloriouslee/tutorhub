@@ -6,32 +6,14 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { SectionHeader } from "@/components/shared";
 import { Bell, Check, Trash2, BookOpen, CheckCircle2, AlertTriangle, Info, CreditCard } from "lucide-react";
-import { getNotifications } from "@/lib/storage";
+import {
+  getNotifications,
+  getNotificationStates,
+  markNotificationState,
+  markNotificationsRead,
+} from "@/lib/storage";
 import { Notification } from "@/types";
 import { useTeacherContext } from "@/hooks/useTeacherContext";
-
-// ── localStorage helpers ──────────────────────────────────────────────────────
-const READ_KEY    = "tutorhub_teacher_notif_read";
-const DELETED_KEY = "tutorhub_teacher_notif_deleted";
-
-function getReadIds(): Set<string> {
-  try { return new Set(JSON.parse(localStorage.getItem(READ_KEY) ?? "[]")); } catch { return new Set(); }
-}
-function addReadId(id: string) {
-  const s = getReadIds(); s.add(id);
-  localStorage.setItem(READ_KEY, JSON.stringify([...s]));
-}
-function markAllReadIds(ids: string[]) {
-  const s = getReadIds(); ids.forEach(id => s.add(id));
-  localStorage.setItem(READ_KEY, JSON.stringify([...s]));
-}
-function getDeletedIds(): Set<string> {
-  try { return new Set(JSON.parse(localStorage.getItem(DELETED_KEY) ?? "[]")); } catch { return new Set(); }
-}
-function addDeletedId(id: string) {
-  const s = getDeletedIds(); s.add(id);
-  localStorage.setItem(DELETED_KEY, JSON.stringify([...s]));
-}
 
 // ── Relative time ─────────────────────────────────────────────────────────────
 function relativeTime(isoString: string): string {
@@ -80,12 +62,13 @@ export default function TeacherNotificationsPage() {
   const [filter, setFilter] = useState<"all" | "unread" | "read">("all");
 
   useEffect(() => {
-    setReadIds(getReadIds());
-    setDeletedIds(getDeletedIds());
-    getNotifications().then(all =>
-      setNotifs(all.filter(n => n.target_role === "teacher" || n.target_role === "all")
-                   .sort((a, b) => b.created_at.localeCompare(a.created_at)))
-    );
+    Promise.all([getNotifications(), getNotificationStates()])
+      .then(([all, states]) => {
+        setNotifs(all.filter(n => n.target_role === "teacher" || n.target_role === "all")
+                     .sort((a, b) => b.created_at.localeCompare(a.created_at)));
+        setReadIds(new Set(Object.keys(states)));
+        setDeletedIds(new Set(Object.entries(states).filter(([, state]) => state.isDeleted).map(([id]) => id)));
+      });
   }, []);
 
   const visible = notifs.filter(n => !deletedIds.has(n.id));
@@ -98,19 +81,21 @@ export default function TeacherNotificationsPage() {
     return true;
   });
 
-  const handleMarkAllRead = () => {
-    markAllReadIds(visible.map(n => n.id));
-    setReadIds(getReadIds());
+  const handleMarkAllRead = async () => {
+    const ids = visible.map(n => n.id);
+    await markNotificationsRead(ids);
+    setReadIds(prev => new Set([...prev, ...ids]));
   };
 
-  const handleMarkRead = (id: string) => {
-    addReadId(id);
-    setReadIds(getReadIds());
+  const handleMarkRead = async (id: string) => {
+    await markNotificationState(id);
+    setReadIds(prev => new Set(prev).add(id));
   };
 
-  const handleDelete = (id: string) => {
-    addDeletedId(id);
-    setDeletedIds(getDeletedIds());
+  const handleDelete = async (id: string) => {
+    await markNotificationState(id, true);
+    setReadIds(prev => new Set(prev).add(id));
+    setDeletedIds(prev => new Set(prev).add(id));
   };
 
   return (

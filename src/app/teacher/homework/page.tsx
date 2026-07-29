@@ -79,10 +79,11 @@ async function loadSubs(classIds: string[]): Promise<Submission[]> {
 // Bài tập từ lộ trình (nộp file + làm câu hỏi) cho các lớp của giáo viên.
 async function loadCurriculumHw(classes: { id: string }[]): Promise<Homework[]> {
   const today = toLocalDateKey(new Date());
-  const out: Homework[] = [];
-  for (const c of classes) {
+  const perClass = await Promise.all(classes.map(async c => {
+    const out: Homework[] = [];
     let chapters;
-    try { chapters = await getCurriculum(c.id); } catch { continue; }
+    try { chapters = await getCurriculum(c.id); } catch { return out; }
+    const exams: { lessonId: string; homeworkIndex: number }[] = [];
     for (const ch of chapters) {
       for (const s of ch.sessions) {
         for (const lesson of s.lessons) {
@@ -93,19 +94,25 @@ async function loadCurriculumHw(classes: { id: string }[]): Promise<Homework[]> 
               source: "curriculum", kind: "file", file_url: lesson.file_url,
             });
           } else if (lesson.type === "exam") {
-            const results = await getAllExamResults(c.id, lesson.id).catch(() => []);
+            const homeworkIndex = out.length;
             out.push({
               id: lesson.id, class_id: c.id, title: lesson.title, description: lesson.description,
               due_date: lesson.exam_opens_at?.slice(0, 10) ?? s.date ?? today, created_at: s.date ?? today,
               source: "curriculum", kind: "exam", exam_status: lesson.exam_status ?? "draft",
-              exam_submitted: results.length,
+              exam_submitted: 0,
             });
+            exams.push({ lessonId: lesson.id, homeworkIndex });
           }
         }
       }
     }
-  }
-  return out;
+    const resultCounts = await Promise.all(
+      exams.map(exam => getAllExamResults(c.id, exam.lessonId).then(results => results.length).catch(() => 0)),
+    );
+    exams.forEach((exam, index) => { out[exam.homeworkIndex].exam_submitted = resultCounts[index]; });
+    return out;
+  }));
+  return perClass.flat();
 }
 
 function isOverdue(dueDate: string): boolean {
@@ -177,7 +184,7 @@ export default function TeacherHomeworkPage() {
     setModalOpen(true);
   }
 
-  function handleSave() {
+  async function handleSave() {
     if (!fTitle.trim()) { setFErr("Vui lòng nhập tiêu đề bài tập."); return; }
     if (!fDue)          { setFErr("Vui lòng chọn hạn nộp."); return; }
     setFErr("");
@@ -185,27 +192,28 @@ export default function TeacherHomeworkPage() {
     const item: Homework = editTarget
       ? { ...editTarget, title: fTitle.trim(), class_id: fClass, due_date: fDue, description: fDesc }
       : {
-          id:          `h-${Date.now()}`,
+          id:          `hw_${crypto.randomUUID()}`,
           class_id:    fClass,
           title:       fTitle.trim(),
           description: fDesc,
           due_date:    fDue,
           created_at:  toLocalDateKey(new Date()),
         };
-    upsertHw(item, homeworks).then(setHomeworks).catch(() => {
-      setHomeworks(prev => {
-        const exists = prev.some(h => h.id === item.id);
-        return exists ? prev.map(h => (h.id === item.id ? item : h)) : [item, ...prev];
-      });
-    });
-    setModalOpen(false);
+    try {
+      setHomeworks(await upsertHw(item, homeworks));
+      setModalOpen(false);
+    } catch {
+      setFErr("Không thể lưu bài tập. Dữ liệu cũ vẫn được giữ nguyên.");
+    }
   }
 
-  function handleDelete(id: string) {
+  async function handleDelete(id: string) {
     if (!confirm("Bạn có chắc muốn xoá bài tập này không?")) return;
-    removeHw(id, homeworks).then(setHomeworks).catch(() => {
-      setHomeworks(prev => prev.filter(h => h.id !== id));
-    });
+    try {
+      setHomeworks(await removeHw(id, homeworks));
+    } catch {
+      alert("Không thể xóa bài tập. Dữ liệu cũ vẫn được giữ nguyên.");
+    }
   }
 
   // Submission stats per homework
