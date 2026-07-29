@@ -306,3 +306,18 @@ test("teacher payment approvals are scoped to the owning class", async () => {
   await assert.rejects(read("src/app/admin/payments/page.tsx"));
   await assert.rejects(read("src/app/api/admin/create-account/route.ts"));
 });
+
+test("admin profile is backed by the authenticated account", async () => {
+  const route = await read("src/app/api/admin/profile/route.ts");
+  const page = await read("src/app/admin/profile/page.tsx");
+  const sidebar = await read("src/components/layout/Sidebar.tsx");
+
+  assert.match(route, /actor\?\.role !== "admin"/);
+  assert.match(route, /hasValidMutationOrigin/);
+  assert.match(route, /\.from\("profiles"\)/);
+  assert.match(route, /updateUserById/);
+  assert.match(route, /resetPasswordForEmail/);
+  assert.match(page, /\/api\/admin\/profile/);
+  assert.match(page, /resetAccountContextCache/);
+  assert.match(sidebar, /\/admin\/profile/);
+});

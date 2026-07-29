@@ -68,7 +68,8 @@ const navConfig: Record<UserRole, NavItem[]> = {
     { label: "Báo cáo",    href: "/admin/reports",          icon: BarChart3 },
     { label: "Thông báo",  href: "/admin/notifications",    icon: Bell },
     { label: "Tài khoản",  href: "/admin/users",            icon: Shield },
-    { label: "Cài đặt",    href: "/admin/settings",         icon: Settings },
+    { label: "Hồ sơ",      href: "/admin/profile",          icon: User },
+    { label: "Công cụ",    href: "/admin/settings",         icon: Settings },
   ],
 };
 

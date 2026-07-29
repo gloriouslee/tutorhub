@@ -83,6 +83,9 @@ export function resetAccountContextCache() {
   cachedContext = null;
   cachedAt = 0;
   inFlight = null;
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event("account-context-reset"));
+  }
 }
 
 export function useAccountContext(): AccountContextState {
@@ -95,16 +98,22 @@ export function useAccountContext(): AccountContextState {
   useEffect(() => {
     let cancelled = false;
 
-    loadAccountContext()
-      .then((context) => {
-        if (!cancelled) setState({ context, ready: true });
-      })
-      .catch(() => {
-        if (!cancelled) setState({ context: null, ready: true });
-      });
+    const refresh = () => {
+      setState((current) => ({ context: current.context, ready: false }));
+      loadAccountContext()
+        .then((context) => {
+          if (!cancelled) setState({ context, ready: true });
+        })
+        .catch(() => {
+          if (!cancelled) setState({ context: null, ready: true });
+        });
+    };
+    refresh();
+    window.addEventListener("account-context-reset", refresh);
 
     return () => {
       cancelled = true;
+      window.removeEventListener("account-context-reset", refresh);
     };
   }, []);
 
