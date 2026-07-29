@@ -124,9 +124,16 @@ test("password recovery follows Supabase reset and update flow", async () => {
 
 test("self-service signup creates a blank student without enrollment", async () => {
   const signupPage = await read("src/app/signup/page.tsx");
-  assert.match(signupPage, /auth\.signUp/);
-  assert.match(signupPage, /self_service_signup: true/);
+  assert.match(signupPage, /\/api\/auth\/signup/);
   assert.doesNotMatch(signupPage, /\/api\/enrollments|requested_class_id/);
+
+  const signupRoute = await read("src/app/api/auth/signup/route.ts");
+  assert.match(signupRoute, /publicAuth\.auth\.signUp/);
+  assert.match(signupRoute, /self_service_signup: true/);
+  assert.match(signupRoute, /hasValidMutationOrigin/);
+  assert.match(signupRoute, /consumeRateLimit/);
+  assert.match(signupRoute, /\.from\("students"\)\.upsert/);
+  assert.doesNotMatch(signupRoute, /enrollment_requests|student_ids/);
 
   const migration = await read(
     "supabase/migrations/20260729130000_self_service_student_signup.sql",

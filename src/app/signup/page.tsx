@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   CheckCircle2,
@@ -17,8 +16,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { resetAccountContextCache } from "@/hooks/useAccountContext";
-import { createClient } from "@/lib/supabase/client";
 import { isEmail, validatePassword } from "@/lib/validation";
 
 const PASSWORD_ERRORS: Record<string, string> = {
@@ -32,7 +29,6 @@ const PASSWORD_ERRORS: Record<string, string> = {
 };
 
 export default function SignupPage() {
-  const router = useRouter();
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -65,26 +61,18 @@ export default function SignupPage() {
 
     setSubmitting(true);
     try {
-      const supabase = createClient();
-      const { data, error: signupError } = await supabase.auth.signUp({
-        email: email.trim().toLowerCase(),
-        password,
-        options: {
-          emailRedirectTo: `${window.location.origin}/auth/callback?next=/student`,
-          data: {
-            full_name: fullName.trim(),
-            self_service_signup: true,
-          },
-        },
+      const response = await fetch("/api/auth/signup", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          full_name: fullName.trim(),
+          email: email.trim().toLowerCase(),
+          password,
+        }),
       });
-      if (signupError) throw signupError;
-
-      if (data.session) {
-        resetAccountContextCache();
-        router.replace("/student");
-        router.refresh();
-        return;
-      }
+      const result = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(result.error ?? "signup_failed");
       setConfirmationSent(true);
     } catch (signupError) {
       const message =
