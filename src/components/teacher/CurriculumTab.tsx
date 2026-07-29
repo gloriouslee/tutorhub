@@ -790,20 +790,26 @@ export default function CurriculumTab({ classId, schedule, students = [], gradeL
                   const sExpanded = expanded.has(session.id);
                   return (
                     <div key={session.id} className="bg-card">
-                      {/* Session header */}
+                      {/* Session header — wraps on mobile so the title isn't squeezed */}
                       <div
-                        className="flex items-center gap-3 px-5 py-2.5 cursor-pointer select-none hover:bg-muted/30 transition-colors"
+                        className="flex flex-wrap items-center gap-x-2 gap-y-1.5 px-5 py-2.5 cursor-pointer select-none hover:bg-muted/30 transition-colors"
                         onClick={() => toggle(session.id)}
                       >
+                        {/* Left: chevron + số buổi + tên (chiếm cả hàng trên mobile) */}
+                        <div className="flex items-center gap-2 min-w-0 basis-full sm:basis-0 sm:flex-1">
                         {sExpanded ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" /> : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
-                        <span className="text-xs text-muted-foreground shrink-0 w-14">Buổi {si + 1}</span>
-                        <span className="flex-1 text-sm font-medium text-foreground" onClick={e => e.stopPropagation()}>
+                        <span className="text-xs text-muted-foreground shrink-0 w-12 sm:w-14">Buổi {si + 1}</span>
+                        <span className="flex-1 min-w-0 text-sm font-medium text-foreground" onClick={e => e.stopPropagation()}>
                           <InlineEdit
                             value={session.title}
                             onSave={v => updateSessionTitle(chapter.id, session.id, v)}
                             placeholder="Tên buổi học..."
                           />
                         </span>
+                        </div>
+
+                        {/* Right: ngày + số nội dung + thêm/xóa (xuống hàng dưới trên mobile) */}
+                        <div className="flex items-center gap-2 shrink-0 ml-auto pl-6 sm:pl-0">
 
                         {/* Date picker — select from scheduled slots */}
                         <span onClick={e => e.stopPropagation()} className="shrink-0">
@@ -850,6 +856,7 @@ export default function CurriculumTab({ classId, schedule, students = [], gradeL
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
+                        </div>
                       </div>
 
                       {/* Lessons */}
