@@ -500,6 +500,13 @@ export default function TeacherClassDetailPage() {
     await saveStudentPackages(classId, updated);
   }
 
+  function handleRegistrationApproved(
+    studentId: string,
+    pkg: StudentPackage,
+  ) {
+    setStudentPackages((current) => ({ ...current, [studentId]: pkg }));
+  }
+
   const handleSaveComment = async (studentId: string, text: string, date: string, rating: number) => {
     const updated = [{ text, date, rating }, ...(comments[studentId] || [])];
     setComments(prev => ({ ...prev, [studentId]: updated }));
@@ -706,6 +713,7 @@ export default function TeacherClassDetailPage() {
               setStudentSearch={setStudentSearch}
               comments={comments}
               onRosterChanged={setDbStudentIds}
+              onRegistrationApproved={handleRegistrationApproved}
               onSetPackage={handleSetPackage}
               onOpenComment={setCommentModalStudent}
               onRemoveStudent={handleRemoveStudent}

@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { ProgressBar } from "@/components/shared";
 import { type StudentPackage } from "@/lib/storage";
 import type { ClassRegistrationRequest } from "@/lib/class-registration-types";
+import { formatCurrency } from "@/lib/utils";
 import { Users, Trash2, MessageSquare, Clock, CheckCircle2, XCircle, ArrowRight } from "lucide-react";
 import { PACKAGE_TYPES } from "./classDetail.types";
 
@@ -19,6 +20,7 @@ export default function StudentsTab({
   classId,
   teacherClasses,
   onRosterChanged,
+  onRegistrationApproved,
   onSetPackage,
   onOpenComment,
   onRemoveStudent,
@@ -30,6 +32,10 @@ export default function StudentsTab({
   classId: string;
   teacherClasses: { id: string; class_name: string; subject: string }[];
   onRosterChanged: (studentIds: string[]) => void;
+  onRegistrationApproved: (
+    studentId: string,
+    pkg: StudentPackage,
+  ) => void;
   onSetPackage: (studentId: string, pkg: StudentPackage) => void;
   onOpenComment: (student: any) => void;
   onRemoveStudent: (student: any) => void;
@@ -100,6 +106,10 @@ export default function StudentsTab({
         && Array.isArray(roster)
       ) {
         onRosterChanged(roster.map(String));
+        onRegistrationApproved(
+          request.student_id,
+          request.requested_package ?? "online",
+        );
       }
     } catch (error) {
       const code = error instanceof Error ? error.message : "";
@@ -158,6 +168,27 @@ export default function StudentsTab({
                       <p className="mt-1 text-xs text-muted-foreground">
                         Đăng ký từ {request.source === "material" ? "tài liệu lớp học" : "danh mục lớp"}
                       </p>
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <Badge variant="outline" className="text-primary">
+                          Gói{" "}
+                          {request.requested_package === "advanced"
+                            ? "Nâng cao"
+                            : request.requested_package === "offline"
+                              ? "Offline"
+                              : "Online"}
+                        </Badge>
+                        <span className="text-xs font-semibold text-foreground">
+                          {request.requested_unit_price != null
+                            && request.requested_unit_price > 0
+                            ? `${formatCurrency(request.requested_unit_price)}/buổi`
+                            : "Học phí chưa cập nhật"}
+                        </span>
+                        {request.tuition_period && (
+                          <span className="text-[11px] text-muted-foreground">
+                            Kỳ giá {request.tuition_period}
+                          </span>
+                        )}
+                      </div>
                     </div>
                     <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                       <select

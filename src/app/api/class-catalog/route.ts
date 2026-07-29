@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getRequestIdentity } from "@/lib/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { resolveRegistrationTuition } from "@/lib/registration-pricing";
 
 export const dynamic = "force-dynamic";
 
@@ -24,20 +25,6 @@ function publicRoadmap(value: unknown) {
           id: String(session.id ?? ""),
           title: String(session.title ?? "Buổi học"),
           date: typeof session.date === "string" ? session.date : undefined,
-          lessons: arrayOfObjects(session.lessons)
-            .filter(
-              (lesson) =>
-                lesson.is_published === true
-                && (
-                  !Array.isArray(lesson.assigned_to)
-                  || lesson.assigned_to.length === 0
-                ),
-            )
-            .map((lesson) => ({
-              id: String(lesson.id ?? ""),
-              title: String(lesson.title ?? "Nội dung học"),
-              type: String(lesson.type ?? "lecture"),
-            })),
         })),
     }));
 }
@@ -73,8 +60,14 @@ export async function GET(req: NextRequest) {
   }
 
   const admin = createAdminClient();
-  const [classResult, teacherResult, requestResult, curriculumResult, materialResult] =
-    await Promise.all([
+  const [
+    classResult,
+    teacherResult,
+    requestResult,
+    curriculumResult,
+    materialResult,
+    tuitionResult,
+  ] = await Promise.all([
       admin
         .from("classes")
         .select(
@@ -84,7 +77,7 @@ export async function GET(req: NextRequest) {
       admin.from("teachers").select("id,full_name"),
       admin
         .from("class_registration_requests")
-        .select("id,requested_class_id,status,created_at")
+        .select("id,requested_class_id,status,requested_package,created_at")
         .eq("student_id", actor.studentId)
         .order("created_at", { ascending: false }),
       admin.from("kv_curriculum").select("id,value"),
@@ -93,6 +86,7 @@ export async function GET(req: NextRequest) {
         .select("id,class_id,data")
         .eq("published", true)
         .not("class_id", "is", null),
+      admin.from("kv_tuition").select("id,value"),
     ]);
 
   const error =
@@ -100,7 +94,8 @@ export async function GET(req: NextRequest) {
     ?? teacherResult.error
     ?? requestResult.error
     ?? curriculumResult.error
-    ?? materialResult.error;
+    ?? materialResult.error
+    ?? tuitionResult.error;
   if (error) {
     return NextResponse.json({ error: "catalog_unavailable" }, { status: 500 });
   }
@@ -120,6 +115,12 @@ export async function GET(req: NextRequest) {
     (curriculumResult.data ?? []).map((row) => [
       String(row.id),
       publicRoadmap(row.value),
+    ]),
+  );
+  const tuitionByClass = new Map(
+    (tuitionResult.data ?? []).map((row) => [
+      String(row.id),
+      resolveRegistrationTuition(row.value),
     ]),
   );
   const materials = new Map<string, ReturnType<typeof publicMaterial>[]>();
@@ -151,6 +152,10 @@ export async function GET(req: NextRequest) {
       enrolled: studentIds.includes(actor.studentId!),
       registration_status: request?.status ?? null,
       registration_id: request?.id ?? null,
+      registration_package: request?.requested_package ?? null,
+      tuition:
+        tuitionByClass.get(String(item.id))
+        ?? resolveRegistrationTuition(null),
       roadmap: roadmaps.get(String(item.id)) ?? [],
       materials: materials.get(String(item.id)) ?? [],
     };

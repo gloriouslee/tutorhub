@@ -7,7 +7,9 @@ import { Card, CardContent } from "@/components/ui/card";
 import type {
   CatalogMaterial,
   ClassCatalogItem,
+  RegistrationPackage,
 } from "@/lib/class-registration-types";
+import { formatCurrency } from "@/lib/utils";
 import {
   BookOpen,
   CheckCircle2,
@@ -18,6 +20,7 @@ import {
   Map,
   Search,
   Send,
+  Wifi,
   Users,
   X,
 } from "lucide-react";
@@ -27,6 +30,16 @@ const MODE_LABEL: Record<string, string> = {
   offline: "Trực tiếp",
   hybrid: "Kết hợp",
 };
+
+const PACKAGE_LABEL: Record<RegistrationPackage, string> = {
+  online: "Gói Online",
+  advanced: "Gói Nâng cao",
+  offline: "Gói Offline",
+};
+
+function tuitionLabel(amount: number) {
+  return amount > 0 ? `${formatCurrency(amount)}/buổi` : "Chưa cập nhật";
+}
 
 function requestLabel(status?: string | null) {
   if (status === "pending") return "Đang chờ giáo viên duyệt";
@@ -39,11 +52,13 @@ function RegisterButton({
   item,
   source,
   resourceId,
+  packageType,
   onRegistered,
 }: {
   item: ClassCatalogItem;
   source: "class" | "material";
   resourceId?: string;
+  packageType: RegistrationPackage;
   onRegistered: (requestId: string) => void;
 }) {
   const [saving, setSaving] = useState(false);
@@ -63,6 +78,7 @@ function RegisterButton({
           class_id: item.id,
           source,
           resource_id: resourceId,
+          package_type: packageType,
         }),
       });
       const result = await response.json();
@@ -103,6 +119,10 @@ function ClassDetailModal({
   onRegistered: (requestId: string) => void;
   onClose: () => void;
 }) {
+  const [packageType, setPackageType] = useState<RegistrationPackage>(
+    item.registration_package ?? "online",
+  );
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
       <div className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl">
@@ -154,6 +174,75 @@ function ClassDetailModal({
           </div>
 
           <div>
+            <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
+              <div>
+                <h3 className="font-semibold">Chọn gói đăng ký</h3>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Học phí theo buổi, áp dụng cho kỳ {item.tuition.period}.
+                </p>
+              </div>
+              <Badge variant="outline">Tính theo số buổi thực tế</Badge>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-3">
+              {(["online", "advanced", "offline"] as const).map((option) => {
+                const selected = packageType === option;
+                const amount = item.tuition[option];
+                return (
+                  <button
+                    key={option}
+                    type="button"
+                    disabled={
+                      item.enrolled || item.registration_status === "pending"
+                    }
+                    onClick={() => setPackageType(option)}
+                    className={`rounded-xl border p-4 text-left transition-colors ${
+                      selected
+                        ? "border-primary bg-primary/5 ring-2 ring-primary/20"
+                        : "border-border hover:border-primary/40"
+                    }`}
+                  >
+                    <span className="flex items-center justify-between gap-3">
+                      <span className="flex items-center gap-2 font-semibold">
+                        {option === "online" ? (
+                          <Wifi className="h-4 w-4 text-sky-600" />
+                        ) : option === "advanced" ? (
+                          <Layers className="h-4 w-4 text-violet-600" />
+                        ) : (
+                          <Users className="h-4 w-4 text-amber-600" />
+                        )}
+                        {PACKAGE_LABEL[option]}
+                      </span>
+                      <span
+                        className={`h-4 w-4 rounded-full border ${
+                          selected
+                            ? "border-[5px] border-primary"
+                            : "border-muted-foreground/40"
+                        }`}
+                      />
+                    </span>
+                    <p className="mt-3 text-lg font-bold text-primary">
+                      {tuitionLabel(amount)}
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {option === "online"
+                        ? "Tham gia các buổi học trực tuyến."
+                        : option === "advanced"
+                          ? "Học online kèm tài liệu và hỗ trợ nâng cao."
+                          : "Học trực tiếp tại lớp theo lịch của giáo viên."}
+                    </p>
+                  </button>
+                );
+              })}
+            </div>
+            {item.tuition[packageType] <= 0 && (
+              <p className="mt-2 text-xs text-amber-600">
+                Giáo viên chưa nhập đơn giá cho gói này và sẽ xác nhận học phí
+                khi duyệt yêu cầu.
+              </p>
+            )}
+          </div>
+
+          <div>
             <h3 className="mb-3 flex items-center gap-2 font-semibold">
               <Map className="h-4 w-4 text-primary" /> Lộ trình học
             </h3>
@@ -172,9 +261,9 @@ function ClassDetailModal({
                       {(chapter.sessions ?? []).map((session) => (
                         <div key={session.id} className="rounded-lg bg-muted/40 px-3 py-2">
                           <p className="text-sm font-medium">{session.title}</p>
-                          {session.lessons.length > 0 && (
+                          {session.date && (
                             <p className="mt-1 text-xs text-muted-foreground">
-                              {session.lessons.map((lesson) => lesson.title).join(" · ")}
+                              {new Date(`${session.date}T00:00:00`).toLocaleDateString("vi-VN")}
                             </p>
                           )}
                         </div>
@@ -214,6 +303,7 @@ function ClassDetailModal({
             item={item}
             source={source}
             resourceId={resourceId}
+            packageType={packageType}
             onRegistered={onRegistered}
           />
         </div>
@@ -380,6 +470,26 @@ export default function StudentDiscoveryCatalog({
                         {item.materials.length} bộ tài liệu
                       </span>
                     </div>
+                    <div className="grid grid-cols-3 gap-2 rounded-xl bg-muted/40 p-3 text-xs">
+                      <div>
+                        <p className="text-muted-foreground">Online</p>
+                        <p className="mt-1 font-semibold text-foreground">
+                          {tuitionLabel(item.tuition.online)}
+                        </p>
+                      </div>
+                      <div className="border-l border-border pl-3">
+                        <p className="text-muted-foreground">Nâng cao</p>
+                        <p className="mt-1 font-semibold text-foreground">
+                          {tuitionLabel(item.tuition.advanced)}
+                        </p>
+                      </div>
+                      <div className="border-l border-border pl-3">
+                        <p className="text-muted-foreground">Offline</p>
+                        <p className="mt-1 font-semibold text-foreground">
+                          {tuitionLabel(item.tuition.offline)}
+                        </p>
+                      </div>
+                    </div>
                     <Button
                       variant="outline"
                       className="w-full"
@@ -445,4 +555,3 @@ export default function StudentDiscoveryCatalog({
     </section>
   );
 }
-

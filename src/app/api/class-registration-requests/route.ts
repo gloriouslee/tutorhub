@@ -3,6 +3,11 @@ import { getRequestIdentity } from "@/lib/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { hasValidMutationOrigin } from "@/lib/request-security";
 import { isNonEmptyString } from "@/lib/validation";
+import {
+  resolveRegistrationTuition,
+  tuitionForPackage,
+} from "@/lib/registration-pricing";
+import type { RegistrationPackage } from "@/lib/class-registration-types";
 
 export const dynamic = "force-dynamic";
 
@@ -114,6 +119,14 @@ export async function POST(req: NextRequest) {
   if (!isNonEmptyString(body.class_id, 100)) {
     return NextResponse.json({ error: "invalid_class_id" }, { status: 400 });
   }
+  if (
+    body.package_type !== "online"
+    && body.package_type !== "advanced"
+    && body.package_type !== "offline"
+  ) {
+    return NextResponse.json({ error: "invalid_package_type" }, { status: 400 });
+  }
+  const requestedPackage = body.package_type as RegistrationPackage;
   const source = body.source === "material" ? "material" : "class";
   const note =
     typeof body.note === "string" ? body.note.trim().slice(0, 1000) : null;
@@ -164,6 +177,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(existing, { status: 200 });
   }
 
+  const { data: tuitionRow, error: tuitionError } = await admin
+    .from("kv_tuition")
+    .select("value")
+    .eq("id", body.class_id)
+    .maybeSingle();
+  if (tuitionError) {
+    return NextResponse.json({ error: "tuition_unavailable" }, { status: 500 });
+  }
+  const tuition = resolveRegistrationTuition(tuitionRow?.value);
+  const requestedUnitPrice = tuitionForPackage(tuition, requestedPackage);
+
   const { data, error } = await admin
     .from("class_registration_requests")
     .insert({
@@ -171,6 +195,9 @@ export async function POST(req: NextRequest) {
       requested_class_id: body.class_id,
       source,
       resource_id: resourceId,
+      requested_package: requestedPackage,
+      requested_unit_price: requestedUnitPrice || null,
+      tuition_period: tuition.period,
       student_note: note,
     })
     .select("*")

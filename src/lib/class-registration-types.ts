@@ -5,6 +5,15 @@ export type ClassRegistrationStatus =
   | "cancelled";
 
 export type RegistrationSource = "class" | "material";
+export type RegistrationPackage = "online" | "advanced" | "offline";
+
+export interface ClassRegistrationTuition {
+  period: string;
+  billing_unit: "session";
+  online: number;
+  advanced: number;
+  offline: number;
+}
 
 export interface ClassRegistrationRequest {
   id: string;
@@ -13,6 +22,9 @@ export interface ClassRegistrationRequest {
   assigned_class_id?: string | null;
   source: RegistrationSource;
   resource_id?: string | null;
+  requested_package?: RegistrationPackage | null;
+  requested_unit_price?: number | null;
+  tuition_period?: string | null;
   student_note?: string | null;
   teacher_note?: string | null;
   status: ClassRegistrationStatus;
@@ -51,7 +63,6 @@ export interface CatalogChapterOutline {
     id: string;
     title: string;
     date?: string;
-    lessons: CatalogLessonOutline[];
   }>;
   lessons?: CatalogLessonOutline[];
 }
@@ -82,7 +93,8 @@ export interface ClassCatalogItem {
   enrolled: boolean;
   registration_status?: ClassRegistrationStatus | null;
   registration_id?: string | null;
+  registration_package?: RegistrationPackage | null;
+  tuition: ClassRegistrationTuition;
   roadmap: CatalogChapterOutline[];
   materials: CatalogMaterial[];
 }
-

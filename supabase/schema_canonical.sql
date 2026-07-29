@@ -464,6 +464,11 @@ create table if not exists public.class_registration_requests (
   source             text not null default 'class'
                      check (source in ('class', 'material')),
   resource_id        text,
+  requested_package  text check (requested_package in ('online', 'advanced', 'offline')),
+  requested_unit_price numeric(12, 0)
+                     check (requested_unit_price is null or requested_unit_price >= 0),
+  tuition_period     text
+                     check (tuition_period is null or tuition_period ~ '^[0-9]{4}-[0-9]{2}$'),
   student_note       text,
   teacher_note       text,
   status             text not null default 'pending'
@@ -892,6 +897,20 @@ begin
   end
   where id = p_assigned_class_id
   returning classes.student_ids into destination.student_ids;
+
+  insert into public.kv_student_packages (id, value, updated_at)
+  values (
+    p_assigned_class_id,
+    jsonb_build_object(
+      request_row.student_id,
+      coalesce(request_row.requested_package, 'online')
+    ),
+    now()
+  )
+  on conflict (id) do update
+  set value = coalesce(public.kv_student_packages.value, '{}'::jsonb)
+              || excluded.value,
+      updated_at = now();
 
   update public.class_registration_requests
   set status = 'approved',

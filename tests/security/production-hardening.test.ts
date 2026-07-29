@@ -8,6 +8,10 @@ import {
   normalizeStudentGrade,
   validatePassword,
 } from "../../src/lib/validation";
+import {
+  resolveRegistrationTuition,
+  tuitionForPackage,
+} from "../../src/lib/registration-pricing";
 
 const read = (path: string) => readFile(path, "utf8");
 
@@ -44,6 +48,28 @@ test("student onboarding validates every required profile field", () => {
     }),
     false,
   );
+});
+
+test("class registration tuition resolves all three session package prices", () => {
+  const tuition = resolveRegistrationTuition(
+    {
+      unit_prices: {
+        "2026-06": { online: 80_000, advanced: 100_000, offline: 140_000 },
+        "2026-07": { online: 90_000, advanced: 110_000, offline: 150_000 },
+      },
+    },
+    "2026-07",
+  );
+  assert.deepEqual(tuition, {
+    period: "2026-07",
+    billing_unit: "session",
+    online: 90_000,
+    advanced: 110_000,
+    offline: 150_000,
+  });
+  assert.equal(tuitionForPackage(tuition, "online"), 90_000);
+  assert.equal(tuitionForPackage(tuition, "advanced"), 110_000);
+  assert.equal(tuitionForPackage(tuition, "offline"), 150_000);
 });
 
 test("login contains no demo-cookie or enrollment password fallback", async () => {
@@ -122,6 +148,9 @@ test("class registration is student-created and teacher-reviewed", async () => {
   assert.match(collectionRoute, /hasValidMutationOrigin/);
   assert.match(collectionRoute, /\.from\("class_registration_requests"\)/);
   assert.match(collectionRoute, /\.eq\("tutor_id", actor\.teacherId\)/);
+  assert.match(collectionRoute, /body\.package_type/);
+  assert.match(collectionRoute, /requested_package: requestedPackage/);
+  assert.match(collectionRoute, /requested_unit_price: requestedUnitPrice/);
 
   const reviewRoute = await read(
     "src/app/api/class-registration-requests/[id]/route.ts",
@@ -131,13 +160,23 @@ test("class registration is student-created and teacher-reviewed", async () => {
   assert.match(reviewRoute, /p_teacher_id: actor\.teacherId/);
   assert.match(reviewRoute, /hasValidMutationOrigin/);
   assert.doesNotMatch(reviewRoute, /role !== "admin"/);
+
+  const migration = await read(
+    "supabase/migrations/20260729160000_class_registration_packages.sql",
+  );
+  assert.match(migration, /requested_package/);
+  assert.match(migration, /requested_unit_price/);
+  assert.match(migration, /insert into public\.kv_student_packages/);
 });
 
-test("class catalog only exposes sanitized published outlines", async () => {
+test("class catalog exposes session-only roadmap and sanitized materials", async () => {
   const catalogRoute = await read("src/app/api/class-catalog/route.ts");
   assert.match(catalogRoute, /actor\?\.role !== "student"/);
-  assert.match(catalogRoute, /lesson\.is_published === true/);
   assert.match(catalogRoute, /\.eq\("published", true\)/);
+  assert.match(catalogRoute, /resolveRegistrationTuition/);
+  assert.match(catalogRoute, /\.from\("kv_tuition"\)/);
+  assert.doesNotMatch(catalogRoute, /session\.lessons/);
+  assert.doesNotMatch(catalogRoute, /lesson\.is_published/);
   assert.doesNotMatch(catalogRoute, /video_url|file_url|exam_content/);
 });
 
