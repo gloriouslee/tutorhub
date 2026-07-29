@@ -26,14 +26,24 @@ function getYouTubeId(url: string): string | null {
   if (!url) return null;
   const patterns = [
     /[?&]v=([^&#]+)/,
-    /youtu\.be\/([^?&#]+)/,
-    /embed\/([^?&#]+)/,
+    /youtu\.be\/([^?&#/]+)/,
+    /embed\/([^?&#/]+)/,
+    /shorts\/([^?&#/]+)/,
+    /live\/([^?&#/]+)/,
   ];
   for (const p of patterns) {
     const m = url.match(p);
     if (m) return m[1];
   }
   return null;
+}
+
+// Embed URL with an explicit `origin` (YouTube requires it for many embeds — its
+// absence is a common cause of "player configuration" errors like 153) and the
+// privacy-enhanced nocookie host. No autoplay (avoids autoplay-policy failures).
+function ytEmbedSrc(id: string): string {
+  const origin = typeof window !== "undefined" ? `&origin=${encodeURIComponent(window.location.origin)}` : "";
+  return `https://www.youtube-nocookie.com/embed/${id}?rel=0&modestbranding=1&playsinline=1${origin}`;
 }
 
 // ── Props ─────────────────────────────────────────────────────────────────────
@@ -125,7 +135,7 @@ export default function CurriculumView({ classId, studentId, watched, onWatch, s
         {activeLesson && activeYtId ? (
           <div className="relative w-full aspect-video bg-black">
             <iframe
-              src={`https://www.youtube.com/embed/${activeYtId}?autoplay=1&rel=0`}
+              src={ytEmbedSrc(activeYtId)}
               className="absolute inset-0 w-full h-full"
               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
               allowFullScreen
