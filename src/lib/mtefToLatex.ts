@@ -733,7 +733,9 @@ export function equationNativeToLatex(streamBytes: Uint8Array): string | null {
  */
 export function oleBinToLatex(oleBytes: Uint8Array): string | null {
   try {
-    const cfb = CFB.read(oleBytes, { type: "buffer" });
+    // type "array" (not "buffer") → không phụ thuộc Node Buffer, chạy được trong
+    // trình duyệt (Next.js không polyfill Buffer cho client bundle).
+    const cfb = CFB.read(Array.from(oleBytes), { type: "array" });
     const entry = CFB.find(cfb, "Equation Native");
     if (!entry || !entry.content) return null;
     const content = entry.content as unknown as ArrayLike<number>;
