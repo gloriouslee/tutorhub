@@ -27,7 +27,6 @@ interface ProfileData {
   phone:        string;
   student_id:   string;
   username?:    string;
-  from_enrollment: boolean;
 }
 
 function buildProfile(
@@ -45,7 +44,6 @@ function buildProfile(
       phone:            account.phone,
       student_id:      account.student_id,
       username:        account.username,
-      from_enrollment: account.from_enrollment === true,
     };
   }
   return {
@@ -56,7 +54,6 @@ function buildProfile(
     grade:           "",
     phone:           "",
     student_id:      studentId,
-    from_enrollment: false,
   };
 }
 
@@ -216,21 +213,6 @@ export default function StudentProfilePage() {
           subtitle="Quản lý thông tin cá nhân và cài đặt bảo mật"
         />
 
-        {/* Enrollment sync banner */}
-        {form.from_enrollment && (
-          <div className="flex items-center gap-3 p-4 rounded-xl bg-emerald-50 dark:bg-emerald-900/10 border border-emerald-200 dark:border-emerald-800/50">
-            <CheckCircle2 className="h-5 w-5 text-emerald-500 shrink-0" />
-            <div>
-              <p className="text-sm font-semibold text-emerald-800 dark:text-emerald-300">
-                Thông tin đồng bộ từ đơn đăng ký nhập học
-              </p>
-              <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-0.5">
-                Thông tin dưới đây được cập nhật tự động khi admin duyệt đơn của bạn.
-              </p>
-            </div>
-          </div>
-        )}
-
         {/* Save success toast */}
         {saved && (
           <div className="flex items-center gap-3 p-3 rounded-xl bg-emerald-50 dark:bg-emerald-900/10 border border-emerald-200 dark:border-emerald-800/50 animate-fade-in">
@@ -372,11 +354,6 @@ export default function StudentProfilePage() {
                   <div className="flex items-center gap-2">
                     {dirty && (
                       <Badge variant="warning" className="text-[10px]">Chưa lưu</Badge>
-                    )}
-                    {form.from_enrollment && !dirty && (
-                      <Badge variant="outline" className="text-[10px] text-emerald-600 border-emerald-300">
-                        <CheckCircle2 className="h-3 w-3 mr-1" /> Đã xác thực
-                      </Badge>
                     )}
                   </div>
                 </div>

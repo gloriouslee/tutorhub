@@ -5,7 +5,6 @@ const PUBLIC_ROUTES = new Set([
   "/login",
   "/signup",
   "/forgot-password",
-  "/enroll",
   "/auth/callback",
 ]);
 const ROLE_HOME: Record<UserRole, string> = {
@@ -98,12 +97,10 @@ export async function proxy(request: NextRequest) {
   // identity here as well would repeat the same Supabase calls in every handler.
   if (pathname.startsWith("/api/")) return response;
 
-  // These routes never need a role lookup. The callback validates its own code,
-  // while enrollment is intentionally public.
+  // These routes never need a role lookup. The callback validates its own code.
   if (
     pathname === "/signup"
     || pathname === "/forgot-password"
-    || pathname === "/enroll"
     || pathname === "/auth/callback"
   ) return response;
 

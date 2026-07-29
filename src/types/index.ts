@@ -65,14 +65,6 @@ export interface ClassSchedule {
   end_time: string;
 }
 
-export interface Enrollment {
-  id: string;
-  student_id: string;
-  class_id: string;
-  enrolled_at: string;
-  status: "active" | "inactive" | "completed";
-}
-
 export interface Attendance {
   id: string;
   class_id: string;

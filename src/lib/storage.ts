@@ -1058,31 +1058,6 @@ export async function saveTeacherSettings(teacherId: string, settings: TeacherSe
   await kvSet(`${TEACHER_SETTINGS_KEY}${teacherId}`, settings);
 }
 
-// ── Enrollment requests (Supabase) ───────────────────────────────────────────
-
-export type EnrollmentStatus = "pending" | "approved" | "rejected";
-
-export interface EnrollmentRequest {
-  id: string;
-  full_name: string;
-  email: string;
-  dob: string;
-  school: string;
-  grade: string;
-  requested_class_id: string;
-  parent_phone: string;
-  student_phone?: string;
-  package?: StudentPackage;   // gói học viên đăng ký: online | advanced | offline
-  note?: string;
-  status: EnrollmentStatus;
-  assigned_class_id?: string;
-  account_username?: string;
-  reject_reason?: string;
-  supabase_user_id?: string;
-  created_at: string;
-  reviewed_at?: string;
-}
-
 export interface StudentAccount {
   student_id: string;
   full_name: string;
@@ -1091,71 +1066,9 @@ export interface StudentAccount {
   school: string;
   grade: string;
   phone: string;
-  assigned_class_id: string;
-  parent_phone: string;
   username: string;
   created_at: string;
-  from_enrollment?: boolean;
   profile_complete?: boolean;
-}
-
-export async function getEnrollments(): Promise<EnrollmentRequest[]> {
-  const response = await fetch("/api/enrollments", {
-    cache: "no-store",
-    credentials: "same-origin",
-  });
-  if (!response.ok) throw new Error("Không thể tải danh sách ghi danh.");
-  return response.json() as Promise<EnrollmentRequest[]>;
-}
-
-export async function createEnrollment(
-  data: Omit<EnrollmentRequest, "id" | "status" | "created_at">
-): Promise<EnrollmentRequest> {
-  const response = await fetch("/api/enrollments", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data),
-  });
-  const result = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(
-      result.error === "rate_limit_exceeded"
-        ? "Bạn đã gửi quá nhiều đơn. Vui lòng thử lại sau."
-        : "Không thể gửi đơn ghi danh.",
-    );
-  }
-  return { ...data, ...result } as EnrollmentRequest;
-}
-
-export async function approveEnrollment(
-  id: string,
-  opts: { assigned_class_id: string; account_username: string; account_password: string }
-): Promise<void> {
-  const response = await fetch(`/api/enrollments/${encodeURIComponent(id)}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ action: "approve", ...opts }),
-  });
-  const result = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(result.error || "Không thể duyệt đơn ghi danh.");
-  }
-}
-
-export async function deleteEnrollment(id: string): Promise<void> {
-  const response = await fetch(`/api/enrollments/${encodeURIComponent(id)}`, {
-    method: "DELETE",
-  });
-  if (!response.ok) throw new Error("Không thể xóa đơn ghi danh.");
-}
-
-export async function rejectEnrollment(id: string, reason?: string): Promise<void> {
-  const response = await fetch(`/api/enrollments/${encodeURIComponent(id)}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ action: "reject", reject_reason: reason }),
-  });
-  if (!response.ok) throw new Error("Không thể từ chối đơn ghi danh.");
 }
 
 export async function getStudentAccounts(): Promise<StudentAccount[]> {

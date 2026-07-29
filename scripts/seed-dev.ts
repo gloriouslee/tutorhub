@@ -239,22 +239,7 @@ async function main() {
   const [cls1, cls2, cls3, cls4] = classes!;
   console.log("  ✅  Classes created");
 
-  // ── 7. Enrollments ────────────────────────────────────────────────────────
-  console.log("  Creating enrollments...");
-  await insert("enrollments", [
-    { student_id: stu1.id, class_id: cls1.id, status: "active" },
-    { student_id: stu2.id, class_id: cls1.id, status: "active" },
-    { student_id: stu4.id, class_id: cls1.id, status: "active" },
-    { student_id: stu1.id, class_id: cls2.id, status: "active" },
-    { student_id: stu5.id, class_id: cls2.id, status: "active" },
-    { student_id: stu2.id, class_id: cls3.id, status: "active" },
-    { student_id: stu3.id, class_id: cls3.id, status: "active" },
-    { student_id: stu3.id, class_id: cls4.id, status: "active" },
-    { student_id: stu4.id, class_id: cls4.id, status: "active" },
-  ]);
-  console.log("  ✅  Enrollments created");
-
-  // ── 8. Homework ───────────────────────────────────────────────────────────
+  // ── 7. Homework ───────────────────────────────────────────────────────────
   console.log("  Creating homework...");
   const { data: hw } = await supabase.from("homework").insert([
     {

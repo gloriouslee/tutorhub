@@ -17,7 +17,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "student_authorization_required" }, { status: 403 });
   }
   const admin = createAdminClient();
-  const [studentResult, profileResult, enrollmentResult] = await Promise.all([
+  const [studentResult, profileResult] = await Promise.all([
     admin
       .from("students")
       .select("id,full_name,email,dob,school,grade,created_at")
@@ -28,11 +28,6 @@ export async function GET(req: NextRequest) {
       .select("phone")
       .eq("id", actor.userId)
       .maybeSingle(),
-    admin
-      .from("enrollment_requests")
-      .select("parent_phone,assigned_class_id,account_username")
-      .eq("supabase_user_id", actor.userId)
-      .maybeSingle(),
   ]);
   const student = studentResult.data;
   const error = studentResult.error;
@@ -40,7 +35,6 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "profile_not_found" }, { status: 404 });
   }
   const phone = profileResult.data?.phone ?? "";
-  const enrollment = enrollmentResult.data;
   return NextResponse.json({
     student_id: student.id,
     full_name: student.full_name,
@@ -49,10 +43,7 @@ export async function GET(req: NextRequest) {
     school: student.school ?? "",
     grade: student.grade ?? "",
     phone,
-    parent_phone: enrollment?.parent_phone ?? "",
-    assigned_class_id: enrollment?.assigned_class_id ?? "",
-    username: enrollment?.account_username ?? actor.email ?? "",
-    from_enrollment: Boolean(enrollment),
+    username: actor.email ?? student.email ?? "",
     profile_complete: isCompleteStudentProfile({
       full_name: student.full_name,
       dob: student.dob,

@@ -23,7 +23,7 @@ test(
     for (const table of [
       "profiles",
       "students",
-      "enrollment_requests",
+      "class_registration_requests",
       "purchase_transactions",
       "kv_curriculum",
       "kv_exam_results",
@@ -31,18 +31,11 @@ test(
       const { error } = await anon.from(table).select("*").limit(1);
       assert.ok(error, `anon SELECT unexpectedly succeeded on ${table}`);
     }
-    const { error: insertError } = await anon.from("enrollment_requests").insert({
-      id: crypto.randomUUID(),
-      full_name: "RLS probe",
-      email: "probe.invalid@example.com",
-      status: "pending",
-    });
-    assert.ok(insertError, "anon INSERT unexpectedly succeeded on enrollment_requests");
   },
 );
 
 test(
-  "public enrollment API rejects invalid data without exposing database errors",
+  "retired public enrollment API is unavailable",
   { skip: !process.env.TEST_APP_URL ? "TEST_APP_URL not configured" : false },
   async () => {
     const response = await fetch(`${process.env.TEST_APP_URL}/api/enrollments`, {
@@ -53,8 +46,6 @@ test(
       },
       body: JSON.stringify({ full_name: "" }),
     });
-    assert.ok([400, 429].includes(response.status));
-    const body = await response.text();
-    assert.doesNotMatch(body, /postgres|relation |SUPABASE_SERVICE_ROLE_KEY/i);
+    assert.equal(response.status, 404);
   },
 );

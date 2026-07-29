@@ -35,8 +35,8 @@
 -- TABLES (42)
 --   Core (11):    profiles, parents, teachers, students, classes, payments,
 --                 attendance, notifications, homework, submissions, materials
---   Domain (4):   enrollment_requests, class_registration_requests,
---                 purchase_transactions, app_exam_scores
+--   Domain (3):   class_registration_requests, purchase_transactions,
+--                 app_exam_scores
 --   KV (14):      kv_curriculum, kv_schedules, kv_online_links, kv_tuition,
 --                 kv_student_packages, kv_session_notes, kv_class_extra_students,
 --                 kv_exam_results, kv_exam_submissions, kv_exam_scores,
@@ -49,14 +49,14 @@
 --                 class_attendance, teacher_materials, parent_messages
 --   Infra (1):    api_rate_limits
 --
--- FUNCTIONS (17)
+-- FUNCTIONS (16)
 --   Auth helpers (9): get_my_role, my_student_id, my_teacher_id, my_parent_id,
 --                     teaches_class, enrolled_in_class, parent_has_student,
 --                     teaches_student, is_my_child
 --   Trigger fn (1):   handle_new_user  (+ trigger on_auth_user_created)
---   Secure RPC (8):   consume_rate_limit, approve_enrollment_request_secure,
+--   Secure RPC (6):   consume_rate_limit,
 --                     review_class_registration_request_secure,
---                     delete_enrollment_request_secure, submit_exam_result_secure,
+--                     submit_exam_result_secure,
 --                     retry_exam_secure, replace_admin_entity_rows_secure,
 --                     mutate_invoice_secure
 --
@@ -76,7 +76,6 @@
 --     kv_schedule_notifications, kv_parent_messages.
 --     (This file simply does not create them. To DROP them from an existing
 --      database, run the destructive supabase/drop_retired_kv.sql separately.)
---   - enrollment_requests.account_password (dropped by the security migration).
 -- ============================================================================
 
 set check_function_bodies = off;
@@ -430,32 +429,6 @@ create index if not exists classes_student_ids_gin_idx on public.classes using g
 
 
 -- ─────────────────────────── 4. Domain tables ──────────────────────────────
--- enrollment_requests: TEXT-id (v2) shape + `package` column
--- (migration_enrollment_package). account_password is intentionally NOT created
--- (the production-security migration drops it).
-create table if not exists public.enrollment_requests (
-  id                 text primary key,
-  full_name          text not null,
-  email              text not null,
-  dob                text,
-  school             text,
-  grade              text,
-  requested_class_id text,
-  parent_phone       text,
-  student_phone      text,
-  note               text,
-  status             text not null default 'pending' check (status in ('pending','approved','rejected')),
-  assigned_class_id  text,
-  account_username   text,
-  reject_reason      text,
-  supabase_user_id   uuid,
-  package            text,
-  created_at         timestamptz not null default now(),
-  reviewed_at        timestamptz
-);
-comment on column public.enrollment_requests.package is
-  'Gói học viên đăng ký: online | advanced | offline';
-
 create table if not exists public.class_registration_requests (
   id                 uuid primary key default gen_random_uuid(),
   student_id         text not null references public.students(id) on delete cascade,
@@ -739,90 +712,6 @@ begin
 end;
 $$;
 
-create or replace function public.approve_enrollment_request_secure(
-  p_enrollment_id text,
-  p_assigned_class_id text,
-  p_auth_user_id uuid,
-  p_actor_id uuid
-)
-returns text
-language plpgsql
-security definer
-set search_path = public, pg_temp
-as $$
-declare
-  request_row public.enrollment_requests%rowtype;
-  student_id_value text := 'enr_' || p_enrollment_id;
-begin
-  if not exists (
-    select 1 from public.profiles
-    where id = p_actor_id and role = 'admin'
-  ) then
-    raise exception 'forbidden';
-  end if;
-
-  select * into request_row
-  from public.enrollment_requests
-  where id::text = p_enrollment_id
-  for update;
-  if not found then raise exception 'enrollment_not_found'; end if;
-  if request_row.status <> 'pending' then
-    raise exception 'enrollment_not_pending';
-  end if;
-  if p_assigned_class_id is not null and not exists (
-    select 1 from public.classes where id = p_assigned_class_id
-  ) then
-    raise exception 'class_not_found';
-  end if;
-
-  insert into public.profiles (
-    id, email, full_name, role, must_reset_password
-  ) values (
-    p_auth_user_id, lower(request_row.email), request_row.full_name,
-    'student', true
-  )
-  on conflict (id) do update
-  set role = 'student', must_reset_password = true;
-
-  insert into public.students (
-    id, user_id, full_name, email, dob, school, grade,
-    learning_type, created_at
-  ) values (
-    student_id_value, p_auth_user_id, request_row.full_name,
-    lower(request_row.email), request_row.dob, request_row.school,
-    request_row.grade, 'hybrid', now()
-  )
-  on conflict (id) do update
-  set user_id = excluded.user_id,
-      full_name = excluded.full_name,
-      email = excluded.email,
-      dob = excluded.dob,
-      school = excluded.school,
-      grade = excluded.grade;
-
-  if p_assigned_class_id is not null then
-    insert into public.class_registration_requests (
-      student_id, requested_class_id, source, student_note
-    ) values (
-      student_id_value, p_assigned_class_id, 'class', request_row.note
-    )
-    on conflict (student_id, requested_class_id)
-      where status = 'pending'
-    do nothing;
-  end if;
-
-  update public.enrollment_requests
-  set status = 'approved',
-      assigned_class_id = p_assigned_class_id,
-      account_username = lower(request_row.email),
-      supabase_user_id = p_auth_user_id,
-      reviewed_at = now(),
-      reject_reason = null
-  where id::text = p_enrollment_id;
-  return student_id_value;
-end;
-$$;
-
 create or replace function public.review_class_registration_request_secure(
   p_request_id uuid,
   p_action text,
@@ -922,40 +811,6 @@ begin
 
   return query
     select request_row.student_id, p_assigned_class_id, destination.student_ids;
-end;
-$$;
-
-create or replace function public.delete_enrollment_request_secure(
-  p_enrollment_id text,
-  p_actor_id uuid
-)
-returns text
-language plpgsql
-security definer
-set search_path = public, pg_temp
-as $$
-declare
-  request_row public.enrollment_requests%rowtype;
-  student_id_value text := 'enr_' || p_enrollment_id;
-begin
-  if not exists (
-    select 1 from public.profiles
-    where id = p_actor_id and role = 'admin'
-  ) then
-    raise exception 'forbidden';
-  end if;
-  select * into request_row
-  from public.enrollment_requests
-  where id::text = p_enrollment_id
-  for update;
-  if not found then raise exception 'enrollment_not_found'; end if;
-
-  update public.classes
-  set student_ids = array_remove(coalesce(student_ids, '{}'::text[]), student_id_value)
-  where id::text = request_row.assigned_class_id::text;
-  delete from public.students where id::text = student_id_value;
-  delete from public.enrollment_requests where id::text = p_enrollment_id;
-  return request_row.supabase_user_id::text;
 end;
 $$;
 
@@ -1243,17 +1098,13 @@ grant execute on function public.is_my_child(text)           to authenticated, s
 
 -- Secure RPCs: service_role only.
 revoke all on function public.consume_rate_limit(text, text, integer, integer)                 from public, anon, authenticated;
-revoke all on function public.approve_enrollment_request_secure(text, text, uuid, uuid)         from public, anon, authenticated;
 revoke all on function public.review_class_registration_request_secure(uuid, text, text, text, uuid, text) from public, anon, authenticated;
-revoke all on function public.delete_enrollment_request_secure(text, uuid)                      from public, anon, authenticated;
 revoke all on function public.submit_exam_result_secure(text, text, text, jsonb, boolean)       from public, anon, authenticated;
 revoke all on function public.retry_exam_secure(text, text, text)                               from public, anon, authenticated;
 revoke all on function public.replace_admin_entity_rows_secure(text, jsonb, uuid)               from public, anon, authenticated;
 revoke all on function public.mutate_invoice_secure(text, text, text, uuid, jsonb)              from public, anon, authenticated;
 grant execute on function public.consume_rate_limit(text, text, integer, integer)               to service_role;
-grant execute on function public.approve_enrollment_request_secure(text, text, uuid, uuid)      to service_role;
 grant execute on function public.review_class_registration_request_secure(uuid, text, text, text, uuid, text) to service_role;
-grant execute on function public.delete_enrollment_request_secure(text, uuid)                   to service_role;
 grant execute on function public.submit_exam_result_secure(text, text, text, jsonb, boolean)    to service_role;
 grant execute on function public.retry_exam_secure(text, text, text)                            to service_role;
 grant execute on function public.replace_admin_entity_rows_secure(text, jsonb, uuid)            to service_role;
@@ -1425,8 +1276,8 @@ create policy app_exam_scores_scoped_select on public.app_exam_scores
     or public.get_my_role() = 'admin'
   );
 
--- enrollment_requests, class_registration_requests and purchase_transactions
--- are API-only (service_role):
+-- class_registration_requests and purchase_transactions are API-only
+-- (service_role):
 -- no authenticated/anon grants or policies -> default deny.
 grant select, insert, update, delete on public.class_registration_requests to service_role;
 

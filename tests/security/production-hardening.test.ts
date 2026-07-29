@@ -92,7 +92,7 @@ test("proxy keeps API and anonymous public traffic on the fast path", async () =
   );
   assert.ok(apiFastPath >= 0 && apiFastPath < identityLookup);
   assert.match(proxy, /hasSupabaseAuthCookie/);
-  assert.match(proxy, /pathname === "\/enroll"/);
+  assert.doesNotMatch(proxy, /pathname === "\/enroll"/);
 
   const auth = await read("src/lib/api-auth.ts");
   assert.match(auth, /auth\.getClaims\(\)/);
@@ -220,6 +220,33 @@ test("self-service signup creates a blank student without enrollment", async () 
   const proxy = await read("src/proxy.ts");
   assert.match(proxy, /"\/signup"/);
   assert.match(proxy, /"\/forgot-password"/);
+});
+
+test("legacy public enrollment workflow is fully retired", async () => {
+  for (const retiredRoute of [
+    "src/app/enroll/page.tsx",
+    "src/app/admin/enrollments/page.tsx",
+    "src/app/api/enrollments/route.ts",
+    "src/app/api/enrollments/[id]/route.ts",
+    "src/app/api/public/classes/route.ts",
+  ]) {
+    await assert.rejects(read(retiredRoute));
+  }
+
+  const sidebar = await read("src/components/layout/Sidebar.tsx");
+  const storage = await read("src/lib/storage.ts");
+  const profileRoute = await read("src/app/api/account/profile/route.ts");
+  assert.doesNotMatch(sidebar, /\/admin\/enrollments|getEnrollments/);
+  assert.doesNotMatch(storage, /\/api\/enrollments|EnrollmentRequest/);
+  assert.doesNotMatch(profileRoute, /\.from\("enrollment_requests"\)/);
+
+  const migration = await read(
+    "supabase/migrations/20260729170000_remove_legacy_enrollment_flow.sql",
+  );
+  assert.match(migration, /drop table if exists public\.enrollment_requests/);
+  assert.match(migration, /drop table if exists public\.enrollments/);
+  assert.match(migration, /drop function if exists public\.approve_enrollment_request_secure/);
+  assert.match(migration, /drop function if exists public\.delete_enrollment_request_secure/);
 });
 
 test("incomplete student profiles are forced through onboarding", async () => {

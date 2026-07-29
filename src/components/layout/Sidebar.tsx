@@ -65,7 +65,6 @@ const navConfig: Record<UserRole, NavItem[]> = {
     { label: "Học viên",   href: "/admin/students",         icon: GraduationCap },
     { label: "Giáo viên",  href: "/admin/teachers",         icon: Users },
     { label: "Lớp học",    href: "/admin/classes",          icon: BookOpen },
-    { label: "Tài khoản mới", href: "/admin/enrollments",   icon: GraduationCap },
     { label: "Báo cáo",    href: "/admin/reports",          icon: BarChart3 },
     { label: "Thông báo",  href: "/admin/notifications",    icon: Bell },
     { label: "Tài khoản",  href: "/admin/users",            icon: Shield },
@@ -174,14 +173,6 @@ async function computeBadges(
         result["/teacher/classes"] = registrations.length;
       }
     }
-  }
-
-  if (role === "admin") {
-    const { getEnrollments } = await import("@/lib/storage");
-    // Admin chỉ xử lý hồ sơ tạo tài khoản; giáo viên duyệt yêu cầu vào lớp.
-    const enrollments = await getEnrollments().catch(() => []);
-    const pendingEnroll = enrollments.filter(e => e.status === "pending").length;
-    if (pendingEnroll > 0) result["/admin/enrollments"] = pendingEnroll;
   }
 
   return result;

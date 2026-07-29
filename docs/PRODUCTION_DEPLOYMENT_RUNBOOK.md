@@ -8,8 +8,8 @@ Never bypass this file in a hosting command.
 - The database backup taken on 2026-07-27 reported **0 Auth users**.
 - The security migration intentionally denies all anonymous table access.
 - A real admin must therefore be bootstrapped and verified before migration.
-- The logical backup could not export `enrollments`; obtain a physical
-  `pg_dump` with the database password before the production change window.
+- Obtain a physical `pg_dump` with the database password before the production
+  change window.
 
 ## Preparation
 
@@ -31,15 +31,16 @@ Never bypass this file in a hosting command.
 
 1. Restore the latest production backup into staging.
 2. Apply
-   `supabase/migrations/20260727140000_production_security.sql`.
+   `supabase/migrations/20260727140000_production_security.sql`, followed by
+   all newer timestamped migrations in order.
 3. Confirm every application table has RLS enabled and no policy named
    `phase1_open_all` remains.
 4. Confirm all three storage buckets are private.
-5. Confirm `enrollment_requests.account_password` is absent and JSON records in
-   `kv_managed_users` contain no `password` property.
+5. Confirm the retired `enrollment_requests` and `enrollments` tables are absent
+   and JSON records in `kv_managed_users` contain no `password` property.
 6. Run `npm run test:integration` against staging.
-7. Exercise admin invitation, enrollment approval, exam submit/retry, and
-   payment create/review using one test account per role.
+7. Exercise admin invitation, teacher-managed class registration approval,
+   exam submit/retry, and payment create/review using one test account per role.
 
 ## Application verification
 
