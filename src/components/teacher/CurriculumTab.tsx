@@ -874,8 +874,10 @@ export default function CurriculumTab({ classId, schedule, students = [], gradeL
                             return (
                               <div key={lesson.id} className="space-y-0">
                                 <div
-                                  className={`flex items-center gap-3 p-2.5 rounded-xl border transition-colors ${lesson.is_published ? "border-border/50 bg-background" : "border-dashed border-border/40 bg-muted/20 opacity-70"}`}
+                                  className={`flex flex-wrap items-center gap-x-3 gap-y-2 p-2.5 rounded-xl border transition-colors ${lesson.is_published ? "border-border/50 bg-background" : "border-dashed border-border/40 bg-muted/20 opacity-70"}`}
                                 >
+                                  {/* Left: icon + nội dung (chiếm cả hàng trên mobile) */}
+                                  <div className="flex items-center gap-3 min-w-0 basis-full sm:basis-0 sm:flex-1">
                                   <div className={`h-7 w-7 rounded-lg flex items-center justify-center shrink-0 ${meta.color}`}>
                                     <meta.icon className="h-3.5 w-3.5" />
                                   </div>
@@ -917,6 +919,9 @@ export default function CurriculumTab({ classId, schedule, students = [], gradeL
                                       </div>
                                     )}
                                   </div>
+                                  </div>{/* /left */}
+                                  {/* Right: badge + nút (xuống hàng dưới trên mobile) */}
+                                  <div className="flex items-center gap-1 shrink-0 ml-auto flex-wrap justify-end">
                                   {lesson.is_published && lesson.assigned_to && lesson.assigned_to.length > 0 && (
                                     <span
                                       className="flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full shrink-0 bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400"
@@ -969,6 +974,7 @@ export default function CurriculumTab({ classId, schedule, students = [], gradeL
                                   >
                                     <Trash2 className="h-3.5 w-3.5" />
                                   </button>
+                                  </div>{/* /right */}
                                 </div>
                               </div>
                             );
