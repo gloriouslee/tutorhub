@@ -78,7 +78,7 @@ export async function getSubmissionsByStudent(
     .from("hw_submissions")
     .select("data")
     .eq("student_id", studentId)
-    .order("created_at", { ascending: false });
+    .order("submitted_at", { ascending: false });
   if (error || !data?.length) return [];
   return data.map(row => row.data as SubmissionRecord);
 }
@@ -92,7 +92,7 @@ export async function getSubmissionsByHomeworks(
     .from("hw_submissions")
     .select("data")
     .in("homework_id", homeworkIds)
-    .order("created_at", { ascending: false });
+    .order("submitted_at", { ascending: false });
   if (error || !data?.length) return [];
   return data.map(row => row.data as SubmissionRecord);
 }

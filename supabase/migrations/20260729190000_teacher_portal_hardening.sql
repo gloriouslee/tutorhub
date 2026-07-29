@@ -87,8 +87,11 @@ where attachment.class_id is null
 
 -- Preserve legacy submission history while switching every client to
 -- hw_submissions. Curriculum homework IDs are resolved from their class blob.
+alter table public.hw_submissions
+  add column if not exists submitted_at timestamptz not null default now();
+
 insert into public.hw_submissions (
-  id, homework_id, student_id, class_id, data, created_at
+  id, homework_id, student_id, class_id, data, submitted_at
 )
 select
   submission.id,

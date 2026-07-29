@@ -346,6 +346,8 @@ test("teacher portal data is class-scoped and notification state is durable", as
   assert.match(migration, /public\.enrolled_in_class\(target_class_id\)/);
   assert.match(migration, /create table if not exists public\.notification_reads/);
   assert.match(migration, /public\.teaches_class\(class_id\)/);
+  assert.match(migration, /data, submitted_at/);
+  assert.doesNotMatch(migration, /hw_submissions \([\s\S]{0,120}created_at/);
   assert.match(entityRoute, /item\.sender_user_id = actor\.userId/);
   assert.match(notificationPage, /getNotificationStates/);
   assert.doesNotMatch(notificationPage, /tutorhub_teacher_notif_read|localStorage/);
