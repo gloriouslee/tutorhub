@@ -13,7 +13,6 @@ import {
   LineChart, Line, CartesianGrid, PieChart, Pie, Cell, Legend,
 } from "recharts";
 import { useState, useEffect } from "react";
-import { getInvoicesRaw, type TuitionInvoice } from "@/lib/storage";
 import {
   loadAnalyticsData, computeKpis, revenueTrend, attendanceTrend, learningModeDist,
   type AnalyticsData,
@@ -29,11 +28,9 @@ const INV_STATUS: Record<string, { label: string; cls: string }> = {
 
 export default function AdminDashboard() {
   const [data, setData] = useState<AnalyticsData | null>(null);
-  const [invoices, setInvoices] = useState<TuitionInvoice[]>([]);
 
   useEffect(() => {
     loadAnalyticsData().then(setData);
-    getInvoicesRaw().then(setInvoices);
   }, []);
 
   if (!data) {
@@ -45,7 +42,7 @@ export default function AdminDashboard() {
     );
   }
 
-  const { students, teachers, classes } = data;
+  const { students, teachers, classes, invoices } = data;
   const kpis = computeKpis(data);
   const totalRevenue = kpis.totalRevenue;
 
@@ -53,7 +50,6 @@ export default function AdminDashboard() {
   const revenueChartData = revenueTrend(data, 5);
   const attendanceChartData = attendanceTrend(data, 5).map(d => ({ month: d.month, diemDanh: d.coMat }));
 
-  const paidInvoices    = invoices.filter(i => i.status === "paid");
   const pendingInvoices = invoices.filter(i => i.status !== "paid");
   const pendingRevenue  = pendingInvoices.reduce((s, i) => s + i.amount, 0);
   const recentInvoices  = [...invoices].sort((a, b) => (b.paid_at ?? b.due_date).localeCompare(a.paid_at ?? a.due_date)).slice(0, 5);

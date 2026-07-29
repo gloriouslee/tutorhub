@@ -22,18 +22,16 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
   const admin = createAdminClient();
-  const users = [];
-  for (let page = 1; page <= 20; page += 1) {
-    const { data, error } = await admin.auth.admin.listUsers({
-      page,
-      perPage: 100,
-    });
-    if (error) {
-      return NextResponse.json({ error: "user_list_failed" }, { status: 500 });
-    }
-    users.push(...data.users);
-    if (data.users.length < 100) break;
+  const page = Math.max(1, Number.parseInt(req.nextUrl.searchParams.get("page") ?? "1", 10) || 1);
+  const perPage = Math.min(
+    100,
+    Math.max(10, Number.parseInt(req.nextUrl.searchParams.get("per_page") ?? "50", 10) || 50),
+  );
+  const { data, error } = await admin.auth.admin.listUsers({ page, perPage });
+  if (error) {
+    return NextResponse.json({ error: "user_list_failed" }, { status: 500 });
   }
+  const users = data.users;
 
   const ids = users.map((user) => user.id);
   const { data: profiles, error: profileError } =
@@ -47,8 +45,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "profile_list_failed" }, { status: 500 });
   }
   const profileById = new Map((profiles ?? []).map((profile) => [profile.id, profile]));
-  return NextResponse.json(
-    users.map((user) => {
+  return NextResponse.json({
+    items: users.map((user) => {
       const profile = profileById.get(user.id);
       return {
         id: user.id,
@@ -61,7 +59,11 @@ export async function GET(req: NextRequest) {
         last_sign_in_at: user.last_sign_in_at ?? null,
       };
     }),
-  );
+    page,
+    per_page: perPage,
+    total: data.total,
+    has_more: page * perPage < data.total,
+  });
 }
 
 export async function POST(req: NextRequest) {
@@ -89,6 +91,10 @@ export async function POST(req: NextRequest) {
   const email = body.email.trim().toLowerCase();
   const fullName = body.full_name.trim();
   const role = body.role as UserRole;
+  const domain =
+    body.domain && typeof body.domain === "object" && !Array.isArray(body.domain)
+      ? body.domain as Record<string, unknown>
+      : {};
   const admin = createAdminClient();
   const { data, error } = await admin.auth.admin.inviteUserByEmail(email, {
     data: { full_name: fullName },
@@ -118,12 +124,66 @@ export async function POST(req: NextRequest) {
     await admin.auth.admin.deleteUser(userId);
     return NextResponse.json({ error: "user_provision_failed" }, { status: 500 });
   }
+
+  let record: Record<string, unknown> | null = null;
+  if (role !== "admin") {
+    const table =
+      role === "student" ? "students" : role === "teacher" ? "teachers" : "parents";
+    const prefix = role === "student" ? "stu" : role === "teacher" ? "tch" : "par";
+    const recordId =
+      typeof domain.id === "string" && domain.id.length <= 100
+        ? domain.id
+        : `${prefix}_${crypto.randomUUID()}`;
+    record =
+      role === "student"
+        ? {
+            id: recordId,
+            user_id: userId,
+            full_name: fullName,
+            email,
+            dob: typeof domain.dob === "string" ? domain.dob.slice(0, 10) : "",
+            school: typeof domain.school === "string" ? domain.school.slice(0, 160) : "",
+            grade: typeof domain.grade === "string" ? domain.grade.slice(0, 30) : "",
+            learning_type: ["online", "offline", "hybrid"].includes(String(domain.learning_type))
+              ? domain.learning_type
+              : "hybrid",
+          }
+        : role === "teacher"
+          ? {
+              id: recordId,
+              user_id: userId,
+              full_name: fullName,
+              email,
+              specialization:
+                typeof domain.specialization === "string"
+                  ? domain.specialization.slice(0, 160)
+                  : "",
+              bio: typeof domain.bio === "string" ? domain.bio.slice(0, 5_000) : "",
+            }
+          : {
+              id: recordId,
+              user_id: userId,
+              full_name: fullName,
+              email,
+              phone: typeof domain.phone === "string" ? domain.phone.slice(0, 30) : "",
+            };
+    const { data: inserted, error: domainError } = await admin
+      .from(table)
+      .insert(record)
+      .select("*")
+      .single();
+    if (domainError) {
+      await admin.auth.admin.deleteUser(userId);
+      return NextResponse.json({ error: "domain_profile_create_failed" }, { status: 500 });
+    }
+    record = inserted;
+  }
   logEvent("info", "admin.user_invited", {
     actor_id: actor.userId,
     user_id: userId,
     role,
   });
-  return NextResponse.json({ id: userId }, { status: 201 });
+  return NextResponse.json({ id: userId, record }, { status: 201 });
 }
 
 export async function PATCH(req: NextRequest) {
@@ -191,7 +251,49 @@ export async function DELETE(req: NextRequest) {
   if (userId === actor.userId) {
     return NextResponse.json({ error: "cannot_delete_self" }, { status: 409 });
   }
-  const { error } = await createAdminClient().auth.admin.deleteUser(userId);
+  const admin = createAdminClient();
+  const { data: profile } = await admin
+    .from("profiles")
+    .select("role")
+    .eq("id", userId)
+    .maybeSingle();
+  if (profile?.role === "student" || profile?.role === "teacher") {
+    const table = profile.role === "student" ? "students" : "teachers";
+    const { data: record } = await admin
+      .from(table)
+      .select("id")
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (record?.id) {
+      const { error: domainError } = await admin.rpc(
+        "delete_admin_domain_identity_secure",
+        {
+          p_entity: table,
+          p_record_id: record.id,
+          p_actor_id: actor.userId,
+        },
+      );
+      if (domainError) {
+        const conflict = domainError.message.includes("_has_classes");
+        return NextResponse.json(
+          { error: conflict ? domainError.message : "domain_profile_delete_failed" },
+          { status: conflict ? 409 : 500 },
+        );
+      }
+    }
+  } else if (profile?.role === "parent") {
+    const { error: parentDeleteError } = await admin
+      .from("parents")
+      .delete()
+      .eq("user_id", userId);
+    if (parentDeleteError) {
+      return NextResponse.json(
+        { error: "domain_profile_delete_failed" },
+        { status: 500 },
+      );
+    }
+  }
+  const { error } = await admin.auth.admin.deleteUser(userId);
   if (error) return NextResponse.json({ error: "user_delete_failed" }, { status: 500 });
   logEvent("info", "admin.user_deleted", {
     actor_id: actor.userId,

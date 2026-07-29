@@ -272,3 +272,37 @@ test("incomplete student profiles are forced through onboarding", async () => {
   assert.match(profileRoute, /normalizeStudentGrade/);
   assert.match(profileRoute, /profile_complete/);
 });
+
+test("admin entity writes are row-level and lifecycle-aware", async () => {
+  const entityRoute = await read("src/app/api/data/entities/[entity]/route.ts");
+  const storage = await read("src/lib/storage.ts");
+  const migration = await read(
+    "supabase/migrations/20260729180000_admin_portal_hardening.sql",
+  );
+
+  assert.match(entityRoute, /export async function POST/);
+  assert.match(entityRoute, /export async function DELETE/);
+  assert.match(entityRoute, /delete_admin_domain_identity_secure/);
+  assert.doesNotMatch(entityRoute, /replace_admin_entity_rows_secure|export async function PUT/);
+  assert.doesNotMatch(storage, /saveEntity|saveStudents|saveTeachers|saveNotifications/);
+  assert.match(migration, /drop function if exists public\.replace_admin_entity_rows_secure/);
+  assert.match(migration, /student_has_classes/);
+  assert.match(migration, /teacher_has_classes/);
+});
+
+test("teacher payment approvals are scoped to the owning class", async () => {
+  const route = await read("src/app/api/payments/transactions/route.ts");
+  const migration = await read(
+    "supabase/migrations/20260729180000_admin_portal_hardening.sql",
+  );
+
+  assert.match(route, /\.eq\("teacher_id", actor\.teacherId\)/);
+  assert.match(route, /teacher_id: product\.teacherId/);
+  assert.match(route, /class_id: product\.classId/);
+  assert.match(migration, /add column if not exists teacher_id/);
+  assert.match(migration, /purchase_transactions_teacher_status_idx/);
+
+  await assert.rejects(read("src/app/admin/transactions/page.tsx"));
+  await assert.rejects(read("src/app/admin/payments/page.tsx"));
+  await assert.rejects(read("src/app/api/admin/create-account/route.ts"));
+});

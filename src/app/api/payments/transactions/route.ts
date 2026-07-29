@@ -16,9 +16,10 @@ type CatalogItem = {
 async function resolveProduct(pkgId: string) {
   const { data } = await createAdminClient()
     .from("teacher_materials")
-    .select("data")
+    .select("class_id,data")
     .eq("id", pkgId)
     .maybeSingle();
+  if (!data) return null;
   const item = (data?.data ?? null) as CatalogItem | null;
   if (
     item &&
@@ -30,7 +31,20 @@ async function resolveProduct(pkgId: string) {
     item.price > 0 &&
     item.price <= 100_000_000
   ) {
-    return { title: item.title.slice(0, 200), amount: item.price };
+    const { data: classRecord } = data.class_id
+      ? await createAdminClient()
+          .from("classes")
+          .select("id,tutor_id")
+          .eq("id", data.class_id)
+          .maybeSingle()
+      : { data: null };
+    if (!classRecord?.tutor_id) return null;
+    return {
+      title: item.title.slice(0, 200),
+      amount: item.price,
+      classId: String(classRecord.id),
+      teacherId: String(classRecord.tutor_id),
+    };
   }
   return null;
 }
@@ -66,7 +80,12 @@ export async function GET(req: NextRequest) {
     const ids = (children ?? []).map((child) => String(child.id));
     if (ids.length === 0) return NextResponse.json([]);
     query = query.in("student_id", ids);
-  } else if (actor.role !== "teacher" && actor.role !== "admin") {
+  } else if (actor.role === "teacher") {
+    if (!actor.teacherId) {
+      return NextResponse.json({ error: "teacher_profile_required" }, { status: 403 });
+    }
+    query = query.eq("teacher_id", actor.teacherId);
+  } else if (actor.role !== "admin") {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 
@@ -119,6 +138,8 @@ export async function POST(req: NextRequest) {
       student_id: actor.studentId,
       student_name: actor.displayName,
       student_email: actor.email,
+      class_id: product.classId,
+      teacher_id: product.teacherId,
       transfer_note: transferNote,
       status: "pending",
     })
@@ -161,14 +182,21 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: "invalid_transaction_update" }, { status: 400 });
   }
 
-  const { data, error } = await createAdminClient()
+  let updateQuery = createAdminClient()
     .from("purchase_transactions")
     .update({
       status: body.status,
       reviewed_at: new Date().toISOString(),
     })
     .eq("id", body.transaction_id)
-    .eq("status", "pending")
+    .eq("status", "pending");
+  if (actor.role === "teacher") {
+    if (!actor.teacherId) {
+      return NextResponse.json({ error: "teacher_profile_required" }, { status: 403 });
+    }
+    updateQuery = updateQuery.eq("teacher_id", actor.teacherId);
+  }
+  const { data, error } = await updateQuery
     .select("id")
     .maybeSingle();
 

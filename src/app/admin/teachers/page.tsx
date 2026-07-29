@@ -1,7 +1,5 @@
 "use client";
 
-import { toLocalDateKey } from "@/lib/utils";
-
 import PortalLayout from "@/components/layout/PortalLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -11,7 +9,12 @@ import { Search, Plus, X, Edit, Trash2, BookOpen, Users, ExternalLink } from "lu
 import Link from "next/link";
 import { Input } from "@/components/ui/input";
 import { useState, useEffect } from "react";
-import { getTeachers, saveTeachers, getClasses } from "@/lib/storage";
+import {
+  deleteTeacher,
+  getClasses,
+  getTeachers,
+  upsertTeacher,
+} from "@/lib/storage";
 import { Teacher, Class } from "@/types";
 
 export default function AdminTeachersPage() {
@@ -29,8 +32,6 @@ export default function AdminTeachersPage() {
     specialization: "Toán học",
     bio: "",
   });
-  const [createAccount, setCreateAccount] = useState(true);
-  const [accountPassword, setAccountPassword] = useState("");
   const [accountError, setAccountError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -54,8 +55,6 @@ export default function AdminTeachersPage() {
       specialization: "Toán học",
       bio: "",
     });
-    setCreateAccount(true);
-    setAccountPassword("");
     setAccountError("");
     setIsModalOpen(true);
   };
@@ -73,9 +72,17 @@ export default function AdminTeachersPage() {
 
   const handleDeleteTeacher = async (id: string) => {
     if (confirm("Xác nhận xóa giáo viên này?")) {
-      const updated = teachers.filter(t => t.id !== id);
-      setTeachers(updated);
-      await saveTeachers(updated);
+      try {
+        await deleteTeacher(id);
+        setTeachers(current => current.filter(teacher => teacher.id !== id));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "";
+        alert(
+          message === "teacher_has_classes"
+            ? "Hãy phân công lại các lớp của giáo viên trước khi xóa."
+            : "Không thể xóa giáo viên. Vui lòng thử lại.",
+        );
+      }
     }
   };
 
@@ -83,74 +90,51 @@ export default function AdminTeachersPage() {
     e.preventDefault();
     setAccountError("");
     if (editingTeacher) {
-      // Edit
-      const updated = teachers.map(t =>
-        t.id === editingTeacher.id
-          ? { ...t, ...formData }
-          : t
-      );
-      setTeachers(updated);
-      await saveTeachers(updated);
-      setIsModalOpen(false);
+      setSubmitting(true);
+      try {
+        const saved = await upsertTeacher({ ...editingTeacher, ...formData });
+        setTeachers(current =>
+          current.map(teacher => teacher.id === saved.id ? saved : teacher),
+        );
+        setIsModalOpen(false);
+      } catch {
+        setAccountError("Không thể lưu thay đổi. Vui lòng thử lại.");
+      } finally {
+        setSubmitting(false);
+      }
       return;
     }
 
-    // Add — tạo tài khoản đăng nhập trước (nếu bật) để lấy user_id thật
-    const newId = `t${Date.now()}`;
-    let authUserId: string | null = null;
-    if (createAccount) {
-      if (!formData.email) { setAccountError("Cần email để tạo tài khoản đăng nhập."); return; }
-      if (
-        accountPassword.length < 12 ||
-        !/[a-z]/.test(accountPassword) ||
-        !/[A-Z]/.test(accountPassword) ||
-        !/[0-9]/.test(accountPassword) ||
-        !/[^A-Za-z0-9]/.test(accountPassword)
-      ) {
-        setAccountError("Mật khẩu cần ít nhất 12 ký tự, gồm chữ hoa, chữ thường, số và ký hiệu.");
-        return;
-      }
-      setSubmitting(true);
-      try {
-        const res = await fetch("/api/admin/create-account", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            email: formData.email,
-            password: accountPassword,
-            full_name: formData.full_name,
-            role: "teacher",
-            record_id: newId,
-          }),
-        });
-        const body = await res.json();
-        if (!res.ok) {
-          setAccountError(body.error ?? "Không tạo được tài khoản.");
-          setSubmitting(false);
-          return;
-        }
-        authUserId = body.user_id;
-      } catch {
-        setAccountError("Không kết nối được máy chủ để tạo tài khoản.");
-        setSubmitting(false);
-        return;
-      }
+    if (!formData.email) {
+      setAccountError("Cần email để gửi lời mời đăng nhập.");
+      return;
     }
 
-    const newTeacher: Teacher = {
-      id: newId,
-      user_id: authUserId,
-      full_name: formData.full_name,
-      email: formData.email,
-      specialization: formData.specialization,
-      bio: formData.bio,
-      created_at: toLocalDateKey(new Date()),
-    } as any;
-    const updated = [...teachers, newTeacher];
-    setTeachers(updated);
-    await saveTeachers(updated);
-    setSubmitting(false);
-    setIsModalOpen(false);
+    setSubmitting(true);
+    try {
+      const newId = `tch_${crypto.randomUUID()}`;
+      const response = await fetch("/api/admin/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: formData.email,
+          full_name: formData.full_name,
+          role: "teacher",
+          domain: { id: newId, ...formData },
+        }),
+      });
+      const body = await response.json();
+      if (!response.ok) {
+        setAccountError(body.error ?? "Không thể gửi lời mời.");
+        return;
+      }
+      setTeachers(current => [body.record as Teacher, ...current]);
+      setIsModalOpen(false);
+    } catch {
+      setAccountError("Không kết nối được máy chủ để gửi lời mời.");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const uniqueSpecs = Array.from(new Set(teachers.map(t => t.specialization)));
@@ -332,40 +316,21 @@ export default function AdminTeachersPage() {
               </div>
               {!editingTeacher && (
                 <div className="space-y-3 border-t border-border pt-4">
-                  <label className="flex items-center gap-2 text-sm font-medium text-foreground cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={createAccount}
-                      onChange={e => setCreateAccount(e.target.checked)}
-                      className="h-4 w-4 rounded border-input accent-primary"
-                    />
-                    Tạo tài khoản đăng nhập cho giáo viên
-                  </label>
-                  {createAccount && (
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-semibold text-muted-foreground uppercase">Mật khẩu ban đầu *</label>
-                      <Input
-                        type="text"
-                        value={accountPassword}
-                        onChange={e => setAccountPassword(e.target.value)}
-                        placeholder="Tối thiểu 12 ký tự, đủ 4 nhóm"
-                      />
-                      <p className="text-[11px] text-muted-foreground">
-                        Đăng nhập bằng email liên hệ ở trên + mật khẩu này.
-                      </p>
-                    </div>
-                  )}
-                  {accountError && (
-                    <p className="text-xs text-red-500 font-medium">{accountError}</p>
-                  )}
+                  <p className="text-sm text-muted-foreground">
+                    Hệ thống sẽ gửi email mời giáo viên tự đặt mật khẩu. Hồ sơ giáo viên
+                    được tạo cùng tài khoản để tránh dữ liệu rời rạc.
+                  </p>
                 </div>
+              )}
+              {accountError && (
+                <p className="text-xs text-red-500 font-medium">{accountError}</p>
               )}
               <div className="flex justify-end gap-3 pt-4 border-t border-border mt-6">
                 <Button type="button" variant="outline" onClick={() => setIsModalOpen(false)}>
                   Hủy
                 </Button>
                 <Button type="submit" variant="gradient" disabled={submitting}>
-                  {submitting ? "Đang tạo..." : editingTeacher ? "Lưu thay đổi" : "Thêm mới"}
+                  {submitting ? "Đang xử lý..." : editingTeacher ? "Lưu thay đổi" : "Gửi lời mời"}
                 </Button>
               </div>
             </form>

@@ -27,6 +27,9 @@ export default function AdminUsersPage() {
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(false);
+  const [total, setTotal] = useState(0);
   const [form, setForm] = useState({
     email: "",
     full_name: "",
@@ -34,13 +37,18 @@ export default function AdminUsersPage() {
   });
 
   const reload = useCallback(async () => {
-    const response = await fetch("/api/admin/users", { cache: "no-store" });
+    const response = await fetch(`/api/admin/users?page=${page}&per_page=50`, {
+      cache: "no-store",
+    });
     if (!response.ok) {
       setMessage("Không thể tải danh sách tài khoản.");
       return;
     }
-    setUsers(await response.json());
-  }, []);
+    const result = await response.json();
+    setUsers(result.items);
+    setHasMore(result.has_more);
+    setTotal(result.total);
+  }, [page]);
 
   useEffect(() => {
     void reload();
@@ -71,7 +79,8 @@ export default function AdminUsersPage() {
     }
     setForm({ email: "", full_name: "", role: "student" });
     setMessage("Đã gửi email mời đặt mật khẩu. Hệ thống không lưu mật khẩu tạm.");
-    await reload();
+    if (page === 1) await reload();
+    else setPage(1);
   }
 
   async function action(user: UserRow, nextAction: "send_reset" | "disable" | "enable") {
@@ -98,8 +107,17 @@ export default function AdminUsersPage() {
     const response = await fetch(`/api/admin/users?id=${encodeURIComponent(user.id)}`, {
       method: "DELETE",
     });
+    const result = await response.json().catch(() => ({}));
     setBusy("");
-    setMessage(response.ok ? "Đã xóa tài khoản." : "Không thể xóa tài khoản.");
+    setMessage(
+      response.ok
+        ? "Đã xóa tài khoản."
+        : String(result.error).includes("student_has_classes")
+          ? "Hãy gỡ học viên khỏi tất cả lớp trước khi xóa tài khoản."
+          : String(result.error).includes("teacher_has_classes")
+            ? "Hãy phân công lại các lớp trước khi xóa tài khoản giáo viên."
+            : "Không thể xóa tài khoản.",
+    );
     if (response.ok) await reload();
   }
 
@@ -108,7 +126,7 @@ export default function AdminUsersPage() {
       <div className="mx-auto max-w-5xl space-y-6">
         <SectionHeader
           title="Quản lý tài khoản thật"
-          subtitle="Tài khoản Supabase Auth; không lưu mật khẩu dạng plaintext."
+          subtitle={`${total} tài khoản Supabase Auth; không lưu mật khẩu dạng plaintext.`}
           action={
             <Button variant="outline" size="sm" onClick={() => void reload()}>
               <RefreshCw className="mr-2 h-4 w-4" /> Làm mới
@@ -154,7 +172,7 @@ export default function AdminUsersPage() {
           <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
           <Input
             className="pl-9"
-            placeholder="Tìm theo tên hoặc email"
+            placeholder="Tìm theo tên hoặc email trong trang hiện tại"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
@@ -205,6 +223,25 @@ export default function AdminUsersPage() {
               </CardContent>
             </Card>
           ))}
+        </div>
+        <div className="flex items-center justify-between">
+          <p className="text-sm text-muted-foreground">Trang {page}</p>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              disabled={page === 1}
+              onClick={() => setPage(current => Math.max(1, current - 1))}
+            >
+              Trang trước
+            </Button>
+            <Button
+              variant="outline"
+              disabled={!hasMore}
+              onClick={() => setPage(current => current + 1)}
+            >
+              Trang sau
+            </Button>
+          </div>
         </div>
       </div>
     </PortalLayout>

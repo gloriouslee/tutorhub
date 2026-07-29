@@ -30,6 +30,7 @@ function AdminClassesPageInner() {
   const [filterMode, setFilterMode] = useState<"All" | "online" | "offline" | "hybrid">("All");
   const [filterTeacher, setFilterTeacher] = useState(teacherParam);
   const [filterStudent, setFilterStudent] = useState(studentParam);
+  const [submitting, setSubmitting] = useState(false);
 
   // Modal states
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -72,8 +73,8 @@ function AdminClassesPageInner() {
       grade: 12,
       learning_mode: "online",
       tutor_id: defaultTutor,
-      classroom: "Phòng 101",
-      zoom_link: "https://zoom.us/j/123456789",
+      classroom: "",
+      zoom_link: "",
       schedule_day: "Monday",
       start_time: "18:00",
       end_time: "19:30",
@@ -105,9 +106,12 @@ function AdminClassesPageInner() {
 
   const handleDeleteClass = async (id: string) => {
     if (confirm("Xác nhận xóa lớp học này?")) {
-      const updated = classes.filter(c => c.id !== id);
-      setClasses(updated);
-      await deleteClass(id);
+      try {
+        await deleteClass(id);
+        setClasses(current => current.filter(cls => cls.id !== id));
+      } catch {
+        alert("Không thể xóa lớp học. Vui lòng thử lại.");
+      }
     }
   };
 
@@ -122,54 +126,53 @@ function AdminClassesPageInner() {
       },
     ];
 
-    if (editingClass) {
-      // Edit
-      const updated = classes.map(c =>
-        c.id === editingClass.id
-          ? {
-              ...c,
-              class_name: formData.class_name,
-              subject: formData.subject,
-              grade: Number(formData.grade),
-              learning_mode: formData.learning_mode,
-              tutor_id: formData.tutor_id,
-              // null (không phải undefined) để cột DB được xóa khi đổi hình thức học
-              classroom: (formData.learning_mode === "offline" ? formData.classroom : null) as unknown as string | undefined,
-              zoom_link: (formData.learning_mode !== "offline" ? formData.zoom_link : null) as unknown as string | undefined,
-              schedule: scheduleData,
-              description: formData.description,
-              max_students: Number(formData.max_students),
-            }
-          : c
-      );
-      setClasses(updated);
-      const edited = updated.find(c => c.id === editingClass.id);
-      if (edited) await upsertClass(edited);
-      // Persist teacher assignment so teacher portal picks it up
-      await setClassTeacherOverride(editingClass.id, formData.tutor_id);
-    } else {
-      // Add
-      const newId = `c${Date.now()}`;
-      const newClass: Class = {
-        id: newId,
-        class_name: formData.class_name,
-        subject: formData.subject,
-        grade: Number(formData.grade),
-        learning_mode: formData.learning_mode,
-        tutor_id: formData.tutor_id,
-        classroom: formData.learning_mode === "offline" ? formData.classroom : undefined,
-        zoom_link: formData.learning_mode !== "offline" ? formData.zoom_link : undefined,
-        schedule: scheduleData,
-        description: formData.description,
-        max_students: Number(formData.max_students),
-        color: `#${Math.floor(Math.random() * 16777215).toString(16)}`,
-        created_at: toLocalDateKey(new Date()),
-      };
-      const updated = [...classes, newClass];
-      setClasses(updated);
-      await upsertClass(newClass);
+    setSubmitting(true);
+    try {
+      if (editingClass) {
+        const edited: Class = {
+          ...editingClass,
+          class_name: formData.class_name,
+          subject: formData.subject,
+          grade: Number(formData.grade),
+          learning_mode: formData.learning_mode,
+          tutor_id: formData.tutor_id,
+          // null (không phải undefined) để cột DB được xóa khi đổi hình thức học
+          classroom: (formData.learning_mode === "offline" ? formData.classroom : null) as unknown as string | undefined,
+          zoom_link: (formData.learning_mode !== "offline" ? formData.zoom_link : null) as unknown as string | undefined,
+          schedule: scheduleData,
+          description: formData.description,
+          max_students: Number(formData.max_students),
+        };
+        await upsertClass(edited);
+        await setClassTeacherOverride(editingClass.id, formData.tutor_id);
+        setClasses(current =>
+          current.map(cls => cls.id === edited.id ? edited : cls),
+        );
+      } else {
+        const newClass: Class = {
+          id: `cls_${crypto.randomUUID()}`,
+          class_name: formData.class_name,
+          subject: formData.subject,
+          grade: Number(formData.grade),
+          learning_mode: formData.learning_mode,
+          tutor_id: formData.tutor_id,
+          classroom: formData.learning_mode === "offline" ? formData.classroom : undefined,
+          zoom_link: formData.learning_mode !== "offline" ? formData.zoom_link : undefined,
+          schedule: scheduleData,
+          description: formData.description,
+          max_students: Number(formData.max_students),
+          color: `#${Math.floor(Math.random() * 16777215).toString(16).padStart(6, "0")}`,
+          created_at: toLocalDateKey(new Date()),
+        };
+        await upsertClass(newClass);
+        setClasses(current => [newClass, ...current]);
+      }
+      setIsModalOpen(false);
+    } catch {
+      alert("Không thể lưu lớp học. Vui lòng thử lại.");
+    } finally {
+      setSubmitting(false);
     }
-    setIsModalOpen(false);
   };
 
   const filtered = classes.filter(c => {
@@ -507,8 +510,8 @@ function AdminClassesPageInner() {
                 <Button type="button" variant="outline" onClick={() => setIsModalOpen(false)}>
                   Hủy
                 </Button>
-                <Button type="submit" variant="gradient">
-                  {editingClass ? "Lưu thay đổi" : "Tạo lớp"}
+                <Button type="submit" variant="gradient" disabled={submitting}>
+                  {submitting ? "Đang lưu..." : editingClass ? "Lưu thay đổi" : "Tạo lớp"}
                 </Button>
               </div>
             </form>

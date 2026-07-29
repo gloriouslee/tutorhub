@@ -154,9 +154,6 @@ export async function kvDelete(key: string): Promise<void> {
   } catch { /* offline */ }
 }
 
-// Đánh dấu các bảng mà lần đọc gần nhất THỰC SỰ đến từ DB (không phải cache).
-const verifiedTables = new Set<string>();
-
 // Supabase-first getter: DB là nguồn dữ liệu chính; localStorage chỉ là cache
 // offline. Bảng rỗng là trạng thái hợp lệ (đã xóa hết) — chỉ fallback khi lỗi.
 async function getEntity<T>(
@@ -168,33 +165,39 @@ async function getEntity<T>(
     const { data, error } = await query();
     if (!error && data) {
       writeLocal(key, data);
-      verifiedTables.add(table);
       return data;
     }
   } catch { /* offline hoặc chưa cấu hình — dùng cache */ }
-  verifiedTables.delete(table);
   const local = readLocal<T>(key);
   if (local !== null) return local;
   return [];
 }
 
-// Supabase-first saver: upsert danh sách mới, mirror vào localStorage.
-// Chỉ prune row vắng mặt khi phiên này đã đọc thành công từ DB — nếu không,
-// upsert-only (an toàn: không bao giờ xóa dữ liệu dựa trên cache phía client).
-async function saveEntity<T extends { id: string }>(
-  key: string,
+async function upsertEntity<T extends { id: string }>(
   table: string,
-  items: T[]
-): Promise<void> {
+  item: T,
+): Promise<T> {
   const response = await fetch(`/api/data/entities/${encodeURIComponent(table)}`, {
-    method: "PUT",
+    method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ items }),
+    body: JSON.stringify({ item }),
   });
   if (!response.ok) {
-    throw new Error(`Không thể lưu ${table}; dữ liệu cục bộ chưa được thay đổi.`);
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body.error || `Không thể lưu ${table}.`);
   }
-  writeLocal(key, items);
+  return response.json() as Promise<T>;
+}
+
+async function deleteEntity(table: string, id: string): Promise<void> {
+  const response = await fetch(
+    `/api/data/entities/${encodeURIComponent(table)}?id=${encodeURIComponent(id)}`,
+    { method: "DELETE" },
+  );
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body.error || `Không thể xóa ${table}.`);
+  }
 }
 
 export async function getStudents(): Promise<Student[]> {
@@ -205,8 +208,12 @@ export async function getStudents(): Promise<Student[]> {
   );
 }
 
-export async function saveStudents(students: Student[]): Promise<void> {
-  return saveEntity(ENTITY_KEYS.students, "students", students);
+export async function upsertStudent(student: Student): Promise<Student> {
+  return upsertEntity("students", student);
+}
+
+export async function deleteStudent(id: string): Promise<void> {
+  return deleteEntity("students", id);
 }
 
 export async function getTeachers(): Promise<Teacher[]> {
@@ -217,8 +224,12 @@ export async function getTeachers(): Promise<Teacher[]> {
   );
 }
 
-export async function saveTeachers(teachers: Teacher[]): Promise<void> {
-  return saveEntity(ENTITY_KEYS.teachers, "teachers", teachers);
+export async function upsertTeacher(teacher: Teacher): Promise<Teacher> {
+  return upsertEntity("teachers", teacher);
+}
+
+export async function deleteTeacher(id: string): Promise<void> {
+  return deleteEntity("teachers", id);
 }
 
 export async function getClasses(): Promise<Class[]> {
@@ -227,10 +238,6 @@ export async function getClasses(): Promise<Class[]> {
     "classes",
     () => supabase.from("classes").select("*").order("created_at", { ascending: false }) as any
   );
-}
-
-export async function saveClasses(classes: Class[]): Promise<void> {
-  return saveEntity(ENTITY_KEYS.classes, "classes", classes);
 }
 
 // Targeted single-class write/delete (admin + owning teacher via RLS). Avoids the
@@ -267,20 +274,12 @@ export async function getPayments(): Promise<Payment[]> {
   );
 }
 
-export async function savePayments(payments: Payment[]): Promise<void> {
-  return saveEntity(ENTITY_KEYS.payments, "payments", payments);
-}
-
 export async function getAttendance(): Promise<Attendance[]> {
   return getEntity(
     ENTITY_KEYS.attendance,
     "attendance",
     () => supabase.from("attendance").select("*").order("attendance_date", { ascending: false }) as any
   );
-}
-
-export async function saveAttendance(attendance: Attendance[]): Promise<void> {
-  return saveEntity(ENTITY_KEYS.attendance, "attendance", attendance);
 }
 
 /** Điểm danh THẬT do giáo viên nhập (kv_teacher_attendance) — dùng cho báo cáo. */
@@ -473,25 +472,21 @@ export async function saveParentMessages(parentId: string, contacts: unknown): P
 }
 
 export async function getNotifications(): Promise<Notification[]> {
-  // Chụp cache cục bộ TRƯỚC khi getEntity ghi đè bằng dữ liệu DB.
-  const localBefore = readLocal<Notification>(ENTITY_KEYS.notifications) ?? [];
-  const list = await getEntity<Notification>(
+  return getEntity<Notification>(
     ENTITY_KEYS.notifications,
     "notifications",
     () => supabase.from("notifications").select("*").order("created_at", { ascending: false }) as any
   );
-  // Giữ lại thông báo tạo cục bộ chưa kịp đồng bộ lên DB (Supabase chập chờn),
-  // union theo id — vô hại khi đã đồng bộ (trùng id) và trên prod.
-  const ids = new Set(list.map(n => n.id));
-  const localOnly = localBefore.filter(n => !ids.has(n.id));
-  if (localOnly.length === 0) return list;
-  const merged = [...localOnly, ...list].sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""));
-  writeLocal(ENTITY_KEYS.notifications, merged);
-  return merged;
 }
 
-export async function saveNotifications(notifications: Notification[]): Promise<void> {
-  return saveEntity(ENTITY_KEYS.notifications, "notifications", notifications);
+export async function upsertNotification(
+  notification: Notification,
+): Promise<Notification> {
+  return upsertEntity("notifications", notification);
+}
+
+export async function deleteNotification(id: string): Promise<void> {
+  return deleteEntity("notifications", id);
 }
 
 export interface NewNotification {
@@ -514,7 +509,6 @@ export async function addNotification(n: NewNotification): Promise<void> {
 /** Thêm nhiều thông báo trong một lần đọc-ghi. */
 export async function addNotifications(items: NewNotification[]): Promise<void> {
   if (items.length === 0) return;
-  const all = await getNotifications();
   const now = Date.now();
   const fulls: Notification[] = items.map((n, i) => ({
     id: `ntf_${now}_${i}_${Math.random().toString(36).slice(2, 5)}`,
@@ -527,7 +521,7 @@ export async function addNotifications(items: NewNotification[]): Promise<void> 
     sent_by: n.sent_by,
     target_class_id: n.target_class_id,
   }));
-  await saveNotifications([...fulls, ...all]);
+  await Promise.all(fulls.map(upsertNotification));
 }
 
 export async function resetAllStorage(): Promise<void> {
@@ -662,6 +656,8 @@ export interface PurchaseTransaction {
   student_id: string;
   student_name: string;
   student_email: string;
+  class_id?: string;
+  teacher_id?: string;
   transfer_note: string;
   status: TxStatus;
   created_at: string;
@@ -991,18 +987,6 @@ export async function issueTuitionInvoice(params: {
   dueDate: string;  // "YYYY-MM-DD"
 }): Promise<TuitionInvoice> {
   const { classId, className, studentId, amount, period, dueDate } = params;
-  const id = `INV-${period}-${classId}-${studentId}`;
-  const [y, m] = period.split("-");
-  const invoice: TuitionInvoice = {
-    id,
-    child_id: studentId,
-    title: `Học phí ${className} - Tháng ${parseInt(m)}/${y}`,
-    amount,
-    due_date: dueDate,
-    status: "pending",
-    class_id: classId,
-    period,
-  };
   const response = await fetch("/api/payments/invoices", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -1295,20 +1279,61 @@ const DEFAULT_TUITION: ClassTuitionConfig = {
 
 function tuitionKey(classId: string) { return `tutorhub_tuition_${classId}`; }
 
-export async function getClassTuition(classId: string): Promise<ClassTuitionConfig> {
-  const parsed = await kvGet<ClassTuitionConfig & { default_fee?: number }>(tuitionKey(classId), DEFAULT_TUITION);
-  // Migrate old default_fee format
+function normalizeTuitionConfig(
+  parsed: ClassTuitionConfig & { default_fee?: number },
+): ClassTuitionConfig {
   if (typeof parsed.default_fee === "number" && !parsed.package_fees) {
-    return { package_fees: { online: parsed.default_fee, advanced: parsed.default_fee, offline: parsed.default_fee }, students: parsed.students ?? {} };
+    return {
+      package_fees: {
+        online: parsed.default_fee,
+        advanced: parsed.default_fee,
+        offline: parsed.default_fee,
+      },
+      students: parsed.students ?? {},
+    };
   }
-  // Chuẩn hóa: dữ liệu cũ/hỏng có thể thiếu package_fees hoặc students →
-  // caller đọc config.package_fees.online sẽ crash. Giữ nguyên các field khác
-  // (unit_price...) và chỉ đảm bảo package_fees + students luôn tồn tại.
   return {
     ...parsed,
     package_fees: parsed.package_fees ?? { ...DEFAULT_TUITION.package_fees },
     students: parsed.students ?? {},
   };
+}
+
+export async function getClassTuition(classId: string): Promise<ClassTuitionConfig> {
+  const parsed = await kvGet<ClassTuitionConfig & { default_fee?: number }>(tuitionKey(classId), DEFAULT_TUITION);
+  return normalizeTuitionConfig(parsed);
+}
+
+export async function getClassTuitions(
+  classIds: string[],
+): Promise<Record<string, ClassTuitionConfig>> {
+  if (classIds.length === 0) return {};
+  try {
+    const { data, error } = await supabase
+      .from("kv_tuition")
+      .select("id,value")
+      .in("id", classIds);
+    if (!error) {
+      const byClass: Record<string, ClassTuitionConfig> = {};
+      for (const classId of classIds) {
+        byClass[classId] = { ...DEFAULT_TUITION, students: {} };
+      }
+      for (const row of data ?? []) {
+        const value = normalizeTuitionConfig(
+          row.value as ClassTuitionConfig & { default_fee?: number },
+        );
+        byClass[row.id] = value;
+        kvWriteLocal(tuitionKey(row.id), value);
+      }
+      return byClass;
+    }
+  } catch {
+    // Offline: use the existing cache-aware record loader below.
+  }
+  const entries = await Promise.all(
+    classIds.map(async classId => [classId, await getClassTuition(classId)] as const),
+  );
+  return Object.fromEntries(entries);
 }
 
 export async function saveClassTuition(classId: string, config: ClassTuitionConfig): Promise<void> {

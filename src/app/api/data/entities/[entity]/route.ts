@@ -13,124 +13,192 @@ const ENTITY_FIELDS: Record<string, Set<string>> = {
     "id", "user_id", "full_name", "email", "specialization", "bio",
     "avatar_url", "created_at",
   ]),
-  classes: new Set([
-    "id", "class_name", "subject", "grade", "learning_mode", "tutor_id",
-    "classroom", "zoom_link", "schedule", "student_ids", "description",
-    "max_students", "color", "created_at",
-  ]),
-  payments: new Set([
-    "id", "student_id", "class_id", "amount", "due_date", "paid_date",
-    "payment_status", "description", "created_at",
-  ]),
-  attendance: new Set([
-    "id", "class_id", "student_id", "attendance_date", "status", "notes",
-    "created_at",
-  ]),
   notifications: new Set([
     "id", "title", "content", "category", "target_role", "target_class_id",
     "sent_by", "is_read", "created_at",
   ]),
 };
 
-function validateRows(value: unknown, fields: Set<string>) {
-  if (!Array.isArray(value) || value.length > 5_000) return null;
-  const seen = new Set<string>();
-  for (const row of value) {
-    if (!row || typeof row !== "object" || Array.isArray(row)) return null;
-    const record = row as Record<string, unknown>;
-    if (
-      typeof record.id !== "string" ||
-      record.id.length === 0 ||
-      record.id.length > 120 ||
-      seen.has(record.id) ||
-      Object.keys(record).some((key) => !fields.has(key))
-    ) {
-      return null;
-    }
-    seen.add(record.id);
+function validateItem(value: unknown, fields: Set<string>) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const item = value as Record<string, unknown>;
+  if (
+    typeof item.id !== "string"
+    || item.id.length === 0
+    || item.id.length > 120
+    || Object.keys(item).some((key) => !fields.has(key))
+    || JSON.stringify(item).length > 100_000
+  ) {
+    return null;
   }
-  if (JSON.stringify(value).length > 5_000_000) return null;
-  return value as Record<string, unknown>[];
+  return item;
 }
 
-export async function PUT(
-  req: NextRequest,
-  { params }: { params: Promise<{ entity: string }> },
-) {
+async function context(req: NextRequest, params: Promise<{ entity: string }>) {
   if (!hasValidMutationOrigin(req)) {
-    return NextResponse.json({ error: "invalid_origin" }, { status: 403 });
+    return { response: NextResponse.json({ error: "invalid_origin" }, { status: 403 }) };
   }
   const actor = await getRequestIdentity(req);
   if (!actor) {
-    return NextResponse.json({ error: "authentication_required" }, { status: 401 });
+    return {
+      response: NextResponse.json(
+        { error: "authentication_required" },
+        { status: 401 },
+      ),
+    };
   }
   const { entity } = await params;
   const fields = ENTITY_FIELDS[entity];
-  if (!fields) return NextResponse.json({ error: "not_found" }, { status: 404 });
+  if (!fields) {
+    return { response: NextResponse.json({ error: "not_found" }, { status: 404 }) };
+  }
+  return { actor, entity, fields };
+}
 
+async function teacherCanWriteNotification(
+  admin: ReturnType<typeof createAdminClient>,
+  teacherId: string | null | undefined,
+  item: Record<string, unknown>,
+) {
+  if (
+    item.target_role === "admin"
+    || typeof item.title !== "string"
+    || item.title.length > 200
+    || typeof item.content !== "string"
+    || item.content.length > 5_000
+    || typeof item.target_class_id !== "string"
+  ) {
+    return false;
+  }
+  const { data } = await admin
+    .from("classes")
+    .select("id")
+    .eq("id", item.target_class_id)
+    .eq("tutor_id", teacherId ?? "")
+    .maybeSingle();
+  return Boolean(data);
+}
+
+export async function POST(
+  req: NextRequest,
+  { params }: { params: Promise<{ entity: string }> },
+) {
+  const result = await context(req, params);
+  if ("response" in result) return result.response;
+
+  const { actor, entity, fields } = result;
   let body: Record<string, unknown>;
   try {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: "invalid_json" }, { status: 400 });
   }
-  const items = validateRows(body.items, fields);
-  if (!items) {
-    return NextResponse.json({ error: "invalid_entity_rows" }, { status: 400 });
+  const item = validateItem(body.item, fields);
+  if (!item) {
+    return NextResponse.json({ error: "invalid_entity_row" }, { status: 400 });
   }
 
   const admin = createAdminClient();
-  if (actor.role === "admin") {
-    const { data, error } = await admin.rpc("replace_admin_entity_rows_secure", {
-      p_table_name: entity,
-      p_rows: items,
-      p_actor_id: actor.userId,
-    });
-    if (error || data !== true) {
-      logEvent("error", "admin.entity_replace_failed", {
-        actor_id: actor.userId,
-        entity,
-        error: error?.message ?? "not_replaced",
-      });
-      return NextResponse.json({ error: "entity_replace_failed" }, { status: 500 });
+  if (actor.role === "teacher" && entity === "notifications") {
+    if (!await teacherCanWriteNotification(admin, actor.teacherId, item)) {
+      return NextResponse.json({ error: "forbidden" }, { status: 403 });
     }
-    logEvent("info", "admin.entity_replaced", {
+    item.sent_by = actor.displayName;
+  } else if (actor.role !== "admin") {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  } else if (entity === "notifications") {
+    item.sent_by = actor.displayName;
+  }
+
+  const { data, error } = await admin
+    .from(entity)
+    .upsert(item)
+    .select("*")
+    .single();
+  if (error) {
+    logEvent("error", "admin.entity_upsert_failed", {
       actor_id: actor.userId,
       entity,
-      row_count: items.length,
+      record_id: item.id,
+      error: error.message,
     });
+    return NextResponse.json({ error: "entity_upsert_failed" }, { status: 500 });
+  }
+  return NextResponse.json(data);
+}
+
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ entity: string }> },
+) {
+  const result = await context(req, params);
+  if ("response" in result) return result.response;
+  const { actor, entity } = result;
+  const id = req.nextUrl.searchParams.get("id");
+  if (!id || id.length > 120) {
+    return NextResponse.json({ error: "invalid_entity_id" }, { status: 400 });
+  }
+  const admin = createAdminClient();
+  if (actor.role === "teacher" && entity === "notifications") {
+    const { data: notification } = await admin
+      .from("notifications")
+      .select("id,target_class_id")
+      .eq("id", id)
+      .maybeSingle();
+    if (
+      !notification?.target_class_id
+      || !await teacherCanWriteNotification(admin, actor.teacherId, {
+        id,
+        title: "delete",
+        content: "delete",
+        target_role: "student",
+        target_class_id: notification.target_class_id,
+      })
+    ) {
+      return NextResponse.json({ error: "forbidden" }, { status: 403 });
+    }
+  } else if (actor.role !== "admin") {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  }
+
+  if (entity === "students" || entity === "teachers") {
+    const { data, error } = await admin.rpc(
+      "delete_admin_domain_identity_secure",
+      {
+        p_entity: entity,
+        p_record_id: id,
+        p_actor_id: actor.userId,
+      },
+    );
+    if (error) {
+      const conflict = error.message.includes("_has_classes");
+      return NextResponse.json(
+        { error: conflict ? error.message : "entity_delete_failed" },
+        { status: conflict ? 409 : 500 },
+      );
+    }
+    if (typeof data === "string" && data) {
+      const authResult = await admin.auth.admin.deleteUser(data);
+      if (authResult.error) {
+        logEvent("error", "admin.domain_auth_delete_failed", {
+          actor_id: actor.userId,
+          entity,
+          record_id: id,
+          user_id: data,
+          error: authResult.error.message,
+        });
+        return NextResponse.json(
+          { error: "account_delete_incomplete" },
+          { status: 500 },
+        );
+      }
+    }
     return NextResponse.json({ success: true });
   }
 
-  if (actor.role === "teacher" && entity === "notifications") {
-    // A teacher may only write notifications scoped to a class they own. This
-    // prevents overwriting other users' notifications (by id) or injecting into
-    // classes they don't teach. Rows for other classes are ignored, not written.
-    const { data: owned } = await admin
-      .from("classes")
-      .select("id")
-      .eq("tutor_id", actor.teacherId ?? "");
-    const ownedSet = new Set((owned ?? []).map((c) => String(c.id)));
-    const safeItems = items.filter(
-      (item) =>
-        item.target_role !== "admin" &&
-        typeof item.title === "string" &&
-        item.title.length <= 200 &&
-        typeof item.content === "string" &&
-        item.content.length <= 5_000 &&
-        typeof item.target_class_id === "string" &&
-        ownedSet.has(item.target_class_id),
-    );
-    if (safeItems.length === 0) {
-      return NextResponse.json({ success: true, written: 0 });
-    }
-    for (const item of safeItems) item.sent_by = actor.userId;
-    const { error } = await admin.from("notifications").upsert(safeItems);
-    if (error) {
-      return NextResponse.json({ error: "notification_save_failed" }, { status: 500 });
-    }
-    return NextResponse.json({ success: true, written: safeItems.length });
+  const { error } = await admin.from(entity).delete().eq("id", id);
+  if (error) {
+    return NextResponse.json({ error: "entity_delete_failed" }, { status: 500 });
   }
-
-  return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  return NextResponse.json({ success: true });
 }

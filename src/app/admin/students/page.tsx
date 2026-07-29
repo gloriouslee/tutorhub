@@ -1,7 +1,5 @@
 "use client";
 
-import { toLocalDateKey } from "@/lib/utils";
-
 import PortalLayout from "@/components/layout/PortalLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -12,7 +10,13 @@ import { Search, Plus, X, Edit, Trash2, ExternalLink } from "lucide-react";
 import Link from "next/link";
 import { Input } from "@/components/ui/input";
 import { useState, useEffect } from "react";
-import { getStudents, saveStudents, getPayments, getAttendance } from "@/lib/storage";
+import {
+  deleteStudent,
+  getAttendance,
+  getPayments,
+  getStudents,
+  upsertStudent,
+} from "@/lib/storage";
 import { Student } from "@/types";
 
 export default function AdminStudentsPage() {
@@ -33,8 +37,6 @@ export default function AdminStudentsPage() {
     school: "",
     learning_type: "hybrid" as "online" | "offline" | "hybrid",
   });
-  const [createAccount, setCreateAccount] = useState(true);
-  const [accountPassword, setAccountPassword] = useState("");
   const [accountError, setAccountError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -55,8 +57,6 @@ export default function AdminStudentsPage() {
   const handleOpenAddModal = () => {
     setEditingStudent(null);
     setFormData({ full_name: "", email: "", dob: "", grade: "Lớp 8", school: "", learning_type: "hybrid" });
-    setCreateAccount(true);
-    setAccountPassword("");
     setAccountError("");
     setIsModalOpen(true);
   };
@@ -76,9 +76,17 @@ export default function AdminStudentsPage() {
 
   const handleDeleteStudent = async (id: string) => {
     if (confirm("Xác nhận xóa học viên này?")) {
-      const updated = students.filter(s => s.id !== id);
-      setStudents(updated);
-      await saveStudents(updated);
+      try {
+        await deleteStudent(id);
+        setStudents(current => current.filter(student => student.id !== id));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "";
+        alert(
+          message === "student_has_classes"
+            ? "Hãy gỡ học viên khỏi tất cả lớp trước khi xóa."
+            : "Không thể xóa học viên. Vui lòng thử lại.",
+        );
+      }
     }
   };
 
@@ -86,76 +94,51 @@ export default function AdminStudentsPage() {
     e.preventDefault();
     setAccountError("");
     if (editingStudent) {
-      // Edit
-      const updated = students.map(s =>
-        s.id === editingStudent.id
-          ? { ...s, ...formData }
-          : s
-      );
-      setStudents(updated);
-      await saveStudents(updated);
-      setIsModalOpen(false);
+      setSubmitting(true);
+      try {
+        const saved = await upsertStudent({ ...editingStudent, ...formData });
+        setStudents(current =>
+          current.map(student => student.id === saved.id ? saved : student),
+        );
+        setIsModalOpen(false);
+      } catch {
+        setAccountError("Không thể lưu thay đổi. Vui lòng thử lại.");
+      } finally {
+        setSubmitting(false);
+      }
       return;
     }
 
-    // Add — tạo tài khoản đăng nhập trước (nếu bật) để lấy user_id thật
-    const newId = `s${Date.now()}`;
-    let authUserId: string | null = null;
-    if (createAccount) {
-      if (!formData.email) { setAccountError("Cần email để tạo tài khoản đăng nhập."); return; }
-      if (
-        accountPassword.length < 12 ||
-        !/[a-z]/.test(accountPassword) ||
-        !/[A-Z]/.test(accountPassword) ||
-        !/[0-9]/.test(accountPassword) ||
-        !/[^A-Za-z0-9]/.test(accountPassword)
-      ) {
-        setAccountError("Mật khẩu cần ít nhất 12 ký tự, gồm chữ hoa, chữ thường, số và ký hiệu.");
-        return;
-      }
-      setSubmitting(true);
-      try {
-        const res = await fetch("/api/admin/create-account", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            email: formData.email,
-            password: accountPassword,
-            full_name: formData.full_name,
-            role: "student",
-            record_id: newId,
-          }),
-        });
-        const body = await res.json();
-        if (!res.ok) {
-          setAccountError(body.error ?? "Không tạo được tài khoản.");
-          setSubmitting(false);
-          return;
-        }
-        authUserId = body.user_id;
-      } catch {
-        setAccountError("Không kết nối được máy chủ để tạo tài khoản.");
-        setSubmitting(false);
-        return;
-      }
+    if (!formData.email) {
+      setAccountError("Cần email để gửi lời mời đăng nhập.");
+      return;
     }
 
-    const newStudent: Student = {
-      id: newId,
-      user_id: authUserId,
-      full_name: formData.full_name,
-      email: formData.email,
-      dob: formData.dob,
-      grade: formData.grade,
-      school: formData.school,
-      learning_type: formData.learning_type,
-      created_at: toLocalDateKey(new Date()),
-    } as any;
-    const updated = [...students, newStudent];
-    setStudents(updated);
-    await saveStudents(updated);
-    setSubmitting(false);
-    setIsModalOpen(false);
+    setSubmitting(true);
+    try {
+      const newId = `stu_${crypto.randomUUID()}`;
+      const response = await fetch("/api/admin/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: formData.email,
+          full_name: formData.full_name,
+          role: "student",
+          domain: { id: newId, ...formData },
+        }),
+      });
+      const body = await response.json();
+      if (!response.ok) {
+        setAccountError(body.error ?? "Không thể gửi lời mời.");
+        return;
+      }
+      setStudents(current => [body.record as Student, ...current]);
+      setIsModalOpen(false);
+    } catch {
+      setAccountError("Không kết nối được máy chủ để gửi lời mời.");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const filtered = students.filter(s => {
@@ -371,40 +354,21 @@ export default function AdminStudentsPage() {
               </div>
               {!editingStudent && (
                 <div className="space-y-3 border-t border-border pt-4">
-                  <label className="flex items-center gap-2 text-sm font-medium text-foreground cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={createAccount}
-                      onChange={e => setCreateAccount(e.target.checked)}
-                      className="h-4 w-4 rounded border-input accent-primary"
-                    />
-                    Tạo tài khoản đăng nhập cho học viên
-                  </label>
-                  {createAccount && (
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-semibold text-muted-foreground uppercase">Mật khẩu ban đầu *</label>
-                      <Input
-                        type="text"
-                        value={accountPassword}
-                        onChange={e => setAccountPassword(e.target.value)}
-                        placeholder="Tối thiểu 12 ký tự, đủ 4 nhóm"
-                      />
-                      <p className="text-[11px] text-muted-foreground">
-                        Đăng nhập bằng email liên hệ ở trên + mật khẩu này.
-                      </p>
-                    </div>
-                  )}
-                  {accountError && (
-                    <p className="text-xs text-red-500 font-medium">{accountError}</p>
-                  )}
+                  <p className="text-sm text-muted-foreground">
+                    Hệ thống sẽ gửi email mời học viên tự đặt mật khẩu. Hồ sơ học viên
+                    được tạo cùng tài khoản để tránh dữ liệu rời rạc.
+                  </p>
                 </div>
+              )}
+              {accountError && (
+                <p className="text-xs text-red-500 font-medium">{accountError}</p>
               )}
               <div className="flex justify-end gap-3 pt-4 border-t border-border mt-6">
                 <Button type="button" variant="outline" onClick={() => setIsModalOpen(false)}>
                   Hủy
                 </Button>
                 <Button type="submit" variant="gradient" disabled={submitting}>
-                  {submitting ? "Đang tạo..." : editingStudent ? "Lưu thay đổi" : "Thêm mới"}
+                  {submitting ? "Đang xử lý..." : editingStudent ? "Lưu thay đổi" : "Gửi lời mời"}
                 </Button>
               </div>
             </form>

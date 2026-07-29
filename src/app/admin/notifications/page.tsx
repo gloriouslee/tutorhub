@@ -7,7 +7,11 @@ import { SectionHeader } from "@/components/shared";
 import { Input } from "@/components/ui/input";
 import { Bell, Send, Check, Trash2, BookOpen, CheckCircle2, AlertTriangle, Info, CreditCard } from "lucide-react";
 import { useState, useEffect } from "react";
-import { getNotifications, saveNotifications } from "@/lib/storage";
+import {
+  deleteNotification,
+  getNotifications,
+  upsertNotification,
+} from "@/lib/storage";
 import { Notification } from "@/types";
 
 // ── localStorage helpers ──────────────────────────────────────────────────────
@@ -106,7 +110,7 @@ export default function AdminNotificationsPage() {
     if (!title || !content) return;
 
     const newNotification: Notification = {
-      id: `n${notifications.length + 1}-${Math.floor(Math.random() * 1000)}`,
+      id: `ntf_${crypto.randomUUID()}`,
       title,
       content,
       target_role: targetRole,
@@ -116,15 +120,17 @@ export default function AdminNotificationsPage() {
       created_at: new Date().toISOString(),
     };
 
-    const updated = [newNotification, ...notifications];
-    setNotifications(updated);
-    await saveNotifications(updated);
-
-    setTitle("");
-    setContent("");
-    setTargetRole("all");
-    setCategory("general");
-    setToastMessage("Đã gửi thông báo thành công!");
+    try {
+      const saved = await upsertNotification(newNotification);
+      setNotifications((current) => [saved, ...current]);
+      setTitle("");
+      setContent("");
+      setTargetRole("all");
+      setCategory("general");
+      setToastMessage("Đã gửi thông báo thành công!");
+    } catch {
+      setToastMessage("Không thể gửi thông báo. Vui lòng thử lại.");
+    }
     setTimeout(() => setToastMessage(""), 3500);
   };
 
@@ -139,12 +145,15 @@ export default function AdminNotificationsPage() {
   };
 
   const handleDeleteNotification = async (id: string) => {
-    addDeletedId(id);
-    setDeletedIds(getDeletedIds());
-    // Also remove globally so other portals don't see it
-    const updated = notifications.filter(n => n.id !== id);
-    setNotifications(updated);
-    await saveNotifications(updated);
+    try {
+      await deleteNotification(id);
+      addDeletedId(id);
+      setDeletedIds(getDeletedIds());
+      setNotifications((current) => current.filter((item) => item.id !== id));
+    } catch {
+      setToastMessage("Không thể xóa thông báo. Vui lòng thử lại.");
+      setTimeout(() => setToastMessage(""), 3500);
+    }
   };
 
   return (

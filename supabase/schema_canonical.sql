@@ -57,7 +57,7 @@
 --   Secure RPC (6):   consume_rate_limit,
 --                     review_class_registration_request_secure,
 --                     submit_exam_result_secure,
---                     retry_exam_secure, replace_admin_entity_rows_secure,
+--                     retry_exam_secure, delete_admin_domain_identity_secure,
 --                     mutate_invoice_secure
 --
 -- STORAGE
@@ -466,12 +466,16 @@ create table if not exists public.purchase_transactions (
   student_id    text not null,
   student_name  text,
   student_email text,
+  class_id      text references public.classes(id) on delete set null,
+  teacher_id    text references public.teachers(id) on delete set null,
   transfer_note text,
   status        text not null default 'pending' check (status in ('pending','approved','rejected')),
   created_at    timestamptz not null default now(),
   reviewed_at   timestamptz
 );
 create index if not exists idx_tx_student on public.purchase_transactions (student_id, status);
+create index if not exists purchase_transactions_teacher_status_idx
+  on public.purchase_transactions (teacher_id, status, created_at desc);
 
 -- app_exam_scores: TEXT-id (v2) shape.
 create table if not exists public.app_exam_scores (
@@ -887,27 +891,19 @@ begin
 end;
 $$;
 
-create or replace function public.replace_admin_entity_rows_secure(
-  p_table_name text,
-  p_rows jsonb,
+create or replace function public.delete_admin_domain_identity_secure(
+  p_entity text,
+  p_record_id text,
   p_actor_id uuid
 )
-returns boolean
+returns text
 language plpgsql
 security definer
 set search_path = public, pg_temp
 as $$
 declare
-  update_columns text;
+  auth_user_id text;
 begin
-  if p_table_name not in (
-    'students', 'teachers', 'classes', 'payments', 'attendance', 'notifications'
-  ) then
-    raise exception 'invalid_entity';
-  end if;
-  if jsonb_typeof(p_rows) <> 'array' or jsonb_array_length(p_rows) > 5000 then
-    raise exception 'invalid_rows';
-  end if;
   if not exists (
     select 1 from public.profiles
     where id = p_actor_id and role = 'admin'
@@ -915,33 +911,25 @@ begin
     raise exception 'forbidden';
   end if;
 
-  select string_agg(
-    format('%1$I = excluded.%1$I', column_name),
-    ', ' order by ordinal_position
-  )
-  into update_columns
-  from information_schema.columns
-  where table_schema = 'public'
-    and table_name = p_table_name
-    and column_name <> 'id';
-
-  execute format(
-    'insert into public.%1$I
-       select * from jsonb_populate_recordset(null::public.%1$I, $1)
-     on conflict (id) do update set %2$s',
-    p_table_name,
-    update_columns
-  ) using p_rows;
-
-  execute format(
-    'delete from public.%I
-     where not exists (
-       select 1 from jsonb_array_elements($1) row_value
-       where row_value->>''id'' = id::text
-     )',
-    p_table_name
-  ) using p_rows;
-  return true;
+  if p_entity = 'students' then
+    if exists (
+      select 1 from public.classes
+      where p_record_id = any(coalesce(student_ids, '{}'::text[]))
+    ) then raise exception 'student_has_classes'; end if;
+    select user_id::text into auth_user_id
+    from public.students where id = p_record_id for update;
+    delete from public.students where id = p_record_id;
+  elsif p_entity = 'teachers' then
+    if exists (
+      select 1 from public.classes where tutor_id = p_record_id
+    ) then raise exception 'teacher_has_classes'; end if;
+    select user_id::text into auth_user_id
+    from public.teachers where id = p_record_id for update;
+    delete from public.teachers where id = p_record_id;
+  else
+    raise exception 'invalid_entity';
+  end if;
+  return auth_user_id;
 end;
 $$;
 
@@ -1101,13 +1089,13 @@ revoke all on function public.consume_rate_limit(text, text, integer, integer)  
 revoke all on function public.review_class_registration_request_secure(uuid, text, text, text, uuid, text) from public, anon, authenticated;
 revoke all on function public.submit_exam_result_secure(text, text, text, jsonb, boolean)       from public, anon, authenticated;
 revoke all on function public.retry_exam_secure(text, text, text)                               from public, anon, authenticated;
-revoke all on function public.replace_admin_entity_rows_secure(text, jsonb, uuid)               from public, anon, authenticated;
+revoke all on function public.delete_admin_domain_identity_secure(text, text, uuid)             from public, anon, authenticated;
 revoke all on function public.mutate_invoice_secure(text, text, text, uuid, jsonb)              from public, anon, authenticated;
 grant execute on function public.consume_rate_limit(text, text, integer, integer)               to service_role;
 grant execute on function public.review_class_registration_request_secure(uuid, text, text, text, uuid, text) to service_role;
 grant execute on function public.submit_exam_result_secure(text, text, text, jsonb, boolean)    to service_role;
 grant execute on function public.retry_exam_secure(text, text, text)                            to service_role;
-grant execute on function public.replace_admin_entity_rows_secure(text, jsonb, uuid)            to service_role;
+grant execute on function public.delete_admin_domain_identity_secure(text, text, uuid)          to service_role;
 grant execute on function public.mutate_invoice_secure(text, text, text, uuid, jsonb)           to service_role;
 
 -- ── profiles ────────────────────────────────────────────────────────────────

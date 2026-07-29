@@ -11,7 +11,11 @@ import {
   Send, BookOpen, CheckCircle2, Info, Calendar,
   Users, School, Trash2, Bell,
 } from "lucide-react";
-import { getNotifications, saveNotifications } from "@/lib/storage";
+import {
+  deleteNotification,
+  getNotifications,
+  upsertNotification,
+} from "@/lib/storage";
 import { Notification, NotificationCategory } from "@/types";
 import { formatDate } from "@/lib/utils";
 import { useTeacherContext } from "@/hooks/useTeacherContext";
@@ -63,29 +67,35 @@ export default function TeacherAnnouncementsPage() {
     if (!title.trim() || !content.trim()) return;
     setSubmitting(true);
 
-    const targetClass = MY_CLASSES.find(c => c.id === target);
-    const all = await getNotifications();
-    const newNotif: Notification = {
-      id: `notif-${Date.now()}`,
-      title:   title.trim(),
-      content: content.trim(),
-      target_role: "student",
-      category,
-      sent_by: teacherName,
-      target_class_id:   targetClass?.id,
-      target_class_name: targetClass?.class_name,
-      is_read:    false,
-      created_at: new Date().toISOString(),
-    };
-    await saveNotifications([newNotif, ...all]);
-    setTitle(""); setContent(""); setCategory("general"); setTarget("all-students");
-    setSubmitting(false);
-    await load();
+    const targetClasses =
+      target === "all-students"
+        ? MY_CLASSES
+        : MY_CLASSES.filter((item) => item.id === target);
+    try {
+      await Promise.all(
+        targetClasses.map((targetClass) =>
+          upsertNotification({
+            id: `ntf_${crypto.randomUUID()}`,
+            title: title.trim(),
+            content: content.trim(),
+            target_role: "student",
+            category,
+            sent_by: teacherName,
+            target_class_id: targetClass.id,
+            is_read: false,
+            created_at: new Date().toISOString(),
+          }),
+        ),
+      );
+      setTitle(""); setContent(""); setCategory("general"); setTarget("all-students");
+      await load();
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   async function handleDelete(id: string) {
-    const all = await getNotifications();
-    await saveNotifications(all.filter(n => n.id !== id));
+    await deleteNotification(id);
     await load();
   }
 

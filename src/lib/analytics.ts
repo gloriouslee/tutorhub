@@ -25,6 +25,7 @@ export interface AnalyticsData {
   classes: Class[];
   students: Student[];
   teachers: Teacher[];
+  invoices: TuitionInvoice[];
   attendance: Attendance[];
   examScores: StoredExamScore[];
   revenueEvents: RevenueEvent[];
@@ -53,7 +54,7 @@ export async function loadAnalyticsData(): Promise<AnalyticsData> {
     getTeachers,
     getInvoicesRaw,
     getAllTeacherAttendance,
-    getClassTuition,
+    getClassTuitions,
     getClassTeacherOverrides,
     getAllExamScores,
   } = await import("@/lib/storage");
@@ -85,14 +86,13 @@ export async function loadAnalyticsData(): Promise<AnalyticsData> {
   const revenueEvents: RevenueEvent[] = [];
 
   // 1) Học phí do giáo viên ghi nhận (chính xác nhất: có classId + studentId)
-  const tuitionConfigs = await Promise.all(classes.map(c => getClassTuition(c.id).then(cfg => ({ classId: c.id, cfg })).catch(() => null)));
+  const tuitionConfigs = await getClassTuitions(classes.map(c => c.id));
   const tuitionKeys = new Set<string>();  // classId|studentId|period đã ghi nhận
-  for (const item of tuitionConfigs) {
-    if (!item) continue;
-    for (const [sid, sdata] of Object.entries(item.cfg.students)) {
+  for (const [classId, config] of Object.entries(tuitionConfigs)) {
+    for (const [sid, sdata] of Object.entries(config.students)) {
       for (const p of sdata.payments ?? []) {
-        revenueEvents.push({ amount: p.amount, date: p.paid_at, classId: item.classId, studentId: sid, teacherId: teacherOf[item.classId], source: "tuition" });
-        tuitionKeys.add(`${item.classId}|${sid}|${p.period}`);
+        revenueEvents.push({ amount: p.amount, date: p.paid_at, classId, studentId: sid, teacherId: teacherOf[classId], source: "tuition" });
+        tuitionKeys.add(`${classId}|${sid}|${p.period}`);
       }
     }
   }
@@ -114,7 +114,7 @@ export async function loadAnalyticsData(): Promise<AnalyticsData> {
     });
   }
 
-  return { classes, students, teachers, attendance, examScores, revenueEvents, teacherOf };
+  return { classes, students, teachers, invoices, attendance, examScores, revenueEvents, teacherOf };
 }
 
 // ── Lọc dữ liệu theo khoảng thời gian (N tháng gần nhất) ────────────────────────
