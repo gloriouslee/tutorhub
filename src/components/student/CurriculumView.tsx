@@ -333,7 +333,7 @@ export default function CurriculumView({ classId, watched, onWatch, submissions 
         </div>
         <div className="relative w-full aspect-video bg-black" onClick={e => e.stopPropagation()}>
           <iframe
-            src={`https://www.youtube.com/embed/${activeYtId}?autoplay=1&rel=0`}
+            src={ytEmbedSrc(activeYtId)}
             className="absolute inset-0 w-full h-full"
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
             allowFullScreen
