@@ -118,34 +118,30 @@ export async function proxy(request: NextRequest) {
     return redirectWithCookies(request, "/login", response);
   }
 
+  // A caller may be *forced* onto exactly one gate page: reset the password
+  // first, then (students only) complete onboarding. Resolve a single target
+  // and only redirect when we are not already there — otherwise a caller who
+  // must do BOTH (a freshly created student: temp password + empty profile)
+  // ping-pongs /reset-password ⇄ /student/onboarding forever (ERR_TOO_MANY_REDIRECTS).
+  let forced: string | null = null;
+  if (identity.mustResetPassword) {
+    forced = "/reset-password";
+  } else if (identity.role === "student" && !identity.profileComplete) {
+    forced = "/student/onboarding";
+  }
+  if (forced) {
+    if (pathname !== forced) return redirectWithCookies(request, forced, response);
+    return response;
+  }
+
+  // Gates cleared: keep callers off the transient auth-only pages and off the
+  // login/landing routes by sending them to their role home.
   if (
-    identity.mustResetPassword &&
-    pathname !== "/reset-password"
+    pathname === "/reset-password" ||
+    pathname === "/student/onboarding" ||
+    pathname === "/" ||
+    pathname === "/login"
   ) {
-    return redirectWithCookies(request, "/reset-password", response);
-  }
-
-  if (!identity.mustResetPassword && pathname === "/reset-password") {
-    return redirectWithCookies(request, ROLE_HOME[identity.role], response);
-  }
-
-  if (
-    identity.role === "student" &&
-    !identity.profileComplete &&
-    pathname !== "/student/onboarding"
-  ) {
-    return redirectWithCookies(request, "/student/onboarding", response);
-  }
-
-  if (
-    identity.role === "student" &&
-    identity.profileComplete &&
-    pathname === "/student/onboarding"
-  ) {
-    return redirectWithCookies(request, "/student", response);
-  }
-
-  if (pathname === "/" || pathname === "/login") {
     return redirectWithCookies(request, ROLE_HOME[identity.role], response);
   }
 
