@@ -181,6 +181,24 @@ interface LectureCard {
 }
 
 // Sắp xếp mới nhất lên đầu: ưu tiên created_at, fallback due_date.
+// Chuẩn hoá link YouTube về dạng "xem" (watch?v=…). Mở thẳng URL /embed/ trong
+// tab mới sẽ dính lỗi 153 ("player configuration") vì URL nhúng không dùng để
+// mở độc lập. Link không phải YouTube → giữ nguyên.
+function toYouTubeWatchUrl(url: string): string {
+  const patterns = [
+    /[?&]v=([^&#]+)/,
+    /youtu\.be\/([^?&#/]+)/,
+    /embed\/([^?&#/]+)/,
+    /shorts\/([^?&#/]+)/,
+    /live\/([^?&#/]+)/,
+  ];
+  for (const p of patterns) {
+    const m = url.match(p);
+    if (m) return `https://www.youtube.com/watch?v=${m[1]}`;
+  }
+  return url;
+}
+
 function recentFirst(a: { created_at?: string; due_date?: string }, b: { created_at?: string; due_date?: string }) {
   return (b.created_at ?? b.due_date ?? "").localeCompare(a.created_at ?? a.due_date ?? "");
 }
@@ -468,7 +486,7 @@ export default function StudentClassDetailPage() {
     next.add(lecId);
     setWatched(next);
     void saveStudentLessonProgress(classId, lecId, { completed: true });
-    if (videoUrl) window.open(videoUrl, "_blank", "noopener,noreferrer");
+    if (videoUrl) window.open(toYouTubeWatchUrl(videoUrl), "_blank", "noopener,noreferrer");
   }
 
   // ── Session dates (last 3 months + next 2 weeks) ──────────────────────────
