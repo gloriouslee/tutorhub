@@ -6,6 +6,7 @@ const PUBLIC_ROUTES = new Set([
   "/signup",
   "/forgot-password",
   "/auth/callback",
+  "/auth/confirm",
 ]);
 const ROLE_HOME: Record<UserRole, string> = {
   student: "/student",
@@ -102,6 +103,9 @@ export async function proxy(request: NextRequest) {
     pathname === "/signup"
     || pathname === "/forgot-password"
     || pathname === "/auth/callback"
+    // Establishes the session client-side from the URL fragment, so it must
+    // render even though no auth cookie exists yet.
+    || pathname === "/auth/confirm"
   ) return response;
 
   // No session cookie means there is nothing for Supabase to validate. Keep the

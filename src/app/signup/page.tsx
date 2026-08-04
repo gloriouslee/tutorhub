@@ -16,6 +16,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { GoogleSignInButton } from "@/components/auth/GoogleSignInButton";
 import { isEmail, validatePassword } from "@/lib/validation";
 
 const PASSWORD_ERRORS: Record<string, string> = {
@@ -36,7 +37,10 @@ export default function SignupPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
-  const [confirmationSent, setConfirmationSent] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  // Supabase chỉ gửi email kích hoạt khi "Confirm email" đang bật; nếu tắt thì
+  // tài khoản dùng được ngay và không có email nào được gửi.
+  const [needsConfirmation, setNeedsConfirmation] = useState(true);
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -71,9 +75,13 @@ export default function SignupPage() {
           password,
         }),
       });
-      const result = await response.json() as { error?: string };
+      const result = await response.json() as {
+        error?: string;
+        confirmation_required?: boolean;
+      };
       if (!response.ok) throw new Error(result.error ?? "signup_failed");
-      setConfirmationSent(true);
+      setNeedsConfirmation(result.confirmation_required !== false);
+      setSubmitted(true);
     } catch (signupError) {
       const message =
         signupError instanceof Error ? signupError.message.toLowerCase() : "";
@@ -99,15 +107,31 @@ export default function SignupPage() {
           </p>
         </CardHeader>
         <CardContent>
-          {confirmationSent ? (
+          {submitted ? (
             <div className="space-y-5 text-center">
               <CheckCircle2 className="mx-auto h-12 w-12 text-emerald-500" />
-              <div>
-                <h2 className="font-semibold">Kiểm tra email của bạn</h2>
-                <p className="mt-2 text-sm text-muted-foreground">
-                  Nếu cần xác nhận email, Supabase đã gửi liên kết kích hoạt tới {email.trim().toLowerCase()}.
-                </p>
-              </div>
+              {needsConfirmation ? (
+                <div>
+                  <h2 className="font-semibold">Kiểm tra email của bạn</h2>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    Chúng tôi đã gửi liên kết kích hoạt tới{" "}
+                    <span className="font-medium text-foreground">
+                      {email.trim().toLowerCase()}
+                    </span>
+                    . Mở email và bấm vào liên kết để hoàn tất đăng ký.
+                  </p>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    Không thấy email? Kiểm tra thư mục Spam / Quảng cáo, hoặc thử đăng nhập bằng Google.
+                  </p>
+                </div>
+              ) : (
+                <div>
+                  <h2 className="font-semibold">Tài khoản đã sẵn sàng</h2>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    Bạn có thể đăng nhập ngay bằng email và mật khẩu vừa tạo.
+                  </p>
+                </div>
+              )}
               <Link href="/login">
                 <Button className="w-full">Đi đến đăng nhập</Button>
               </Link>
@@ -162,6 +186,15 @@ export default function SignupPage() {
                 {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 Tạo tài khoản
               </Button>
+              <div className="relative py-1">
+                <div className="absolute inset-0 flex items-center">
+                  <span className="w-full border-t border-border" />
+                </div>
+                <div className="relative flex justify-center text-xs uppercase">
+                  <span className="bg-card px-3 text-muted-foreground">Hoặc</span>
+                </div>
+              </div>
+              <GoogleSignInButton label="Đăng ký với Google" />
               <div className="flex items-center justify-between text-sm">
                 <Link href="/login" className="flex items-center gap-1.5 text-muted-foreground hover:text-primary">
                   <ArrowLeft className="h-4 w-4" /> Đăng nhập

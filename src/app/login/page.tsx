@@ -1,13 +1,21 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { GraduationCap, Mail, Lock, Eye, EyeOff, ArrowRight, CheckCircle2, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { GoogleSignInButton } from "@/components/auth/GoogleSignInButton";
 import { createClient } from "@/lib/supabase/client";
 import { resetAccountContextCache } from "@/hooks/useAccountContext";
+
+// Lỗi do /auth/callback chuyển về khi liên kết email không dùng được.
+const URL_ERRORS: Record<string, string> = {
+  invalid_or_expired_link:
+    "Liên kết đã hết hạn hoặc được sử dụng rồi. Vui lòng đăng nhập hoặc yêu cầu liên kết mới.",
+  configuration: "Hệ thống đăng nhập chưa được cấu hình. Vui lòng liên hệ quản trị viên.",
+};
 
 const HIGHLIGHTS = [
   "Khám phá lớp học của tất cả giáo viên",
@@ -25,6 +33,12 @@ export default function LoginPage() {
   const [remember, setRemember] = useState(true);
   const [loginLoading, setLoginLoading] = useState(false);
   const [loginError, setLoginError] = useState("");
+
+  // Đọc từ window thay vì useSearchParams để trang vẫn prerender tĩnh được.
+  useEffect(() => {
+    const code = new URLSearchParams(window.location.search).get("error");
+    if (code && URL_ERRORS[code]) setLoginError(URL_ERRORS[code]);
+  }, []);
 
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -203,6 +217,17 @@ export default function LoginPage() {
               )}
             </Button>
           </form>
+
+          <div className="relative my-6">
+            <div className="absolute inset-0 flex items-center">
+              <span className="w-full border-t border-border" />
+            </div>
+            <div className="relative flex justify-center text-xs uppercase">
+              <span className="bg-background px-3 text-muted-foreground">Hoặc</span>
+            </div>
+          </div>
+
+          <GoogleSignInButton remember={remember} label="Đăng nhập với Google" />
 
           {/* Chưa có tài khoản */}
           <p className="text-center text-sm text-muted-foreground mt-5">

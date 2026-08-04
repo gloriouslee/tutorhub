@@ -231,17 +231,38 @@ security definer
 set search_path = public, pg_temp
 as $$
 declare
-  requested_role text;
+  requested_role       text;
+  oauth_signup         boolean;
   self_service_student boolean;
+  resolved_name        text;
 begin
   requested_role := coalesce(new.raw_app_meta_data->>'role', 'student');
   if requested_role not in ('student', 'parent', 'teacher', 'admin') then
     requested_role := 'student';
   end if;
 
+  -- 'email' is the password provider; anything else is a federated identity
+  -- (Google, …). Those are provider-verified, so they need neither a password
+  -- nor an email confirmation and count as a self-service student signup.
+  oauth_signup :=
+    coalesce(new.raw_app_meta_data->>'provider', 'email') <> 'email';
+
   self_service_student :=
     requested_role = 'student'
-    and coalesce(new.raw_user_meta_data->>'self_service_signup', 'false') = 'true';
+    and (
+      coalesce(new.raw_user_meta_data->>'self_service_signup', 'false') = 'true'
+      or oauth_signup
+    );
+
+  -- Google sends the display name as full_name and/or name.
+  resolved_name := nullif(
+    coalesce(
+      new.raw_user_meta_data->>'full_name',
+      new.raw_user_meta_data->>'name',
+      ''
+    ),
+    ''
+  );
 
   insert into public.profiles (
     id, email, full_name, role, must_reset_password
@@ -249,7 +270,7 @@ begin
   values (
     new.id,
     new.email,
-    nullif(new.raw_user_meta_data->>'full_name', ''),
+    resolved_name,
     requested_role,
     requested_role <> 'admin' and not self_service_student
   )
@@ -260,19 +281,29 @@ begin
   if self_service_student then
     insert into public.students (
       id, user_id, full_name, email, dob, school, grade,
-      learning_type, created_at
+      learning_type, avatar_url, created_at
     )
     values (
       'stu_' || new.id::text,
       new.id,
-      coalesce(nullif(new.raw_user_meta_data->>'full_name', ''), split_part(new.email, '@', 1)),
+      coalesce(resolved_name, split_part(new.email, '@', 1)),
       lower(new.email),
-      '', '', '', 'hybrid', now()
+      '', '', '', 'hybrid',
+      nullif(
+        coalesce(
+          new.raw_user_meta_data->>'avatar_url',
+          new.raw_user_meta_data->>'picture',
+          ''
+        ),
+        ''
+      ),
+      now()
     )
     on conflict (id) do update
     set user_id = excluded.user_id,
         full_name = excluded.full_name,
-        email = excluded.email;
+        email = excluded.email,
+        avatar_url = coalesce(public.students.avatar_url, excluded.avatar_url);
   end if;
 
   return new;
