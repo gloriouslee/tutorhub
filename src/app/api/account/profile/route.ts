@@ -37,13 +37,16 @@ export async function GET(req: NextRequest) {
   const phone = profileResult.data?.phone ?? "";
   return NextResponse.json({
     student_id: student.id,
-    full_name: student.full_name,
-    email: student.email ?? actor.email ?? "",
+    full_name: student.full_name ?? "",
+    // `||`, not `??`: rows provisioned by handle_new_user() store empty strings
+    // rather than NULL, and an empty email must still fall back to the auth email
+    // or the onboarding form shows a blank, unfillable box.
+    email: student.email || actor.email || "",
     dob: student.dob ?? "",
     school: student.school ?? "",
     grade: student.grade ?? "",
     phone,
-    username: actor.email ?? student.email ?? "",
+    username: actor.email || student.email || "",
     avatar_url: student.avatar_url ?? "",
     profile_complete: isCompleteStudentProfile({
       full_name: student.full_name,

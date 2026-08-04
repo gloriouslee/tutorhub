@@ -20,7 +20,8 @@ import { Input } from "@/components/ui/input";
 import { resetAccountContextCache } from "@/hooks/useAccountContext";
 import { createClient } from "@/lib/supabase/client";
 import {
-  isCompleteStudentProfile,
+  isNonEmptyString,
+  isValidDateOfBirth,
   normalizeContactPhone,
   normalizeStudentGrade,
 } from "@/lib/validation";
@@ -52,7 +53,45 @@ const ERROR_MESSAGES: Record<string, string> = {
   invalid_grade: "Vui lòng chọn khối lớp.",
   invalid_phone: "Số điện thoại liên hệ chưa hợp lệ.",
   profile_update_failed: "Không thể lưu hồ sơ lúc này. Vui lòng thử lại.",
+  profile_incomplete:
+    "Hồ sơ vẫn thiếu thông tin bắt buộc. Vui lòng kiểm tra lại các trường có dấu *.",
 };
+
+// Email không nằm trong danh sách bắt buộc — nó lấy từ tài khoản đăng nhập và
+// hiển thị ở dạng chỉ đọc. Trả lỗi cho từng trường thay vì một câu chung, vì
+// thông báo gộp khiến người dùng không biết ô nào sai (và thường đoán là email).
+const FIELD_CHECKS: {
+  id: string;
+  message: string;
+  isValid: (profile: OnboardingProfile) => boolean;
+}[] = [
+  {
+    id: "full-name",
+    message: "Vui lòng nhập họ và tên.",
+    isValid: (p) => isNonEmptyString(p.full_name.trim(), 120),
+  },
+  {
+    id: "dob",
+    message: "Vui lòng chọn ngày sinh hợp lệ (không được ở tương lai).",
+    isValid: (p) => isValidDateOfBirth(p.dob),
+  },
+  {
+    id: "phone",
+    message:
+      "Số điện thoại chưa hợp lệ. Nhập 8–15 chữ số, ví dụ: 0912345678.",
+    isValid: (p) => normalizeContactPhone(p.phone) !== null,
+  },
+  {
+    id: "school",
+    message: "Vui lòng nhập tên trường đang học.",
+    isValid: (p) => isNonEmptyString(p.school.trim(), 160),
+  },
+  {
+    id: "grade",
+    message: "Vui lòng chọn khối lớp.",
+    isValid: (p) => normalizeStudentGrade(p.grade) !== null,
+  },
+];
 
 export default function StudentOnboardingPage() {
   const router = useRouter();
@@ -104,20 +143,14 @@ export default function StudentOnboardingPage() {
     event.preventDefault();
     setError("");
 
-    const normalizedGrade = normalizeStudentGrade(profile.grade);
-    const normalizedPhone = normalizeContactPhone(profile.phone);
-    if (
-      !normalizedGrade ||
-      !normalizedPhone ||
-      !isCompleteStudentProfile({
-        ...profile,
-        grade: normalizedGrade,
-        phone: normalizedPhone,
-      })
-    ) {
-      setError("Vui lòng điền đầy đủ và kiểm tra lại các thông tin bắt buộc.");
+    const failed = FIELD_CHECKS.find((check) => !check.isValid(profile));
+    if (failed) {
+      setError(failed.message);
+      document.getElementById(failed.id)?.focus();
       return;
     }
+    const normalizedGrade = normalizeStudentGrade(profile.grade) as string;
+    const normalizedPhone = normalizeContactPhone(profile.phone) as string;
 
     setSubmitting(true);
     try {
@@ -233,7 +266,10 @@ export default function StudentOnboardingPage() {
 
                   <div className="space-y-1.5">
                     <label htmlFor="email" className="text-sm font-medium">
-                      Email tài khoản
+                      Email tài khoản{" "}
+                      <span className="font-normal text-muted-foreground">
+                        (chỉ đọc)
+                      </span>
                     </label>
                     <Input
                       id="email"
@@ -242,6 +278,9 @@ export default function StudentOnboardingPage() {
                       leftIcon={<Mail className="h-4 w-4" />}
                       disabled
                     />
+                    <p className="text-xs text-muted-foreground">
+                      Đây là email bạn dùng để đăng nhập, không cần điền lại.
+                    </p>
                   </div>
 
                   <div className="space-y-1.5">
