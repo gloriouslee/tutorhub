@@ -15,12 +15,39 @@ type UserRow = {
   id: string;
   email: string;
   full_name: string;
-  role: "student" | "parent" | "teacher" | "admin";
+  role: "student" | "parent" | "teacher" | "admin" | null;
+  has_profile: boolean;
   must_reset_password: boolean;
   disabled: boolean;
   created_at: string;
   last_sign_in_at: string | null;
 };
+
+// Mã lỗi từ /api/admin/users. Gộp tất cả thành "thao tác thất bại" khiến admin
+// không biết nên gỡ lớp, đợi hạn mức, hay đi sửa cấu hình email.
+const ACTION_ERRORS: Record<string, string> = {
+  cannot_disable_self: "Bạn không thể tự khóa tài khoản đang đăng nhập.",
+  cannot_delete_self: "Bạn không thể tự xóa tài khoản đang đăng nhập.",
+  student_has_classes: "Hãy gỡ học viên khỏi tất cả lớp trước khi xóa tài khoản.",
+  teacher_has_classes: "Hãy phân công lại các lớp trước khi xóa tài khoản giáo viên.",
+  account_already_exists: "Email này đã có tài khoản.",
+  invite_rate_limited:
+    "Đã vượt hạn mức gửi email. Vui lòng đợi ít phút rồi thử lại.",
+  invite_email_failed:
+    "Không gửi được email mời: hệ thống email đang lỗi. Kiểm tra cấu hình SMTP của Supabase.",
+  reset_email_failed:
+    "Không gửi được email đặt lại mật khẩu: hệ thống email đang lỗi. Kiểm tra cấu hình SMTP.",
+  user_not_found: "Không tìm thấy tài khoản này.",
+};
+
+function describeError(code: unknown, fallback: string): string {
+  const key = String(code ?? "");
+  // Domain guards arrive as raw Postgres messages, e.g. "…student_has_classes…".
+  const matched = Object.keys(ACTION_ERRORS).find((candidate) =>
+    key.includes(candidate),
+  );
+  return matched ? ACTION_ERRORS[matched] : fallback;
+}
 
 export default function AdminUsersPage() {
   const [users, setUsers] = useState<UserRow[]>([]);
@@ -74,7 +101,13 @@ export default function AdminUsersPage() {
     });
     setBusy("");
     if (!response.ok) {
-      setMessage("Không thể gửi lời mời. Kiểm tra email hoặc tài khoản đã tồn tại.");
+      const result = await response.json().catch(() => ({}));
+      setMessage(
+        describeError(
+          result.error,
+          "Không thể gửi lời mời. Kiểm tra lại email và thử lại.",
+        ),
+      );
       return;
     }
     setForm({ email: "", full_name: "", role: "student" });
@@ -85,18 +118,22 @@ export default function AdminUsersPage() {
 
   async function action(user: UserRow, nextAction: "send_reset" | "disable" | "enable") {
     setBusy(user.id);
+    setMessage("");
     const response = await fetch("/api/admin/users", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ user_id: user.id, action: nextAction }),
     });
+    const result = await response.json().catch(() => ({}));
     setBusy("");
     setMessage(
       response.ok
         ? nextAction === "send_reset"
           ? "Đã gửi email đặt lại mật khẩu."
-          : "Đã cập nhật trạng thái tài khoản."
-        : "Thao tác thất bại.",
+          : nextAction === "disable"
+            ? "Đã khóa tài khoản. Phiên đang đăng nhập bị chấm dứt ngay."
+            : "Đã mở khóa tài khoản."
+        : describeError(result.error, "Thao tác thất bại."),
     );
     if (response.ok) await reload();
   }
@@ -112,11 +149,7 @@ export default function AdminUsersPage() {
     setMessage(
       response.ok
         ? "Đã xóa tài khoản."
-        : String(result.error).includes("student_has_classes")
-          ? "Hãy gỡ học viên khỏi tất cả lớp trước khi xóa tài khoản."
-          : String(result.error).includes("teacher_has_classes")
-            ? "Hãy phân công lại các lớp trước khi xóa tài khoản giáo viên."
-            : "Không thể xóa tài khoản.",
+        : describeError(result.error, "Không thể xóa tài khoản."),
     );
     if (response.ok) await reload();
   }
@@ -186,9 +219,12 @@ export default function AdminUsersPage() {
                   <p className="truncate font-semibold">{user.full_name || user.email}</p>
                   <p className="truncate text-sm text-muted-foreground">{user.email}</p>
                   <div className="mt-2 flex flex-wrap gap-2">
-                    <Badge variant="secondary">{user.role}</Badge>
+                    <Badge variant="secondary">{user.role ?? "chưa có vai trò"}</Badge>
                     {user.must_reset_password && <Badge variant="outline">Phải đổi mật khẩu</Badge>}
                     {user.disabled && <Badge variant="destructive">Đã khóa</Badge>}
+                    {!user.has_profile && (
+                      <Badge variant="destructive">Thiếu hồ sơ · không đăng nhập được</Badge>
+                    )}
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-2">

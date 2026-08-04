@@ -45,6 +45,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "profile_list_failed" }, { status: 500 });
   }
   const profileById = new Map((profiles ?? []).map((profile) => [profile.id, profile]));
+  // Every email address on the platform is in this payload; keep it out of any
+  // shared or browser cache.
   return NextResponse.json({
     items: users.map((user) => {
       const profile = profileById.get(user.id);
@@ -53,6 +55,10 @@ export async function GET(req: NextRequest) {
         email: user.email ?? "",
         full_name: profile?.full_name ?? user.user_metadata?.full_name ?? "",
         role: profile?.role ?? user.app_metadata?.role ?? null,
+        // An auth user with no profiles row cannot sign in at all (the identity
+        // lookup refuses to infer a role from the token). Surface it so the state
+        // is visible here instead of looking like a working account.
+        has_profile: Boolean(profile),
         must_reset_password: profile?.must_reset_password === true,
         // Either source counts as locked: the ban is the source of truth for
         // sign-in, the flag is what the app enforces per request.
@@ -67,7 +73,7 @@ export async function GET(req: NextRequest) {
     per_page: perPage,
     total: data.total,
     has_more: page * perPage < data.total,
-  });
+  }, { headers: { "Cache-Control": "private, no-store" } });
 }
 
 export async function POST(req: NextRequest) {
@@ -105,11 +111,24 @@ export async function POST(req: NextRequest) {
     redirectTo: `${appUrl(req)}/auth/callback?next=/reset-password`,
   });
   if (error || !data.user) {
-    const duplicate = error?.message.toLowerCase().includes("already");
-    return NextResponse.json(
-      { error: duplicate ? "account_already_exists" : "invite_failed" },
-      { status: duplicate ? 409 : 500 },
-    );
+    // Inviting *is* sending an email, so most failures here are mail-delivery
+    // problems, not bad input. Reporting them all as "invite_failed" sent admins
+    // hunting for a duplicate account or a typo instead of the real cause.
+    const message = error?.message.toLowerCase() ?? "";
+    const status = error?.status ?? 0;
+    const reason = message.includes("already")
+      ? { error: "account_already_exists", status: 409 }
+      : status === 429 || message.includes("rate limit")
+        ? { error: "invite_rate_limited", status: 429 }
+        : status >= 500 || message.includes("error sending")
+          ? { error: "invite_email_failed", status: 502 }
+          : { error: "invite_failed", status: 500 };
+    logEvent("warn", "admin.user_invite_failed", {
+      actor_id: actor.userId,
+      reason: reason.error,
+      detail: error?.message ?? "no_user_returned",
+    });
+    return NextResponse.json({ error: reason.error }, { status: reason.status });
   }
 
   const userId = data.user.id;
