@@ -183,6 +183,22 @@ export default function StudentOnboardingPage() {
       }
 
       resetAccountContextCache();
+
+      // Route-guard tự tính lại "hồ sơ đã đủ" từ dữ liệu của chính nó. Nếu nó
+      // chưa đồng ý, điều hướng sang /student sẽ bị đẩy ngược về đây và người
+      // dùng thấy form y nguyên, không một thông báo nào — trông như bấm Lưu mà
+      // không lưu. Xác nhận trước rồi mới đi, để lỗi luôn hiện ra.
+      const identity = await fetch("/api/account/me", { cache: "no-store" })
+        .then((res) => (res.ok ? (res.json() as Promise<{ profileComplete?: boolean }>) : null))
+        .catch(() => null);
+      if (identity && identity.profileComplete === false) {
+        setError(
+          "Đã lưu hồ sơ nhưng hệ thống vẫn thấy thiếu thông tin. Vui lòng tải lại trang; nếu vẫn lỗi hãy liên hệ quản trị viên.",
+        );
+        setSubmitting(false);
+        return;
+      }
+
       router.replace("/student");
       router.refresh();
     } catch (submitError) {
