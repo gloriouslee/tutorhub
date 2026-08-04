@@ -220,6 +220,10 @@ create table if not exists public.profiles (
   full_name           text,
   role                text not null check (role in ('student','parent','teacher','admin')) default 'student',
   must_reset_password boolean not null default true,
+  -- Account locked by an admin. Checked on every request (see getRequestIdentity)
+  -- so a lock applies immediately instead of waiting for the token to expire.
+  -- Service-role writes only: authenticated may update (full_name, phone) only.
+  disabled            boolean not null default false,
   created_at          timestamptz default now()
 );
 

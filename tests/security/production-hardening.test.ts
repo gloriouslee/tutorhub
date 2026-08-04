@@ -341,6 +341,28 @@ test("teacher payment approvals are scoped to the owning class", async () => {
   await assert.rejects(read("src/app/api/admin/create-account/route.ts"));
 });
 
+test("deleting or locking an account ends its session immediately", async () => {
+  const auth = await read("src/lib/api-auth.ts");
+  const users = await read("src/app/api/admin/users/route.ts");
+  const migration = await read(
+    "supabase/migrations/20260804140000_profiles_disabled_flag.sql",
+  );
+
+  // Access tokens are validated locally, so authorization must hang off the
+  // per-request profiles read rather than trusting the token's app_metadata.
+  assert.match(auth, /select\("role, must_reset_password, phone, disabled"\)/);
+  assert.match(auth, /if \(!profile\) return null/);
+  assert.match(auth, /profile\.disabled === true\) return null/);
+  // A deleted account keeps a signed token carrying its old role; the role must
+  // not be recoverable from app_metadata alone.
+  assert.doesNotMatch(auth, /profile\?\.role \?\? metadataRole/);
+
+  // Locking must write the flag the request path checks, not only the auth ban.
+  assert.match(users, /ban_duration: disabled \? "876000h" : "none"/);
+  assert.match(users, /\.update\(\{ disabled \}\)/);
+  assert.match(migration, /add column if not exists disabled/);
+});
+
 test("admin profile is backed by the authenticated account", async () => {
   const route = await read("src/app/api/admin/profile/route.ts");
   const page = await read("src/app/admin/profile/page.tsx");

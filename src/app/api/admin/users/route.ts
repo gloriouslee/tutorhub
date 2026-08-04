@@ -39,7 +39,7 @@ export async function GET(req: NextRequest) {
       ? { data: [], error: null }
       : await admin
           .from("profiles")
-          .select("id,full_name,role,must_reset_password")
+          .select("id,full_name,role,must_reset_password,disabled")
           .in("id", ids);
   if (profileError) {
     return NextResponse.json({ error: "profile_list_failed" }, { status: 500 });
@@ -54,7 +54,11 @@ export async function GET(req: NextRequest) {
         full_name: profile?.full_name ?? user.user_metadata?.full_name ?? "",
         role: profile?.role ?? user.app_metadata?.role ?? null,
         must_reset_password: profile?.must_reset_password === true,
-        disabled: Boolean(user.banned_until && new Date(user.banned_until) > new Date()),
+        // Either source counts as locked: the ban is the source of truth for
+        // sign-in, the flag is what the app enforces per request.
+        disabled:
+          profile?.disabled === true
+          || Boolean(user.banned_until && new Date(user.banned_until) > new Date()),
         created_at: user.created_at,
         last_sign_in_at: user.last_sign_in_at ?? null,
       };
@@ -220,10 +224,21 @@ export async function PATCH(req: NextRequest) {
     if (userId === actor.userId) {
       return NextResponse.json({ error: "cannot_disable_self" }, { status: 409 });
     }
+    const disabled = body.action === "disable";
     const { error } = await admin.auth.admin.updateUserById(userId, {
-      ban_duration: body.action === "disable" ? "876000h" : "none",
+      ban_duration: disabled ? "876000h" : "none",
     });
     if (error) return NextResponse.json({ error: "user_status_failed" }, { status: 500 });
+    // Banning stops new sign-ins and refreshes, but the app validates access
+    // tokens locally, so an already-signed-in user would keep working until the
+    // token expired. Mirror the state where getRequestIdentity can see it.
+    const { error: flagError } = await admin
+      .from("profiles")
+      .update({ disabled })
+      .eq("id", userId);
+    if (flagError) {
+      return NextResponse.json({ error: "user_status_failed" }, { status: 500 });
+    }
   } else {
     return NextResponse.json({ error: "invalid_action" }, { status: 400 });
   }

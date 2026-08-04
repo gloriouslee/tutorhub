@@ -139,7 +139,7 @@ export async function getRequestIdentity(
   const [profileResult, metadataEntity] = await Promise.all([
     supabase
       .from("profiles")
-      .select("role, must_reset_password, phone")
+      .select("role, must_reset_password, phone, disabled")
       .eq("id", userId)
       .maybeSingle(),
     metadataEntityPromise,
@@ -149,6 +149,7 @@ export async function getRequestIdentity(
     role?: unknown;
     must_reset_password?: unknown;
     phone?: unknown;
+    disabled?: unknown;
   } | null = null;
   if (!profileResult.error) {
     profile = profileResult.data;
@@ -162,7 +163,17 @@ export async function getRequestIdentity(
     profile = legacyProfile.data;
   }
 
-  const roleCandidate = profile?.role ?? metadataRole;
+  // Deleting an account cascades its profiles row away, but the browser still
+  // holds a signed access token whose app_metadata carries the old role. Falling
+  // back to that role let a deleted user keep using the app until the token
+  // expired, so require the row to exist. handle_new_user() creates it in the
+  // same transaction as the auth user, so a live account always has one.
+  if (!profile) return null;
+  // A lock (ban_duration in auth.users) is invisible to local token validation.
+  // The mirrored flag makes it take effect on the very next request.
+  if (profile.disabled === true) return null;
+
+  const roleCandidate = profile.role ?? metadataRole;
   if (!isRole(roleCandidate)) return null;
 
   const roleEntity =
