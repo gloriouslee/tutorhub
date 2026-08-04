@@ -6,7 +6,6 @@ import { KeyRound, Loader2, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { createClient } from "@/lib/supabase/client";
 import { validatePassword } from "@/lib/validation";
 
 const ERROR_MESSAGES: Record<string, string> = {
@@ -42,9 +41,24 @@ export default function UpdatePasswordPage() {
 
     setSubmitting(true);
     try {
-      const supabase = createClient();
-      const { error: updateError } = await supabase.auth.updateUser({ password });
-      if (updateError) throw updateError;
+      // Cùng endpoint với /reset-password: nó vừa đổi mật khẩu vừa gỡ cờ
+      // must_reset_password. Gọi thẳng Supabase từ client chỉ đổi được mật khẩu
+      // và để lại cờ, khiến người dùng bị đẩy sang /reset-password ngay sau đó.
+      const response = await fetch("/api/account/change-password", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ new_password: password }),
+      });
+      const result = (await response.json()) as { error?: string };
+      if (!response.ok) {
+        setError(
+          ERROR_MESSAGES[result.error ?? ""]
+            ?? "Liên kết đã hết hạn hoặc không thể cập nhật mật khẩu. Hãy yêu cầu một liên kết mới.",
+        );
+        setSubmitting(false);
+        return;
+      }
 
       const identityResponse = await fetch("/api/account/me", { cache: "no-store" });
       const identity = identityResponse.ok

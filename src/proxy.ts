@@ -133,7 +133,11 @@ export async function proxy(request: NextRequest) {
   } else if (identity.role === "student" && !identity.profileComplete) {
     forced = "/student/onboarding";
   }
-  if (forced) {
+  // /update-password is where a password-recovery email lands. Neither gate can
+  // be satisfied before the caller sets a password, so it must stay reachable —
+  // otherwise a student with an unfinished profile is bounced to onboarding and
+  // can never recover their account.
+  if (forced && pathname !== "/update-password") {
     if (pathname !== forced) return redirectWithCookies(request, forced, response);
     return response;
   }

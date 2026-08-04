@@ -189,8 +189,17 @@ test("password recovery follows Supabase reset and update flow", async () => {
   );
 
   const updatePage = await read("src/app/update-password/page.tsx");
-  assert.match(updatePage, /auth\.updateUser\(\{ password \}\)/);
+  // Must go through the API that also clears must_reset_password. Calling
+  // auth.updateUser() directly leaves the flag set, so the route guard bounces
+  // the user straight back to /reset-password after a successful recovery.
+  assert.match(updatePage, /\/api\/account\/change-password/);
+  assert.doesNotMatch(updatePage, /auth\.updateUser/);
   assert.match(updatePage, /validatePassword/);
+
+  // The recovery screen has to survive both route-guard gates: a caller arriving
+  // from a recovery email cannot satisfy them until the password is set.
+  const guard = await read("src/proxy.ts");
+  assert.match(guard, /forced && pathname !== "\/update-password"/);
 
   const callback = await read("src/app/auth/callback/route.ts");
   assert.match(callback, /exchangeCodeForSession/);
