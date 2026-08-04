@@ -97,7 +97,11 @@ export async function getRequestIdentity(
         .from("students")
         .select("id, full_name, dob, school, grade")
         .eq("user_id", userId)
+        // `id` breaks the tie: two rows sharing a created_at would otherwise come
+        // back in an arbitrary order, so this lookup and the profile endpoint
+        // could pick different rows and disagree about the same account.
         .order("created_at", { ascending: true })
+        .order("id", { ascending: true })
         .limit(1);
       // A failed query is not the same as "no student row", but both used to
       // resolve to null — which the route guard reads as an incomplete profile

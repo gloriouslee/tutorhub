@@ -34,7 +34,10 @@ async function resolveStudentId(
     .from("students")
     .select("id")
     .eq("user_id", actor.userId)
+    // Same ordering as getRequestIdentity, tiebreaker included, so both always
+    // resolve to the same row when an account has more than one.
     .order("created_at", { ascending: true })
+    .order("id", { ascending: true })
     .limit(1);
   const found = existing?.[0]?.id;
   if (found) return String(found);
