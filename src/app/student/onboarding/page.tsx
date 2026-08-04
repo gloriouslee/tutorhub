@@ -202,17 +202,31 @@ export default function StudentOnboardingPage() {
         // server lưu đủ mà route-guard vẫn báo thiếu thì đó là lệch dữ liệu, chứ
         // không phải người dùng điền sai — hai trường hợp cần chỉ dẫn khác nhau.
         const saved = await fetch("/api/account/profile", { cache: "no-store" })
-          .then((res) => (res.ok ? (res.json() as Promise<OnboardingProfile>) : null))
-          .catch(() => null);
-        const missing = saved
-          ? FIELD_CHECKS.filter(
-              (check) => !check.isValid({ ...EMPTY_PROFILE, ...saved }),
-            ).map((check) => check.label)
-          : [];
+          .then(async (res) =>
+            res.ok
+              ? { ok: true as const, data: (await res.json()) as OnboardingProfile }
+              : { ok: false as const, status: res.status },
+          )
+          .catch(() => ({ ok: false as const, status: 0 }));
+
+        if (!saved.ok) {
+          // Không đọc lại được hồ sơ hoàn toàn khác với "đọc được nhưng thiếu
+          // trường" — gộp hai cái lại thì không ai biết nên điền lại hay đi sửa
+          // dữ liệu. Kèm mã HTTP để chẩn đoán được ngay.
+          setError(
+            `Đã lưu nhưng không đọc lại được hồ sơ (mã ${saved.status || "kết nối"}). Vui lòng tải lại trang; nếu vẫn lỗi hãy liên hệ quản trị viên.`,
+          );
+          setSubmitting(false);
+          return;
+        }
+
+        const missing = FIELD_CHECKS.filter(
+          (check) => !check.isValid({ ...EMPTY_PROFILE, ...saved.data }),
+        ).map((check) => check.label);
         setError(
           missing.length > 0
             ? `Hệ thống chưa nhận được: ${missing.join(", ")}. Vui lòng điền lại các trường đó rồi lưu.`
-            : "Hồ sơ đã lưu đủ nhưng hệ thống chưa nhận ra. Vui lòng tải lại trang (Ctrl+Shift+R); nếu vẫn lỗi hãy liên hệ quản trị viên.",
+            : "Hồ sơ đã lưu đủ nhưng phiên đăng nhập chưa nhận ra. Vui lòng đăng xuất rồi đăng nhập lại.",
         );
         setSubmitting(false);
         return;
