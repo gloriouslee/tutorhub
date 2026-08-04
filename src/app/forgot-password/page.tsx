@@ -8,6 +8,19 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { createClient } from "@/lib/supabase/client";
 
+// Lý do /auth/callback không dùng được liên kết trong email. Mỗi trường hợp cần
+// một hướng xử lý khác nhau, nên không gộp thành một thông báo chung.
+const LINK_ERRORS: Record<string, string> = {
+  invalid_or_expired_link:
+    "Liên kết đặt lại mật khẩu không hợp lệ hoặc đã được sử dụng. Vui lòng yêu cầu liên kết mới.",
+  link_expired:
+    "Liên kết đặt lại mật khẩu đã hết hạn. Vui lòng yêu cầu liên kết mới và bấm vào trong vòng 1 giờ.",
+  link_wrong_browser:
+    "Liên kết chỉ dùng được trên đúng trình duyệt đã gửi yêu cầu. Hãy yêu cầu liên kết mới ngay tại đây rồi mở email trên chính trình duyệt này.",
+  configuration:
+    "Hệ thống xác thực chưa được cấu hình đầy đủ. Vui lòng liên hệ quản trị viên.",
+};
+
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -16,11 +29,7 @@ export default function ForgotPasswordPage() {
 
   useEffect(() => {
     const reason = new URLSearchParams(window.location.search).get("error");
-    if (reason === "invalid_or_expired_link") {
-      setError("Liên kết đặt lại mật khẩu không hợp lệ hoặc đã hết hạn. Vui lòng yêu cầu liên kết mới.");
-    } else if (reason === "configuration") {
-      setError("Hệ thống xác thực chưa được cấu hình đầy đủ. Vui lòng liên hệ quản trị viên.");
-    }
+    if (reason && reason in LINK_ERRORS) setError(LINK_ERRORS[reason]);
   }, []);
 
   async function handleSubmit(event: React.FormEvent) {

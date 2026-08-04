@@ -34,13 +34,13 @@ export async function GET(request: NextRequest) {
       : "/";
   if (otpType === "recovery") next = "/update-password";
 
-  // Password-recovery problems belong on the "forgot password" screen; every
-  // other failed link (expired confirmation, replayed magic link) belongs on
-  // the login screen.
-  const failurePath =
-    otpType === "recovery" || otpType === "invite"
-      ? "/forgot-password?error=invalid_or_expired_link"
-      : "/login?error=invalid_or_expired_link";
+  // Password-recovery problems belong on the "forgot password" screen, where a
+  // new link is one click away; every other failed link (expired confirmation,
+  // replayed magic link) belongs on the login screen. GoTrue drops the `type`
+  // param when it redirects a PKCE link, so fall back to the destination.
+  const isRecovery =
+    otpType === "recovery" || otpType === "invite" || next === "/update-password";
+  const failurePath = isRecovery ? "/forgot-password" : "/login";
 
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -82,6 +82,36 @@ export async function GET(request: NextRequest) {
       })
     : await supabase.auth.exchangeCodeForSession(code as string);
 
-  if (error) return NextResponse.redirect(new URL(failurePath, request.url));
+  if (error) {
+    const destination = new URL(failurePath, request.url);
+    destination.searchParams.set("error", classifyFailure(error));
+    return NextResponse.redirect(destination);
+  }
   return response;
+}
+
+/**
+ * Turn a GoTrue failure into a slug the login / forgot-password screens can
+ * explain. The three cases need different instructions, so collapsing them into
+ * one "invalid link" message leaves the user with nothing to act on.
+ */
+function classifyFailure(error: { code?: string; message: string }): string {
+  const code = error.code ?? "";
+  const message = error.message.toLowerCase();
+
+  // A PKCE link ({{ .ConfirmationURL }}) can only be completed by the browser
+  // that requested it, because the code verifier lives in that browser's cookie.
+  // Opening the mail on another device lands here.
+  if (
+    code === "flow_state_not_found"
+    || code === "flow_state_expired"
+    || message.includes("flow state")
+    || message.includes("code verifier")
+  ) {
+    return "link_wrong_browser";
+  }
+  if (code === "otp_expired" || message.includes("expired")) {
+    return "link_expired";
+  }
+  return "invalid_or_expired_link";
 }

@@ -14,6 +14,10 @@ import { resetAccountContextCache } from "@/hooks/useAccountContext";
 const URL_ERRORS: Record<string, string> = {
   invalid_or_expired_link:
     "Liên kết đã hết hạn hoặc được sử dụng rồi. Vui lòng đăng nhập hoặc yêu cầu liên kết mới.",
+  link_expired:
+    "Liên kết đã hết hạn. Vui lòng yêu cầu một liên kết mới và bấm vào trong vòng 24 giờ.",
+  link_wrong_browser:
+    "Liên kết này chỉ dùng được trên đúng trình duyệt đã gửi yêu cầu. Hãy mở liên kết trên thiết bị/trình duyệt đó, hoặc yêu cầu liên kết mới ngay tại đây.",
   configuration: "Hệ thống đăng nhập chưa được cấu hình. Vui lòng liên hệ quản trị viên.",
 };
 

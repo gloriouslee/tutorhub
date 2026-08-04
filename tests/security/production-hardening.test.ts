@@ -197,14 +197,28 @@ test("password recovery follows Supabase reset and update flow", async () => {
   assert.match(callback, /verifyOtp/);
   assert.match(callback, /token_hash/);
   assert.match(callback, /otpType === "recovery"/);
-  assert.match(callback, /\/forgot-password\?error=invalid_or_expired_link/);
+  // A failed recovery link must land on /forgot-password (a new link is one
+  // click away) and must say *why* it failed, so the user knows whether to wait,
+  // switch browser, or request another link.
+  assert.match(callback, /failurePath = isRecovery \? "\/forgot-password"/);
+  assert.match(callback, /searchParams\.set\("error", classifyFailure\(error\)\)/);
+  assert.match(callback, /link_wrong_browser/);
+  assert.match(callback, /link_expired/);
 
-  const recoveryTemplate = await read(
-    "supabase/email-templates/recovery.html",
-  );
-  assert.match(recoveryTemplate, /\{\{ \.RedirectTo \}\}/);
-  assert.match(recoveryTemplate, /\{\{ \.TokenHash \}\}/);
-  assert.match(recoveryTemplate, /type=recovery/);
+  // Both email templates must build their link from a server-verifiable token
+  // hash. {{ .ConfirmationURL }} issues a PKCE code that only the requesting
+  // browser can exchange, which breaks recovery across devices and breaks
+  // signup entirely (signup runs server-side, so no verifier is ever stored).
+  for (const [file, otpType] of [
+    ["supabase/email-templates/recovery.html", "recovery"],
+    ["supabase/email-templates/confirmation.html", "signup"],
+  ] as const) {
+    const template = await read(file);
+    assert.match(template, /\{\{ \.RedirectTo \}\}/);
+    assert.match(template, /\{\{ \.TokenHash \}\}/);
+    assert.match(template, new RegExp(`type=${otpType}`));
+    assert.doesNotMatch(template, /ConfirmationURL/);
+  }
 });
 
 test("self-service signup creates a blank student without enrollment", async () => {
