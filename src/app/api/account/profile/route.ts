@@ -192,9 +192,14 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: "profile_not_found" }, { status: 404 });
   }
   if (Object.keys(studentPatch).length > 0) {
+    // Write the ownership link too. This endpoint addresses the row by `id`,
+    // while the route guard finds it by `user_id` — so a row with a missing or
+    // stale link saves fine here yet stays invisible to the guard, which then
+    // reports the profile as incomplete forever. Re-asserting it is a no-op when
+    // the link is already correct.
     const { error } = await admin
       .from("students")
-      .update(studentPatch)
+      .update({ ...studentPatch, user_id: actor.userId })
       .eq("id", studentId);
     if (error) {
       return NextResponse.json({ error: "profile_update_failed" }, { status: 500 });

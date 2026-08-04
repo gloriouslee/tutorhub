@@ -2,6 +2,7 @@ import "server-only";
 
 import { createServerClient } from "@supabase/ssr";
 import type { NextRequest, NextResponse } from "next/server";
+import { logEvent } from "@/lib/logger";
 import { isCompleteStudentProfile } from "@/lib/validation";
 
 export type UserRole = "student" | "parent" | "teacher" | "admin";
@@ -92,12 +93,23 @@ export async function getRequestIdentity(
     // silently resolve to no entity — leaving the caller with no studentId and
     // no way to use the app.
     if (role === "student") {
-      const { data: rows } = await supabase
+      const { data: rows, error } = await supabase
         .from("students")
         .select("id, full_name, dob, school, grade")
         .eq("user_id", userId)
         .order("created_at", { ascending: true })
         .limit(1);
+      // A failed query is not the same as "no student row", but both used to
+      // resolve to null — which the route guard reads as an incomplete profile
+      // and answers by pinning the account on /student/onboarding forever. Log
+      // it so the cause is visible instead of silent.
+      if (error) {
+        logEvent("error", "auth.role_entity_query_failed", {
+          user_id: userId,
+          role,
+          reason: error.message,
+        });
+      }
       const data = rows?.[0];
       return data
         ? {
@@ -154,7 +166,14 @@ export async function getRequestIdentity(
   if (!profileResult.error) {
     profile = profileResult.data;
   } else {
-    // Compatibility before the security migration adds must_reset_password.
+    // Compatibility before the security migrations add must_reset_password /
+    // disabled. This path silently drops both flags, so a project that has not
+    // run them gets no forced password reset and no account locking — log it
+    // loudly rather than degrading quietly.
+    logEvent("error", "auth.profile_columns_missing", {
+      user_id: userId,
+      reason: profileResult.error.message,
+    });
     const legacyProfile = await supabase
       .from("profiles")
       .select("role, phone")

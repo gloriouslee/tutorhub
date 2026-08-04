@@ -67,32 +67,38 @@ const ERROR_MESSAGES: Record<string, string> = {
 // thông báo gộp khiến người dùng không biết ô nào sai (và thường đoán là email).
 const FIELD_CHECKS: {
   id: string;
+  label: string;
   message: string;
   isValid: (profile: OnboardingProfile) => boolean;
 }[] = [
   {
     id: "full-name",
+    label: "họ và tên",
     message: "Vui lòng nhập họ và tên.",
     isValid: (p) => isNonEmptyString(p.full_name.trim(), 120),
   },
   {
     id: "dob",
+    label: "ngày sinh",
     message: "Vui lòng chọn ngày sinh hợp lệ (không được ở tương lai).",
     isValid: (p) => isValidDateOfBirth(p.dob),
   },
   {
     id: "phone",
+    label: "số điện thoại",
     message:
       "Số điện thoại chưa hợp lệ. Nhập 8–15 chữ số, ví dụ: 0912345678.",
     isValid: (p) => normalizeContactPhone(p.phone) !== null,
   },
   {
     id: "school",
+    label: "trường đang học",
     message: "Vui lòng nhập tên trường đang học.",
     isValid: (p) => isNonEmptyString(p.school.trim(), 160),
   },
   {
     id: "grade",
+    label: "khối lớp",
     message: "Vui lòng chọn khối lớp.",
     isValid: (p) => normalizeStudentGrade(p.grade) !== null,
   },
@@ -192,8 +198,21 @@ export default function StudentOnboardingPage() {
         .then((res) => (res.ok ? (res.json() as Promise<{ profileComplete?: boolean }>) : null))
         .catch(() => null);
       if (identity && identity.profileComplete === false) {
+        // Đọc lại đúng những gì server đang lưu và nêu tên trường bị thiếu. Nếu
+        // server lưu đủ mà route-guard vẫn báo thiếu thì đó là lệch dữ liệu, chứ
+        // không phải người dùng điền sai — hai trường hợp cần chỉ dẫn khác nhau.
+        const saved = await fetch("/api/account/profile", { cache: "no-store" })
+          .then((res) => (res.ok ? (res.json() as Promise<OnboardingProfile>) : null))
+          .catch(() => null);
+        const missing = saved
+          ? FIELD_CHECKS.filter(
+              (check) => !check.isValid({ ...EMPTY_PROFILE, ...saved }),
+            ).map((check) => check.label)
+          : [];
         setError(
-          "Đã lưu hồ sơ nhưng hệ thống vẫn thấy thiếu thông tin. Vui lòng tải lại trang; nếu vẫn lỗi hãy liên hệ quản trị viên.",
+          missing.length > 0
+            ? `Hệ thống chưa nhận được: ${missing.join(", ")}. Vui lòng điền lại các trường đó rồi lưu.`
+            : "Hồ sơ đã lưu đủ nhưng hệ thống chưa nhận ra. Vui lòng tải lại trang (Ctrl+Shift+R); nếu vẫn lỗi hãy liên hệ quản trị viên.",
         );
         setSubmitting(false);
         return;
