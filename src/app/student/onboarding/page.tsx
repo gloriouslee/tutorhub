@@ -55,6 +55,11 @@ const ERROR_MESSAGES: Record<string, string> = {
   profile_update_failed: "Không thể lưu hồ sơ lúc này. Vui lòng thử lại.",
   profile_incomplete:
     "Hồ sơ vẫn thiếu thông tin bắt buộc. Vui lòng kiểm tra lại các trường có dấu *.",
+  profile_not_found:
+    "Không tìm thấy hồ sơ học sinh cho tài khoản này. Vui lòng liên hệ quản trị viên.",
+  student_authorization_required:
+    "Tài khoản này không có quyền học sinh. Vui lòng đăng nhập lại hoặc liên hệ quản trị viên.",
+  invalid_origin: "Yêu cầu bị chặn vì sai tên miền. Vui lòng tải lại trang.",
 };
 
 // Email không nằm trong danh sách bắt buộc — nó lấy từ tài khoản đăng nhập và
@@ -183,9 +188,11 @@ export default function StudentOnboardingPage() {
     } catch (submitError) {
       const code =
         submitError instanceof Error ? submitError.message : "profile_update_failed";
+      // Kèm mã lỗi khi chưa có thông báo riêng: một câu chung chung khiến người
+      // dùng đoán sai trường nào sai và không ai chẩn đoán được sự cố thật.
       setError(
         ERROR_MESSAGES[code] ??
-          "Hồ sơ chưa đầy đủ. Vui lòng kiểm tra lại thông tin.",
+          `Không thể lưu hồ sơ. Vui lòng thử lại hoặc liên hệ quản trị viên (mã lỗi: ${code}).`,
       );
       setSubmitting(false);
     }

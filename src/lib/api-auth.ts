@@ -87,12 +87,18 @@ export async function getRequestIdentity(
 
   const loadRoleEntity = async (role: UserRole): Promise<RoleEntity | null> => {
     if (role === "admin") return null;
+    // limit(1) instead of maybeSingle(): maybeSingle() *errors* when more than
+    // one row matches, and only `data` is read here, so a duplicated row would
+    // silently resolve to no entity — leaving the caller with no studentId and
+    // no way to use the app.
     if (role === "student") {
-      const { data } = await supabase
+      const { data: rows } = await supabase
         .from("students")
         .select("id, full_name, dob, school, grade")
         .eq("user_id", userId)
-        .maybeSingle();
+        .order("created_at", { ascending: true })
+        .limit(1);
+      const data = rows?.[0];
       return data
         ? {
             id: String(data.id),
@@ -110,11 +116,13 @@ export async function getRequestIdentity(
       role === "teacher"
         ? "teachers"
         : "parents";
-    const { data } = await supabase
+    const { data: rows } = await supabase
       .from(table)
       .select("id, full_name")
       .eq("user_id", userId)
-      .maybeSingle();
+      .order("created_at", { ascending: true })
+      .limit(1);
+    const data = rows?.[0];
     return data
       ? {
           id: String(data.id),

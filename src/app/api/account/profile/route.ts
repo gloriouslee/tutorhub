@@ -11,17 +11,71 @@ import {
 } from "@/lib/validation";
 import { hasValidMutationOrigin } from "@/lib/request-security";
 
+type Admin = ReturnType<typeof createAdminClient>;
+
+/**
+ * Resolve the caller's students row, creating it when it is missing.
+ *
+ * An account can hold a profiles row with role='student' and no students row at
+ * all — handle_new_user() only provisions one for self-service and OAuth
+ * signups, so a user added straight from the Supabase dashboard has none. That
+ * left the account unusable: the route guard pins it on /student/onboarding
+ * because the profile can never be complete, while this endpoint answered 403,
+ * so there was no way to fill the profile in. Provision instead of dead-ending.
+ */
+async function resolveStudentId(
+  admin: Admin,
+  actor: { userId: string; studentId?: string; email: string | null; displayName: string },
+): Promise<string | null> {
+  if (actor.studentId) return actor.studentId;
+
+  // limit(1) rather than maybeSingle(): duplicated rows must not read as "none".
+  const { data: existing } = await admin
+    .from("students")
+    .select("id")
+    .eq("user_id", actor.userId)
+    .order("created_at", { ascending: true })
+    .limit(1);
+  const found = existing?.[0]?.id;
+  if (found) return String(found);
+
+  const studentId = `stu_${actor.userId}`;
+  const { error } = await admin.from("students").upsert({
+    id: studentId,
+    user_id: actor.userId,
+    full_name: actor.displayName,
+    email: actor.email ?? "",
+    dob: "",
+    school: "",
+    grade: "",
+    learning_type: "hybrid",
+  });
+  if (error) {
+    logEvent("error", "account.student_row_provision_failed", {
+      actor_id: actor.userId,
+      reason: error.message,
+    });
+    return null;
+  }
+  logEvent("info", "account.student_row_provisioned", { actor_id: actor.userId });
+  return studentId;
+}
+
 export async function GET(req: NextRequest) {
   const actor = await getRequestIdentity(req);
-  if (actor?.role !== "student" || !actor.studentId) {
+  if (actor?.role !== "student") {
     return NextResponse.json({ error: "student_authorization_required" }, { status: 403 });
   }
   const admin = createAdminClient();
+  const studentId = await resolveStudentId(admin, actor);
+  if (!studentId) {
+    return NextResponse.json({ error: "profile_not_found" }, { status: 404 });
+  }
   const [studentResult, profileResult] = await Promise.all([
     admin
       .from("students")
       .select("id,full_name,email,dob,school,grade,avatar_url,created_at")
-      .eq("id", actor.studentId)
+      .eq("id", studentId)
       .maybeSingle(),
     admin
       .from("profiles")
@@ -64,7 +118,7 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: "invalid_origin" }, { status: 403 });
   }
   const actor = await getRequestIdentity(req);
-  if (actor?.role !== "student" || !actor.studentId) {
+  if (actor?.role !== "student") {
     return NextResponse.json({ error: "student_authorization_required" }, { status: 403 });
   }
   let body: Record<string, unknown>;
@@ -133,11 +187,15 @@ export async function PATCH(req: NextRequest) {
   }
 
   const admin = createAdminClient();
+  const studentId = await resolveStudentId(admin, actor);
+  if (!studentId) {
+    return NextResponse.json({ error: "profile_not_found" }, { status: 404 });
+  }
   if (Object.keys(studentPatch).length > 0) {
     const { error } = await admin
       .from("students")
       .update(studentPatch)
-      .eq("id", actor.studentId);
+      .eq("id", studentId);
     if (error) {
       return NextResponse.json({ error: "profile_update_failed" }, { status: 500 });
     }
@@ -166,7 +224,7 @@ export async function PATCH(req: NextRequest) {
     admin
       .from("students")
       .select("full_name,dob,school,grade")
-      .eq("id", actor.studentId)
+      .eq("id", studentId)
       .single(),
     admin
       .from("profiles")
