@@ -37,8 +37,27 @@ export default function ForgotPasswordPage() {
       );
       if (resetError) throw resetError;
       setSent(true);
-    } catch {
-      setError("Không thể gửi email đặt lại mật khẩu. Vui lòng thử lại sau.");
+    } catch (caught) {
+      // Supabase trả 429 khi vượt hạn mức gửi, và 5xx khi SMTP lỗi. Phân biệt
+      // hai trường hợp để người dùng biết nên đợi hay báo quản trị viên, thay vì
+      // nhận một thông báo chung không hành động được.
+      const status =
+        caught && typeof caught === "object" && "status" in caught
+          ? Number((caught as { status?: unknown }).status)
+          : 0;
+      const message =
+        caught instanceof Error ? caught.message.toLowerCase() : "";
+      if (status === 429 || message.includes("rate limit")) {
+        setError(
+          "Bạn đã yêu cầu quá nhiều lần. Vui lòng đợi khoảng 15 phút rồi thử lại.",
+        );
+      } else if (status >= 500 || message.includes("error sending")) {
+        setError(
+          "Hệ thống gửi email đang gặp sự cố nên chưa gửi được liên kết. Vui lòng liên hệ quản trị viên.",
+        );
+      } else {
+        setError("Không thể gửi email đặt lại mật khẩu. Vui lòng thử lại sau.");
+      }
     } finally {
       setSubmitting(false);
     }
