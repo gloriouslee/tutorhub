@@ -95,10 +95,11 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({
     student_id: student.id,
     full_name: student.full_name ?? "",
-    // `||`, not `??`: rows provisioned by handle_new_user() store empty strings
-    // rather than NULL, and an empty email must still fall back to the auth email
-    // or the onboarding form shows a blank, unfillable box.
-    email: student.email || actor.email || "",
+    // The auth email first: the form labels this "email bạn dùng để đăng nhập",
+    // and students.email is a separate, editable contact field that can drift to
+    // a different address — showing that one makes the form claim you are signed
+    // in as somebody else. (`||` not `??` because these columns hold '' not NULL.)
+    email: actor.email || student.email || "",
     dob: student.dob ?? "",
     school: student.school ?? "",
     grade: student.grade ?? "",
