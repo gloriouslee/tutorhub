@@ -1,0 +1,21 @@
+<!--
+  Supabase Dashboard -> Authentication -> Emails -> Templates -> "Confirm signup"
+
+  Must use {{ .TokenHash }}: signup runs server-side in /api/auth/signup, so no
+  PKCE code verifier is ever stored in the student's browser and a
+  {{ .ConfirmationURL }} link cannot be completed. /auth/callback verifies the
+  token hash server-side instead.
+
+  Requires Site URL = https://www.toananhhuy.com (Authentication -> URL Configuration).
+-->
+<h2>Xác nhận đăng ký TutorHub</h2>
+<p>Chào bạn, cảm ơn bạn đã tạo tài khoản học sinh trên TutorHub.</p>
+<p>Nhấn vào liên kết dưới đây để kích hoạt tài khoản:</p>
+<p>
+  <a href="{{ .SiteURL }}/auth/callback?token_hash={{ .TokenHash }}&type=signup&next=/student">
+    Kích hoạt tài khoản
+  </a>
+</p>
+<p>Liên kết có hiệu lực trong 24 giờ.</p>
+<p>Nếu bạn không đăng ký TutorHub, hãy bỏ qua email này.</p>
+<p>— TutorHub</p>
