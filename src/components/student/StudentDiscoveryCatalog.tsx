@@ -9,6 +9,7 @@ import type {
   ClassCatalogItem,
   RegistrationPackage,
 } from "@/lib/class-registration-types";
+import { isDiscoverableClass } from "@/lib/class-catalog";
 import { formatCurrency } from "@/lib/utils";
 import {
   BookOpen,
@@ -381,10 +382,13 @@ export default function StudentDiscoveryCatalog({
     () =>
       catalog.filter(
         (item) =>
-          !query
-          || item.class_name.toLowerCase().includes(query)
-          || item.subject.toLowerCase().includes(query)
-          || item.tutor_name.toLowerCase().includes(query),
+          isDiscoverableClass(item)
+          && (
+            !query
+            || item.class_name.toLowerCase().includes(query)
+            || item.subject.toLowerCase().includes(query)
+            || item.tutor_name.toLowerCase().includes(query)
+          ),
       ),
     [catalog, query],
   );

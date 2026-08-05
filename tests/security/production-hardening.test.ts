@@ -12,6 +12,7 @@ import {
   resolveRegistrationTuition,
   tuitionForPackage,
 } from "../../src/lib/registration-pricing";
+import { isDiscoverableClass } from "../../src/lib/class-catalog";
 
 const read = (path: string) => readFile(path, "utf8");
 
@@ -70,6 +71,15 @@ test("class registration tuition resolves all three session package prices", () 
   assert.equal(tuitionForPackage(tuition, "online"), 90_000);
   assert.equal(tuitionForPackage(tuition, "advanced"), 110_000);
   assert.equal(tuitionForPackage(tuition, "offline"), 150_000);
+});
+
+test("class discovery hides enrolled and active registration classes", () => {
+  assert.equal(isDiscoverableClass({ enrolled: true, registration_status: null }), false);
+  assert.equal(isDiscoverableClass({ enrolled: false, registration_status: "pending" }), false);
+  assert.equal(isDiscoverableClass({ enrolled: false, registration_status: "approved" }), false);
+  assert.equal(isDiscoverableClass({ enrolled: false, registration_status: "rejected" }), true);
+  assert.equal(isDiscoverableClass({ enrolled: false, registration_status: "cancelled" }), true);
+  assert.equal(isDiscoverableClass({ enrolled: false, registration_status: null }), true);
 });
 
 test("login contains no demo-cookie or enrollment password fallback", async () => {
