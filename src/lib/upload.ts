@@ -46,6 +46,29 @@ export async function uploadClassFile(
   };
 }
 
+export async function uploadQuestionFile(
+  file: File,
+  classId: string,
+  studentId: string,
+): Promise<UploadedFile> {
+  const supabase = createClient();
+  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+  const path = `${classId}/submissions/${studentId}/questions/${Date.now()}_${safeName}`;
+  const { error } = await supabase.storage
+    .from("homework-submissions")
+    .upload(path, file, { upsert: false, contentType: file.type });
+
+  if (error) throw new Error(error.message);
+
+  return {
+    url: `/api/files?bucket=homework-submissions&path=${encodeURIComponent(path)}`,
+    path,
+    name: file.name,
+    size: formatSize(file.size),
+    file_type: getFileType(file.name),
+  };
+}
+
 export async function uploadProfileAsset(
   file: File,
   kind: "avatar" | "payment-qr",

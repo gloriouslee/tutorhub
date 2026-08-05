@@ -8,7 +8,7 @@ import {
   BookOpen, Calendar, ClipboardList, GraduationCap,
   LayoutDashboard, Bell, User, LogOut,
   Users, DollarSign, Settings, BarChart3, FileText,
-  CheckSquare, BookMarked, MessageSquare, X, Shield,
+  CheckSquare, BookMarked, MessageSquare, CircleHelp, X, Shield,
 } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { UserRole } from "@/types";
@@ -31,6 +31,7 @@ const navConfig: Record<UserRole, NavItem[]> = {
     { label: "Lớp của tôi",href: "/student/classes",        icon: BookOpen },
     { label: "Lịch học",   href: "/student/schedule",       icon: Calendar },
     { label: "Bài tập",    href: "/student/homework",       icon: ClipboardList },
+    { label: "Hỏi đáp",     href: "/student/questions",      icon: CircleHelp },
     { label: "Tài liệu",   href: "/student/materials",      icon: BookMarked },
     { label: "Điểm thi",   href: "/student/scores",         icon: GraduationCap },
     { label: "Thanh toán", href: "/student/payments",       icon: DollarSign },
@@ -52,6 +53,7 @@ const navConfig: Record<UserRole, NavItem[]> = {
     { label: "Bài tập",    href: "/teacher/homework",       icon: ClipboardList },
     { label: "Điểm danh",  href: "/teacher/attendance",     icon: CheckSquare },
     { label: "Bài nộp",    href: "/teacher/submissions",    icon: FileText },
+    { label: "Hỏi đáp",     href: "/teacher/questions",      icon: CircleHelp },
     { label: "Tài liệu",   href: "/teacher/materials",      icon: BookMarked },
     { label: "Học viên",   href: "/teacher/students",       icon: Users },
     { label: "Xu hướng",   href: "/teacher/analytics",      icon: BarChart3 },
@@ -127,6 +129,10 @@ async function computeBadges(
   const result: Record<string, number> = {};
 
   if (role === "student") {
+    const questionSummaryPromise = fetch("/api/questions?summary=1", {
+      cache: "no-store",
+      credentials: "same-origin",
+    }).catch(() => null);
     const [
       { getTeacherHomework, getHwSubmissions, getScheduleNotifications },
       { getSubmissionsByStudent },
@@ -156,6 +162,14 @@ async function computeBadges(
     const schedUnread = scheduleNotifs.filter(n => !deletedIds.has(n.id) && !n.is_read && !readIds.has(n.id)).length;
     const totalUnread = unread + schedUnread;
     if (totalUnread > 0) result["/student/notifications"] = totalUnread;
+
+    const questionResponse = await questionSummaryPromise;
+    if (questionResponse?.ok) {
+      const summary = await questionResponse.json() as { count?: number };
+      if ((summary.count ?? 0) > 0) {
+        result["/student/questions"] = summary.count ?? 0;
+      }
+    }
   }
 
   if (role === "parent") {
@@ -171,14 +185,26 @@ async function computeBadges(
   if (role === "teacher") {
     const { unread } = await unreadBroadcasts("teacher", "tutorhub_teacher_notif_read", "tutorhub_teacher_notif_deleted");
     if (unread > 0) result["/teacher/notifications"] = unread;
-    const registrationResponse = await fetch(
-      "/api/class-registration-requests?status=pending",
-      { cache: "no-store", credentials: "same-origin" },
-    ).catch(() => null);
+    const [registrationResponse, questionResponse] = await Promise.all([
+      fetch(
+        "/api/class-registration-requests?status=pending",
+        { cache: "no-store", credentials: "same-origin" },
+      ).catch(() => null),
+      fetch("/api/questions?summary=1", {
+        cache: "no-store",
+        credentials: "same-origin",
+      }).catch(() => null),
+    ]);
     if (registrationResponse?.ok) {
       const registrations = await registrationResponse.json() as unknown[];
       if (registrations.length > 0) {
         result["/teacher/classes"] = registrations.length;
+      }
+    }
+    if (questionResponse?.ok) {
+      const summary = await questionResponse.json() as { count?: number };
+      if ((summary.count ?? 0) > 0) {
+        result["/teacher/questions"] = summary.count ?? 0;
       }
     }
   }

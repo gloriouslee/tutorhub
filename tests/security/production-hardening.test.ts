@@ -198,6 +198,35 @@ test("class catalog exposes session-only roadmap and sanitized materials", async
   assert.doesNotMatch(catalogRoute, /video_url|file_url|exam_content/);
 });
 
+test("class questions are private, class-scoped conversations", async () => {
+  const collectionRoute = await read("src/app/api/questions/route.ts");
+  const messageRoute = await read(
+    "src/app/api/questions/[id]/messages/route.ts",
+  );
+  const statusRoute = await read("src/app/api/questions/[id]/route.ts");
+  const server = await read("src/lib/class-question-server.ts");
+  const sidebar = await read("src/components/layout/Sidebar.tsx");
+  const migration = await read(
+    "supabase/migrations/20260805120000_class_questions.sql",
+  );
+
+  assert.match(collectionRoute, /actor\.role !== "student" && actor\.role !== "teacher"/);
+  assert.match(collectionRoute, /\.contains\("student_ids", \[actor\.studentId\]\)/);
+  assert.match(collectionRoute, /getTeacherClassIds/);
+  assert.match(collectionRoute, /hasValidMutationOrigin/);
+  assert.match(collectionRoute, /consumeRateLimit/);
+  assert.match(messageRoute, /getQuestionForActor/);
+  assert.match(messageRoute, /question\.status === "closed"/);
+  assert.match(statusRoute, /getQuestionForActor/);
+  assert.match(server, /homework-submissions/);
+  assert.match(server, /submissions\/\$\{studentId\}\/questions/);
+  assert.match(sidebar, /\/student\/questions/);
+  assert.match(sidebar, /\/teacher\/questions/);
+  assert.match(migration, /force row level security/);
+  assert.match(migration, /revoke all on public\.class_questions from public, anon, authenticated/);
+  assert.doesNotMatch(migration, /grant .*class_questions to authenticated/);
+});
+
 test("password recovery follows Supabase reset and update flow", async () => {
   const forgotPage = await read("src/app/forgot-password/page.tsx");
   assert.match(forgotPage, /resetPasswordForEmail/);
