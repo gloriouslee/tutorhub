@@ -3,6 +3,7 @@ import "server-only";
 import { createServerClient } from "@supabase/ssr";
 import type { NextRequest, NextResponse } from "next/server";
 import { logEvent } from "@/lib/logger";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { isCompleteStudentProfile } from "@/lib/validation";
 
 export type UserRole = "student" | "parent" | "teacher" | "admin";
@@ -77,6 +78,12 @@ export async function getRequestIdentity(
   const userId = claims.sub;
   const email = typeof claims.email === "string" ? claims.email : null;
   const metadataRole = claims.app_metadata?.role;
+  // The verified JWT establishes who the caller is. Read the matching account
+  // rows through the server client so every authorization surface sees the same
+  // authoritative data. In particular, onboarding writes with the server client;
+  // reading the result through an RLS-scoped token can hide that same row when
+  // token visibility or deployed policies drift, pinning a complete profile here.
+  const identityStore = createAdminClient();
 
   type RoleEntity = {
     id: string;
@@ -93,7 +100,7 @@ export async function getRequestIdentity(
     // silently resolve to no entity — leaving the caller with no studentId and
     // no way to use the app.
     if (role === "student") {
-      const { data: rows, error } = await supabase
+      const { data: rows, error } = await identityStore
         .from("students")
         .select("id, full_name, dob, school, grade")
         .eq("user_id", userId)
@@ -132,7 +139,7 @@ export async function getRequestIdentity(
       role === "teacher"
         ? "teachers"
         : "parents";
-    const { data: rows } = await supabase
+    const { data: rows } = await identityStore
       .from(table)
       .select("id, full_name")
       .eq("user_id", userId)
@@ -153,7 +160,7 @@ export async function getRequestIdentity(
     ? loadRoleEntity(metadataRole)
     : Promise.resolve(null);
   const [profileResult, metadataEntity] = await Promise.all([
-    supabase
+    identityStore
       .from("profiles")
       .select("role, must_reset_password, phone, disabled")
       .eq("id", userId)
@@ -178,7 +185,7 @@ export async function getRequestIdentity(
       user_id: userId,
       reason: profileResult.error.message,
     });
-    const legacyProfile = await supabase
+    const legacyProfile = await identityStore
       .from("profiles")
       .select("role, phone")
       .eq("id", userId)

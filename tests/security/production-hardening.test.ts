@@ -295,6 +295,11 @@ test("incomplete student profiles are forced through onboarding", async () => {
   const identity = await read("src/lib/api-auth.ts");
   assert.match(identity, /isCompleteStudentProfile/);
   assert.match(identity, /profileComplete/);
+  assert.match(identity, /createAdminClient/);
+  assert.match(identity, /identityStore\s*\.from\("students"\)/);
+  assert.match(identity, /identityStore\s*\.from\("profiles"\)/);
+  assert.doesNotMatch(identity, /supabase\s*\.from\("students"\)/);
+  assert.doesNotMatch(identity, /supabase\s*\.from\("profiles"\)/);
 
   const onboarding = await read("src/app/student/onboarding/page.tsx");
   assert.match(onboarding, /\/api\/account\/profile/);

@@ -226,7 +226,7 @@ export default function StudentOnboardingPage() {
         setError(
           missing.length > 0
             ? `Hệ thống chưa nhận được: ${missing.join(", ")}. Vui lòng điền lại các trường đó rồi lưu.`
-            : "Hồ sơ đã lưu đủ nhưng phiên đăng nhập chưa nhận ra. Vui lòng đăng xuất rồi đăng nhập lại.",
+            : "Hồ sơ đã lưu đủ nhưng hệ thống chưa đồng bộ được. Vui lòng tải lại trang; nếu vẫn lỗi hãy liên hệ quản trị viên.",
         );
         setSubmitting(false);
         return;
