@@ -167,10 +167,28 @@ async function getEntity<T>(
       writeLocal(key, data);
       return data;
     }
-  } catch { /* offline hoặc chưa cấu hình — dùng cache */ }
+    // Một truy vấn LỖI không giống "bảng rỗng", nhưng cả hai đều rơi xuống dưới
+    // và trả về [] — nên RLS chặn, thiếu hàm helper, hay sai quyền đều hiện ra
+    // thành "không có dữ liệu" và không ai chẩn đoán được. Ít nhất phải ghi ra.
+    if (error) reportQueryFailure(table, error);
+  } catch (thrown) {
+    // Mất mạng hoặc chưa cấu hình — dùng cache. Vẫn ghi lại để phân biệt.
+    reportQueryFailure(table, thrown);
+  }
   const local = readLocal<T>(key);
   if (local !== null) return local;
   return [];
+}
+
+function reportQueryFailure(table: string, error: unknown) {
+  if (typeof console === "undefined") return;
+  const detail =
+    error && typeof error === "object" && "message" in error
+      ? String((error as { message?: unknown }).message)
+      : String(error);
+  console.error(
+    `[TutorHub] Không đọc được bảng "${table}" — danh sách sẽ hiện rỗng. Nguyên nhân: ${detail}`,
+  );
 }
 
 async function upsertEntity<T extends { id: string }>(
