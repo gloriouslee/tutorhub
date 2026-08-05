@@ -171,6 +171,14 @@ test("class registration is student-created and teacher-reviewed", async () => {
   assert.match(reviewRoute, /hasValidMutationOrigin/);
   assert.doesNotMatch(reviewRoute, /role !== "admin"/);
 
+  const reviewPanel = await read("src/components/teacher/StudentsTab.tsx");
+  const classDetail = await read(
+    "src/app/teacher/classes/[classId]/page.tsx",
+  );
+  assert.match(reviewPanel, /resetAccountContextCache\(\)/);
+  assert.match(reviewPanel, /await onRegistrationApproved/);
+  assert.match(classDetail, /setStudents\(await getStudents\(\)\)/);
+
   const migration = await read(
     "supabase/migrations/20260729160000_class_registration_packages.sql",
   );

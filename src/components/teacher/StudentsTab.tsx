@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { ProgressBar } from "@/components/shared";
 import { type StudentPackage } from "@/lib/storage";
 import type { ClassRegistrationRequest } from "@/lib/class-registration-types";
+import { resetAccountContextCache } from "@/hooks/useAccountContext";
 import { formatCurrency } from "@/lib/utils";
 import { Users, Trash2, MessageSquare, Clock, CheckCircle2, XCircle, ArrowRight } from "lucide-react";
 import { PACKAGE_TYPES } from "./classDetail.types";
@@ -35,7 +36,7 @@ export default function StudentsTab({
   onRegistrationApproved: (
     studentId: string,
     pkg: StudentPackage,
-  ) => void;
+  ) => void | Promise<void>;
   onSetPackage: (studentId: string, pkg: StudentPackage) => void;
   onOpenComment: (student: any) => void;
   onRemoveStudent: (student: any) => void;
@@ -81,6 +82,7 @@ export default function StudentsTab({
     setReviewingId(request.id);
     setRequestError("");
     try {
+      const destinationClassId = destinations[request.id] ?? classId;
       const response = await fetch(
         `/api/class-registration-requests/${encodeURIComponent(request.id)}`,
         {
@@ -90,7 +92,7 @@ export default function StudentsTab({
           body: JSON.stringify({
             action,
             assigned_class_id:
-              action === "approve" ? destinations[request.id] ?? classId : null,
+              action === "approve" ? destinationClassId : null,
           }),
         },
       );
@@ -100,16 +102,17 @@ export default function StudentsTab({
       }
       setRequests((items) => items.filter((item) => item.id !== request.id));
       const roster = result.result?.student_ids;
-      if (
-        action === "approve"
-        && destinations[request.id] === classId
-        && Array.isArray(roster)
-      ) {
-        onRosterChanged(roster.map(String));
-        onRegistrationApproved(
-          request.student_id,
-          request.requested_package ?? "online",
-        );
+      if (action === "approve") {
+        // The account context keeps class rosters for one minute. Invalidate it
+        // immediately so every teacher page sees the enrollment just committed.
+        resetAccountContextCache();
+        if (destinationClassId === classId && Array.isArray(roster)) {
+          onRosterChanged(roster.map(String));
+          await onRegistrationApproved(
+            request.student_id,
+            request.requested_package ?? "online",
+          );
+        }
       }
     } catch (error) {
       const code = error instanceof Error ? error.message : "";

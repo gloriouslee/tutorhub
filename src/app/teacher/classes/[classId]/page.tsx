@@ -495,11 +495,14 @@ export default function TeacherClassDetailPage() {
     await saveStudentPackages(classId, updated);
   }
 
-  function handleRegistrationApproved(
+  async function handleRegistrationApproved(
     studentId: string,
     pkg: StudentPackage,
   ) {
     setStudentPackages((current) => ({ ...current, [studentId]: pkg }));
+    // The initial teacher-scoped read cannot include a pending student. Once the
+    // approval commits, load again so the newly authorized profile is rendered.
+    setStudents(await getStudents());
   }
 
   const handleSaveComment = async (studentId: string, text: string, date: string, rating: number) => {
