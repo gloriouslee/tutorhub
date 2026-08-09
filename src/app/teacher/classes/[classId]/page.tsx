@@ -26,6 +26,11 @@ import { toLocalDateKey } from "@/lib/utils";
 import { ClassSchedule, type Student } from "@/types";
 import { useTeacherContext } from "@/hooks/useTeacherContext";
 import {
+  resolveTeacherClassWorkspace,
+  type CurriculumContentFilter,
+  type TeacherResourceView,
+} from "@/lib/class-workspace-tabs";
+import {
   BookOpen, Users, ArrowLeft, FileText, Plus,
   Calendar, Presentation, StickyNote,
   CalendarDays, CheckSquare, Map, Wallet,
@@ -89,24 +94,17 @@ const SessionNotesPanel = dynamic(() => import("@/components/teacher/SessionNote
 const UploadModal = dynamic(() => import("@/components/teacher/UploadModal"));
 const FeedbackModal = dynamic(() => import("@/components/teacher/FeedbackModal"));
 
-type TabKey = "overview" | "curriculum" | "sessions" | "homework" | "schedule" | "lectures" | "materials" | "notes" | "students" | "tuition";
+type TabKey = "overview" | "curriculum" | "sessions" | "homework" | "resources" | "schedule" | "lectures" | "materials" | "notes" | "students" | "tuition";
 
 const TABS: { key: TabKey; label: string; icon: React.ElementType }[] = [
   { key: "overview",    label: "Tổng quan",  icon: BookOpen },
-  { key: "curriculum",  label: "Lộ trình",   icon: Map },
-  { key: "sessions",    label: "Buổi học",   icon: CalendarDays },
-  { key: "homework",    label: "Bài tập",    icon: CheckSquare },
+  { key: "curriculum",  label: "Lộ trình & nội dung", icon: Map },
+  { key: "homework",    label: "Bài tập & chấm", icon: CheckSquare },
+  { key: "sessions",    label: "Vận hành buổi học", icon: CalendarDays },
+  { key: "resources",   label: "Tài nguyên", icon: FileText },
   { key: "students",    label: "Học viên",   icon: Users },
-  { key: "schedule",    label: "Lịch học",   icon: Calendar },
-  { key: "lectures",    label: "Bài giảng",  icon: Presentation },
-  { key: "materials",   label: "Tài liệu",   icon: FileText },
-  { key: "notes",       label: "Ghi chú",    icon: StickyNote },
   { key: "tuition",    label: "Học phí",    icon: Wallet },
 ];
-
-// ── Main page ────────────────────────────────────────────────────────────────
-
-const VALID_TABS: TabKey[] = TABS.map(t => t.key);
 
 export default function TeacherClassDetailPage() {
   const params = useParams();
@@ -118,19 +116,60 @@ export default function TeacherClassDetailPage() {
   // Tab hiện tại đồng bộ với URL (?tab=) để nút back của trình duyệt khôi phục đúng tab.
   // Đọc từ URL khi mount + khi back/forward (popstate); mặc định "overview" để khớp SSR.
   const [activeTab, setActiveTabState] = useState<TabKey>("overview");
+  const [curriculumContentFilter, setCurriculumContentFilter] = useState<CurriculumContentFilter>("all");
+  const [resourceView, setResourceView] = useState<TeacherResourceView>("materials");
+  const [operationsView, setOperationsView] = useState<"sessions" | "schedule">("sessions");
   useEffect(() => {
     const sync = () => {
-      const t = new URLSearchParams(window.location.search).get("tab") as TabKey | null;
-      setActiveTabState(t && VALID_TABS.includes(t) ? t : "overview");
+      const sp = new URLSearchParams(window.location.search);
+      const resolved = resolveTeacherClassWorkspace(sp.get("tab"), sp.get("content"));
+      setActiveTabState(resolved.tab);
+      setCurriculumContentFilter(resolved.content);
+      setResourceView(resolved.resource);
+      setOperationsView(resolved.operations);
+
+      const rawTab = sp.get("tab");
+      if (rawTab && rawTab !== resolved.tab) {
+        sp.set("tab", resolved.tab);
+        if (resolved.tab === "curriculum" && resolved.content !== "all") sp.set("content", resolved.content);
+        else if (resolved.tab === "sessions" && resolved.operations === "schedule") sp.set("content", "schedule");
+        else if (resolved.tab === "resources") sp.set("content", resolved.resource);
+        else sp.delete("content");
+        window.history.replaceState(null, "", `?${sp.toString()}`);
+      }
     };
     sync();
     window.addEventListener("popstate", sync);
     return () => window.removeEventListener("popstate", sync);
   }, []);
   const setActiveTab = (key: TabKey) => {
-    setActiveTabState(key);
+    const resolved = resolveTeacherClassWorkspace(key);
+    setActiveTabState(resolved.tab);
+    setCurriculumContentFilter(resolved.content);
+    setResourceView(resolved.resource);
+    setOperationsView(resolved.operations);
     const sp = new URLSearchParams(window.location.search);
-    sp.set("tab", key);
+    sp.set("tab", resolved.tab);
+    if (resolved.tab === "curriculum" && resolved.content !== "all") sp.set("content", resolved.content);
+    else if (resolved.tab === "sessions" && resolved.operations === "schedule") sp.set("content", "schedule");
+    else if (resolved.tab === "resources") sp.set("content", resolved.resource);
+    else sp.delete("content");
+    router.replace(`?${sp.toString()}`, { scroll: false });
+  };
+  const setSessionWorkspaceView = (view: "sessions" | "schedule") => {
+    setActiveTabState("sessions");
+    setOperationsView(view);
+    const sp = new URLSearchParams(window.location.search);
+    sp.set("tab", "sessions");
+    if (view === "schedule") sp.set("content", "schedule"); else sp.delete("content");
+    router.replace(`?${sp.toString()}`, { scroll: false });
+  };
+  const setResourceWorkspaceView = (view: TeacherResourceView) => {
+    setActiveTabState("resources");
+    setResourceView(view);
+    const sp = new URLSearchParams(window.location.search);
+    sp.set("tab", "resources");
+    sp.set("content", view);
     router.replace(`?${sp.toString()}`, { scroll: false });
   };
   // "Xem & chấm" ở tab Bài tập → chuyển sang tab Lộ trình và mở trình chấm đúng bài
@@ -138,6 +177,7 @@ export default function TeacherClassDetailPage() {
   const gradeExamInCurriculum = (lessonId: string) => {
     setGradeLessonId(lessonId);
     setActiveTabState("curriculum");
+    setCurriculumContentFilter("all");
     const sp = new URLSearchParams(window.location.search);
     sp.set("tab", "curriculum");
     router.replace(`?${sp.toString()}`, { scroll: false });
@@ -198,9 +238,10 @@ export default function TeacherClassDetailPage() {
     getClassMaterials(classId).then(setUploadedMaterials);
   }, [classId]);
 
-  // Tài liệu / Bài giảng nguồn từ Lộ trình — hiển thị ở tab Tài liệu / Bài giảng.
-  const [currMaterials, setCurrMaterials] = useState<StoredClassMaterial[]>([]);
-  const [currLectures, setCurrLectures] = useState<StoredClassMaterial[]>([]);
+  // Vẫn lập chỉ mục nội dung lộ trình cho các luồng liên quan; thư viện chỉ hiển thị
+  // tài nguyên độc lập để tránh trùng với nội dung đã nằm trong Lộ trình.
+  const [, setCurrMaterials] = useState<StoredClassMaterial[]>([]);
+  const [, setCurrLectures] = useState<StoredClassMaterial[]>([]);
 
   // Student packages per class (persisted to localStorage)
   const [studentPackages, setStudentPackages] = useState<Record<string, StudentPackage>>({});
@@ -236,7 +277,7 @@ export default function TeacherClassDetailPage() {
       const today = new Date().toISOString().slice(0, 10);
       const map: Record<string, CurriculumSessionData> = {};
       const fileHws: Homework[] = [];
-      const examLessons: { id: string; title: string; description?: string; date?: string; assigned_to?: string[] | null; exam_status?: "draft" | "open" | "closed"; opens_at?: string }[] = [];
+      const examLessons: { id: string; title: string; description?: string; date?: string; assigned_to?: string[] | null; exam_status?: "draft" | "open" | "closed"; opens_at?: string; chapter_id: string; chapter_title: string; chapter_order: number; session_id: string; session_title: string; session_order: number }[] = [];
       const currMats: StoredClassMaterial[] = [];
       const currLecs: StoredClassMaterial[] = [];
       for (const ch of chapters) {
@@ -253,6 +294,8 @@ export default function TeacherClassDetailPage() {
                 created_at: s.date ?? today,
                 assigned_to: lesson.assigned_to ?? null,
                 source: "curriculum",
+                chapter_id: ch.id, chapter_title: ch.title, chapter_order: chapters.indexOf(ch),
+                session_id: s.id, session_title: s.title, session_order: ch.sessions.indexOf(s),
                 kind: "file",
                 file_url: lesson.file_url,
               });
@@ -261,6 +304,8 @@ export default function TeacherClassDetailPage() {
                 id: lesson.id, title: lesson.title, description: lesson.description,
                 date: s.date, assigned_to: lesson.assigned_to ?? null,
                 exam_status: lesson.exam_status ?? "draft", opens_at: lesson.exam_opens_at,
+                chapter_id: ch.id, chapter_title: ch.title, chapter_order: chapters.indexOf(ch),
+                session_id: s.id, session_title: s.title, session_order: ch.sessions.indexOf(s),
               });
             } else if (lesson.type === "material") {
               const u = (lesson.file_url ?? "").toLowerCase();
@@ -319,6 +364,8 @@ export default function TeacherClassDetailPage() {
           created_at: ex.date ?? today,
           assigned_to: ex.assigned_to ?? null,
           source: "curriculum" as const,
+          chapter_id: ex.chapter_id, chapter_title: ex.chapter_title, chapter_order: ex.chapter_order,
+          session_id: ex.session_id, session_title: ex.session_title, session_order: ex.session_order,
           kind: "exam" as const,
           exam_status: ex.exam_status,
           exam_results,
@@ -450,10 +497,6 @@ export default function TeacherClassDetailPage() {
     );
   }
 
-  const materials = [
-    ...uploadedMaterials,
-    ...currMaterials,
-  ];
   const notes = Object.entries(sessionNotes)
     .filter(([, content]) => content.trim().length > 0)
     .map(([date, content]) => ({
@@ -618,12 +661,12 @@ export default function TeacherClassDetailPage() {
               onlineLink={onlineLink}
               nextSession={nextSession}
               nextSessionContent={nextSession ? curriculumByDate[nextSession.date] : undefined}
-              onEditSchedule={() => setActiveTab("schedule")}
+              onEditSchedule={() => setSessionWorkspaceView("schedule")}
               onQuickAdd={type => {
-                setActiveTab(type === "lecture" ? "lectures" : type === "material" ? "materials" : "notes");
+                setResourceWorkspaceView(type === "lecture" ? "lectures" : type === "material" ? "materials" : "notes");
                 setUploadModal(type);
               }}
-              onSetupOnlineLink={() => setActiveTab("schedule")}
+              onSetupOnlineLink={() => setSessionWorkspaceView("schedule")}
               onOpenCurriculum={() => setActiveTab("curriculum")}
               onOpenHomework={() => setActiveTab("homework")}
               onCreateHomework={() => setHomeworkModal({ open: true })}
@@ -635,33 +678,64 @@ export default function TeacherClassDetailPage() {
           {/* ── Curriculum ── */}
           {activeTab === "curriculum" && (
             <CurriculumTab
+              key={`curriculum:${curriculumContentFilter}`}
               classId={classId}
               schedule={scheduleForDisplay}
               students={classStudents}
               gradeLessonId={gradeLessonId}
               onGradingOpened={() => setGradeLessonId(null)}
+              initialTypeFilter={curriculumContentFilter}
             />
           )}
 
-          {/* ── Sessions ── */}
+          {/* ── Vận hành buổi học: buổi học, chuyên cần, lịch và liên kết ── */}
           {activeTab === "sessions" && (
-            <SessionsTab
-              classId={classId}
-              upcomingSessions={upcomingSessions}
-              pastSessions={pastSessions}
-              showPastSessions={showPastSessions}
-              setShowPastSessions={setShowPastSessions}
-              curriculumByDate={curriculumByDate}
-              sessionNotes={sessionNotes}
-              classStudents={classStudents}
-              savedAttendanceRecords={savedAttendanceRecords}
-              setSavedAttendanceRecords={setSavedAttendanceRecords}
-              openAttendanceDate={openAttendanceDate}
-              setOpenAttendanceDate={setOpenAttendanceDate}
-              setHomeworkModalForSession={setHomeworkModalForSession}
-              setSessionNotesPanel={setSessionNotesPanel}
-              getAttendanceStatsForDate={getAttendanceStatsForDate}
-            />
+            <div className="space-y-4">
+              <div className="flex w-fit rounded-xl border border-border bg-card p-1 shadow-sm" aria-label="Khu vực vận hành lớp học">
+                <button type="button" onClick={() => setSessionWorkspaceView("sessions")} className={`flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition ${operationsView === "sessions" ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:bg-muted"}`}>
+                  <CalendarDays className="h-3.5 w-3.5" /> Buổi học & chuyên cần
+                </button>
+                <button type="button" onClick={() => setSessionWorkspaceView("schedule")} className={`flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition ${operationsView === "schedule" ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:bg-muted"}`}>
+                  <Calendar className="h-3.5 w-3.5" /> Lịch & liên kết học
+                </button>
+              </div>
+
+              {operationsView === "sessions" ? (
+                <SessionsTab
+                  classId={classId}
+                  upcomingSessions={upcomingSessions}
+                  pastSessions={pastSessions}
+                  showPastSessions={showPastSessions}
+                  setShowPastSessions={setShowPastSessions}
+                  curriculumByDate={curriculumByDate}
+                  sessionNotes={sessionNotes}
+                  classStudents={classStudents}
+                  savedAttendanceRecords={savedAttendanceRecords}
+                  setSavedAttendanceRecords={setSavedAttendanceRecords}
+                  openAttendanceDate={openAttendanceDate}
+                  setOpenAttendanceDate={setOpenAttendanceDate}
+                  setHomeworkModalForSession={setHomeworkModalForSession}
+                  setSessionNotesPanel={setSessionNotesPanel}
+                  getAttendanceStatsForDate={getAttendanceStatsForDate}
+                />
+              ) : currentSchedule === null ? (
+                <DeferredPanelFallback />
+              ) : (
+                <ScheduleTab
+                  classId={classId}
+                  className={cls.class_name}
+                  currentSchedule={currentSchedule}
+                  onlineLink={onlineLink}
+                  setOnlineLink={setOnlineLink}
+                  onlineLinkDraft={onlineLinkDraft}
+                  setOnlineLinkDraft={setOnlineLinkDraft}
+                  linkSaved={linkSaved}
+                  setLinkSaved={setLinkSaved}
+                  onSaveOnlineLink={handleSaveOnlineLink}
+                  onSaved={newSchedule => setCurrentSchedule(newSchedule)}
+                />
+              )}
+            </div>
           )}
 
           {/* ── Homework ── */}
@@ -689,41 +763,31 @@ export default function TeacherClassDetailPage() {
             )
           )}
 
-          {/* ── Schedule ── */}
-          {activeTab === "schedule" && currentSchedule !== null && (
-            <ScheduleTab
-              classId={classId}
-              className={cls.class_name}
-              currentSchedule={currentSchedule}
-              onlineLink={onlineLink}
-              setOnlineLink={setOnlineLink}
-              onlineLinkDraft={onlineLinkDraft}
-              setOnlineLinkDraft={setOnlineLinkDraft}
-              linkSaved={linkSaved}
-              setLinkSaved={setLinkSaved}
-              onSaveOnlineLink={handleSaveOnlineLink}
-              onSaved={newSchedule => setCurrentSchedule(newSchedule)}
-            />
-          )}
+          {/* ── Tài nguyên độc lập, tách khỏi nội dung đã xếp trong lộ trình ── */}
+          {activeTab === "resources" && (
+            <div className="space-y-4">
+              <div className="flex w-fit rounded-xl border border-border bg-card p-1 shadow-sm" aria-label="Loại tài nguyên">
+                <button type="button" onClick={() => setResourceWorkspaceView("lectures")} className={`flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition ${resourceView === "lectures" ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:bg-muted"}`}>
+                  <Presentation className="h-3.5 w-3.5" /> Bài giảng
+                </button>
+                <button type="button" onClick={() => setResourceWorkspaceView("materials")} className={`flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition ${resourceView === "materials" ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:bg-muted"}`}>
+                  <FileText className="h-3.5 w-3.5" /> Tài liệu
+                </button>
+                <button type="button" onClick={() => setResourceWorkspaceView("notes")} className={`flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition ${resourceView === "notes" ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:bg-muted"}`}>
+                  <StickyNote className="h-3.5 w-3.5" /> Ghi chú
+                </button>
+              </div>
 
-          {/* ── Lectures ── */}
-          {activeTab === "lectures" && (
-            <LecturesTab classId={classId} lectures={[]} materials={[...uploadedMaterials, ...currLectures]} addButton={addButton("lecture", "Thêm bài giảng")} setUploadedMaterials={setUploadedMaterials} />
-          )}
-
-          {/* ── Materials ── */}
-          {activeTab === "materials" && (
-            <MaterialsTab
-              classId={classId}
-              materials={materials}
-              addButton={addButton("material", "Tải lên tài liệu")}
-              setUploadedMaterials={setUploadedMaterials}
-            />
-          )}
-
-          {/* ── Notes ── */}
-          {activeTab === "notes" && (
-            <NotesTab classId={classId} notes={notes} materials={uploadedMaterials} addButton={addButton("note", "Viết ghi chú")} setUploadedMaterials={setUploadedMaterials} />
+              {resourceView === "lectures" && (
+                <LecturesTab classId={classId} lectures={[]} materials={uploadedMaterials} addButton={addButton("lecture", "Thêm bài giảng")} setUploadedMaterials={setUploadedMaterials} />
+              )}
+              {resourceView === "materials" && (
+                <MaterialsTab classId={classId} materials={uploadedMaterials} addButton={addButton("material", "Tải lên tài liệu")} setUploadedMaterials={setUploadedMaterials} />
+              )}
+              {resourceView === "notes" && (
+                <NotesTab classId={classId} notes={notes} materials={uploadedMaterials} addButton={addButton("note", "Viết ghi chú")} setUploadedMaterials={setUploadedMaterials} />
+              )}
+            </div>
           )}
 
           {/* ── Students ── */}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,8 @@ import {
   FileText,
   GraduationCap,
   Loader2,
+  ListTree,
+  Map as MapIcon,
   MessageSquareText,
   NotebookPen,
   RotateCcw,
@@ -36,12 +38,20 @@ export interface StudentClassHomeworkItem {
   exam_done?: boolean;
   exam_score?: number;
   exam_total?: number;
+  source?: "curriculum";
+  chapter_id?: string;
+  chapter_title?: string;
+  chapter_order?: number;
+  session_id?: string;
+  session_title?: string;
+  session_order?: number;
 }
 
 type HomeworkState = "loading" | "todo" | "overdue" | "returned" | "submitted" | "graded" | "done";
 type FilterKey = "todo" | "returned" | "submitted" | "done" | "all";
 type TypeFilter = "all" | "file" | "exam";
 type SortKey = "priority" | "due" | "newest";
+type ViewMode = "priority" | "curriculum";
 
 type ResolvedHomework = {
   homework: StudentClassHomeworkItem;
@@ -130,6 +140,23 @@ function stateStyles(state: HomeworkState) {
 
 function actionFor(item: ResolvedHomework, classId: string) {
   const homework = item.homework;
+  if (homework.source === "curriculum") {
+    const needsSubmission = item.state === "todo" || item.state === "overdue" || item.state === "returned";
+    return {
+      href: `/student/classes/${classId}/learn/${homework.id}`,
+      label: homework.kind === "exam"
+        ? homework.exam_done ? "Xem kết quả" : item.state === "overdue" ? "Xem chi tiết" : "Làm bài"
+        : item.state === "returned"
+          ? "Sửa và nộp lại"
+          : needsSubmission
+            ? "Nộp bài"
+            : item.state === "graded"
+              ? "Xem kết quả"
+              : "Xem bài nộp",
+      primary: homework.kind === "exam" ? !homework.exam_done && item.state !== "overdue" : needsSubmission,
+      disabled: false,
+    };
+  }
   if (homework.kind === "exam") {
     return {
       href: `/student/classes/${classId}/exam/${homework.id}`,
@@ -188,6 +215,7 @@ export default function StudentHomeworkTab({
   const [query, setQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
   const [sort, setSort] = useState<SortKey>("priority");
+  const [viewMode, setViewMode] = useState<ViewMode>("priority");
 
   const resolved = useMemo<ResolvedHomework[]>(() => homework.map((item) => {
     const submission = submissions.find((candidate) => (
@@ -255,12 +283,17 @@ export default function StudentHomeworkTab({
         || item.homework.title.toLocaleLowerCase("vi-VN").includes(normalized)
         || item.homework.description?.toLocaleLowerCase("vi-VN").includes(normalized))
       .sort((a, b) => {
+        if (viewMode === "curriculum") {
+          return (a.homework.chapter_order ?? Number.MAX_SAFE_INTEGER) - (b.homework.chapter_order ?? Number.MAX_SAFE_INTEGER)
+            || (a.homework.session_order ?? Number.MAX_SAFE_INTEGER) - (b.homework.session_order ?? Number.MAX_SAFE_INTEGER)
+            || dueAt(a.homework.due_date) - dueAt(b.homework.due_date);
+        }
         if (sort === "due") return dueAt(a.homework.due_date) - dueAt(b.homework.due_date);
         if (sort === "newest") return (b.homework.created_at ?? "").localeCompare(a.homework.created_at ?? "");
         return STATE_PRIORITY[a.state] - STATE_PRIORITY[b.state]
           || dueAt(a.homework.due_date) - dueAt(b.homework.due_date);
       });
-  }, [filter, query, resolved, sort, typeFilter]);
+  }, [filter, query, resolved, sort, typeFilter, viewMode]);
 
   if (assignmentsLoading || (homework.length === 0 && assignmentsRefreshing)) return <HomeworkSkeleton />;
 
@@ -328,6 +361,14 @@ export default function StudentHomeworkTab({
       </section>
 
       <div className="space-y-3 rounded-2xl border border-border bg-card p-3 sm:p-4">
+        <div className="flex w-fit rounded-xl bg-muted/70 p-1" aria-label="Cách nhóm bài tập">
+          <button type="button" onClick={() => setViewMode("priority")} className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${viewMode === "priority" ? "bg-background text-primary shadow-sm" : "text-muted-foreground"}`}>
+            <Sparkles className="h-3.5 w-3.5" /> Theo ưu tiên
+          </button>
+          <button type="button" onClick={() => setViewMode("curriculum")} className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${viewMode === "curriculum" ? "bg-background text-primary shadow-sm" : "text-muted-foreground"}`}>
+            <ListTree className="h-3.5 w-3.5" /> Theo lộ trình
+          </button>
+        </div>
         <div className="flex gap-2 overflow-x-auto pb-1" role="tablist" aria-label="Lọc trạng thái bài tập">
           {FILTERS.map((item) => (
             <button
@@ -376,7 +417,7 @@ export default function StudentHomeworkTab({
         </Card>
       ) : (
         <div className="space-y-3">
-          {displayed.map((item) => {
+          {displayed.map((item, index) => {
             const homeworkItem = item.homework;
             const styles = stateStyles(item.state);
             const action = actionFor(item, classId);
@@ -392,9 +433,24 @@ export default function StudentHomeworkTab({
                     : item.state === "loading"
                       ? Loader2
                       : Clock3;
+            const groupLabel = homeworkItem.chapter_title
+              ? `${homeworkItem.chapter_title} · ${homeworkItem.session_title || "Chưa xếp buổi"}`
+              : "Ngoài lộ trình";
+            const previousHomework = displayed[index - 1]?.homework;
+            const previousGroupLabel = previousHomework
+              ? (previousHomework.chapter_title
+                ? `${previousHomework.chapter_title} · ${previousHomework.session_title || "Chưa xếp buổi"}`
+                : "Ngoài lộ trình")
+              : null;
 
             return (
-              <Card key={homeworkItem.id} className={`overflow-hidden transition hover:-translate-y-0.5 hover:shadow-md ${styles.card}`}>
+              <Fragment key={homeworkItem.id}>
+              {viewMode === "curriculum" && groupLabel !== previousGroupLabel && (
+                <div className="flex items-center gap-2 px-1 pt-2 text-xs font-bold text-foreground">
+                  <MapIcon className="h-3.5 w-3.5 text-primary" /> {groupLabel}
+                </div>
+              )}
+              <Card className={`overflow-hidden transition hover:-translate-y-0.5 hover:shadow-md ${styles.card}`}>
                 <CardContent className="p-0">
                   <div className="flex flex-col gap-4 p-4 sm:flex-row sm:items-start sm:p-5">
                     <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${styles.icon}`}>
@@ -410,6 +466,9 @@ export default function StudentHomeworkTab({
                       {homeworkItem.description && <p className="mt-1.5 line-clamp-2 text-xs leading-relaxed text-muted-foreground sm:text-sm">{homeworkItem.description}</p>}
 
                       <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] text-muted-foreground">
+                        {homeworkItem.chapter_title && (
+                          <span className="flex items-center gap-1.5 font-medium text-primary"><MapIcon className="h-3.5 w-3.5" />{homeworkItem.chapter_title} › {homeworkItem.session_title}</span>
+                        )}
                         <span className="flex items-center gap-1.5"><CalendarDays className="h-3.5 w-3.5" />Hạn nộp <strong className="font-semibold text-foreground">{formatDate(homeworkItem.due_date)}</strong></span>
                         <span className="flex items-center gap-1.5"><TypeIcon className="h-3.5 w-3.5" />{homeworkItem.kind === "exam" ? "Làm trên hệ thống" : "Nộp bài bằng file"}</span>
                         {item.submission?.submitted_at && <span className="flex items-center gap-1.5"><Send className="h-3.5 w-3.5" />Đã nộp {submittedAt(item.submission.submitted_at)}</span>}
@@ -435,6 +494,7 @@ export default function StudentHomeworkTab({
                   </div>
                 </CardContent>
               </Card>
+              </Fragment>
             );
           })}
         </div>

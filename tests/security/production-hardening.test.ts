@@ -18,8 +18,45 @@ import { curriculumReferencesStudentFile } from "../../src/lib/curriculum-file-a
 import { parseExamText } from "../../src/lib/examTextParser";
 import { convertOmmlInDocumentXml, ommlFragmentToLatex } from "../../src/lib/ommlToLatex";
 import { googleDrivePreviewUrl } from "../../src/lib/google-drive";
+import { resolveStudentClassWorkspace, resolveTeacherClassWorkspace } from "../../src/lib/class-workspace-tabs";
 
 const read = (path: string) => readFile(path, "utf8");
+
+test("class workspace URLs normalize legacy and punctuated tab values", () => {
+  assert.deepEqual(resolveStudentClassWorkspace("homework,"), { tab: "homework", content: "all" });
+  assert.deepEqual(resolveStudentClassWorkspace("lectures"), { tab: "curriculum", content: "lecture" });
+  assert.deepEqual(resolveStudentClassWorkspace("attendance"), { tab: "sessions", content: "all" });
+  assert.deepEqual(resolveTeacherClassWorkspace("schedule"), {
+    tab: "sessions", content: "all", resource: "materials", operations: "schedule",
+  });
+  assert.deepEqual(resolveTeacherClassWorkspace("notes"), {
+    tab: "resources", content: "all", resource: "notes", operations: "sessions",
+  });
+  assert.deepEqual(resolveTeacherClassWorkspace("resources", "lectures"), {
+    tab: "resources", content: "all", resource: "lectures", operations: "sessions",
+  });
+});
+
+test("class portals expose curriculum-first workspaces without duplicating legacy tabs", async () => {
+  const studentPage = await read("src/app/student/classes/[classId]/page.tsx");
+  const teacherPage = await read("src/app/teacher/classes/[classId]/page.tsx");
+  const studentHomework = await read("src/components/student/StudentHomeworkTab.tsx");
+  const teacherHomework = await read("src/components/teacher/HomeworkTab.tsx");
+  const studentCurriculum = await read("src/components/student/CurriculumView.tsx");
+
+  assert.match(studentPage, /label: "Học theo lộ trình"/);
+  assert.match(studentPage, /label: "Việc cần làm"/);
+  assert.match(studentPage, /label: "Lịch & chuyên cần"/);
+  assert.match(studentPage, /hw\.session_id === currSession\.id/);
+  assert.match(teacherPage, /label: "Lộ trình & nội dung"/);
+  assert.match(teacherPage, /label: "Bài tập & chấm"/);
+  assert.match(teacherPage, /label: "Vận hành buổi học"/);
+  assert.match(teacherPage, /activeTab === "resources"/);
+  assert.match(studentHomework, /Theo lộ trình/);
+  assert.match(studentHomework, /\/learn\/\$\{homework\.id\}/);
+  assert.match(teacherHomework, /Theo lộ trình/);
+  assert.match(studentCurriculum, /CONTENT_FILTERS/);
+});
 
 test("Google Drive document and video links open in the in-app learning player", async () => {
   assert.equal(

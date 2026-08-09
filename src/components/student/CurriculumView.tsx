@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { type CurriculumChapter, type CurriculumLesson } from "@/lib/storage";
+import type { CurriculumContentFilter } from "@/lib/class-workspace-tabs";
 import {
   AlertTriangle,
   ArrowRight,
@@ -36,6 +37,15 @@ const LESSON_META: Record<LessonType, { label: string; icon: React.ElementType; 
   exam: { label: "Bài kiểm tra", icon: PenSquare, color: "text-rose-600", bg: "bg-rose-100 dark:bg-rose-950" },
 };
 
+const CONTENT_FILTERS: Array<{ key: CurriculumContentFilter; label: string }> = [
+  { key: "all", label: "Tất cả" },
+  { key: "lecture", label: "Bài giảng" },
+  { key: "material", label: "Tài liệu" },
+  { key: "homework", label: "Bài tập" },
+  { key: "exam", label: "Kiểm tra" },
+  { key: "solution", label: "Chữa bài" },
+];
+
 interface Props {
   classId: string;
   watched: Set<string>;
@@ -45,6 +55,7 @@ interface Props {
   isLoading: boolean;
   isRefreshing: boolean;
   onRetry: () => Promise<void>;
+  initialTypeFilter?: CurriculumContentFilter;
 }
 
 function examLocked(lesson: CurriculumLesson, completed: boolean) {
@@ -64,9 +75,11 @@ export default function CurriculumView({
   isLoading,
   isRefreshing,
   onRetry,
+  initialTypeFilter = "all",
 }: Props) {
   const router = useRouter();
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [typeFilter, setTypeFilter] = useState<CurriculumContentFilter>(initialTypeFilter);
 
   useEffect(() => {
     if (!chapters?.[0]) return;
@@ -133,6 +146,19 @@ export default function CurriculumView({
   const totalCount = allLessons.length;
   const completionPct = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
   const actionLabel = completedCount === 0 ? "Bắt đầu học" : completedCount >= totalCount ? "Ôn tập lại" : "Tiếp tục học";
+  const visibleChapters = resolvedChapters
+    .map((chapter) => ({
+      ...chapter,
+      sessions: chapter.sessions
+        .map((session) => ({
+          ...session,
+          lessons: typeFilter === "all"
+            ? session.lessons
+            : session.lessons.filter((lesson) => lesson.type === typeFilter),
+        }))
+        .filter((session) => session.lessons.length > 0),
+    }))
+    .filter((chapter) => chapter.sessions.length > 0);
 
   return (
     <div className="space-y-4">
@@ -207,8 +233,26 @@ export default function CurriculumView({
         </div>
       </div>
 
+      <div className="flex gap-2 overflow-x-auto rounded-xl border border-border/70 bg-card p-2" role="tablist" aria-label="Lọc nội dung lộ trình">
+        {CONTENT_FILTERS.map((item) => (
+          <button
+            key={item.key}
+            type="button"
+            role="tab"
+            aria-selected={typeFilter === item.key}
+            onClick={() => setTypeFilter(item.key)}
+            className={`shrink-0 rounded-lg px-3 py-2 text-xs font-semibold transition ${typeFilter === item.key ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+
       <div className="space-y-3">
-        {resolvedChapters.map((chapter, chapterIndex) => {
+        {visibleChapters.length === 0 && (
+          <div className="rounded-xl border border-dashed border-border py-10 text-center text-sm text-muted-foreground">Không có nội dung thuộc loại này.</div>
+        )}
+        {visibleChapters.map((chapter, chapterIndex) => {
           const chapterLessons = chapter.sessions.flatMap((session) => session.lessons);
           const chapterDone = chapterLessons.filter(isCompleted).length;
           const chapterOpen = expanded.has(chapter.id);

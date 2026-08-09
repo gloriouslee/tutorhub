@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { ClassSchedule } from "@/types";
 import { weekdayIndex } from "@/lib/weekday";
+import type { CurriculumContentFilter } from "@/lib/class-workspace-tabs";
 
 interface StudentLite { id: string; full_name: string }
 
@@ -541,14 +542,14 @@ function InlineEdit({ value, onSave, placeholder }: { value: string; onSave: (v:
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
-export default function CurriculumTab({ classId, schedule, students = [], gradeLessonId, onGradingOpened }: { classId: string; schedule: ClassSchedule[]; students?: StudentLite[]; gradeLessonId?: string | null; onGradingOpened?: () => void }) {
+export default function CurriculumTab({ classId, schedule, students = [], gradeLessonId, onGradingOpened, initialTypeFilter = "all" }: { classId: string; schedule: ClassSchedule[]; students?: StudentLite[]; gradeLessonId?: string | null; onGradingOpened?: () => void; initialTypeFilter?: CurriculumContentFilter }) {
   const router = useRouter();
   const submissionRefreshRevision = useWindowFocusRevision();
   const slots = generateSlots(schedule);
   const [chapters,     setChapters]     = useState<CurriculumChapter[]>([]);
   const [expanded,     setExpanded]     = useState<Set<string>>(new Set());
   const [query,        setQuery]        = useState("");
-  const [typeFilter,   setTypeFilter]   = useState<"all" | LessonType>("all");
+  const [typeFilter,   setTypeFilter]   = useState<"all" | LessonType>(initialTypeFilter);
   const [onlyHidden,   setOnlyHidden]   = useState(false);
   const [lessonModal,  setLessonModal]  = useState<{
     chapterId: string;

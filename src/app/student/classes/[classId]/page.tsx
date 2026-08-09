@@ -15,6 +15,7 @@ import StudentHomeworkTab from "@/components/student/StudentHomeworkTab";
 import StudentOverviewTab from "@/components/student/StudentOverviewTab";
 import { useStudentCurriculum } from "@/hooks/useStudentCurriculum";
 import type { Class } from "@/types";
+import { resolveStudentClassWorkspace, type CurriculumContentFilter } from "@/lib/class-workspace-tabs";
 import {
   BookOpen, Clock, Video, ArrowLeft, FileText, Download,
   PlayCircle, StickyNote, Pin, Eye, ChevronRight, GraduationCap,
@@ -165,6 +166,13 @@ interface HomeworkItem {
   exam_done?: boolean;
   exam_score?: number;
   exam_total?: number;
+  source?: "curriculum";
+  chapter_id?: string;
+  chapter_title?: string;
+  chapter_order?: number;
+  session_id?: string;
+  session_title?: string;
+  session_order?: number;
 }
 
 // Video trong tab Bài giảng: gồm bài giảng (lecture) và video chữa bài (solution).
@@ -207,8 +215,6 @@ function recentFirst(a: { created_at?: string; due_date?: string }, b: { created
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
-const VALID_TABS: TabKey[] = ["overview", "curriculum", "sessions", "attendance", "homework", "materials", "lectures", "notes"];
-
 export default function StudentClassDetailPage() {
   const { studentId, studentName, myClasses, assignedClassId, ready } = useStudentContext();
   const CURRENT_STUDENT_ID = studentId;
@@ -219,19 +225,42 @@ export default function StudentClassDetailPage() {
   // Tab hiện tại đồng bộ với URL (?tab=) để nút back của trình duyệt khôi phục đúng tab.
   // Đọc từ URL khi mount + khi back/forward (popstate); mặc định "overview" để khớp SSR.
   const [activeTab, setActiveTabState] = useState<TabKey>("overview");
+  const [curriculumContentFilter, setCurriculumContentFilter] = useState<CurriculumContentFilter>("all");
   useEffect(() => {
     const sync = () => {
-      const t = new URLSearchParams(window.location.search).get("tab") as TabKey | null;
-      setActiveTabState(t && VALID_TABS.includes(t) ? t : "overview");
+      const sp = new URLSearchParams(window.location.search);
+      const resolved = resolveStudentClassWorkspace(sp.get("tab"), sp.get("content"));
+      setActiveTabState(resolved.tab);
+      setCurriculumContentFilter(resolved.content);
+
+      const rawTab = sp.get("tab");
+      if (rawTab && rawTab !== resolved.tab) {
+        sp.set("tab", resolved.tab);
+        if (resolved.content !== "all") sp.set("content", resolved.content);
+        else sp.delete("content");
+        window.history.replaceState(null, "", `?${sp.toString()}`);
+      }
     };
     sync();
     window.addEventListener("popstate", sync);
     return () => window.removeEventListener("popstate", sync);
   }, []);
   const setActiveTab = (key: TabKey) => {
-    setActiveTabState(key);
+    const resolved = resolveStudentClassWorkspace(key);
+    setActiveTabState(resolved.tab);
+    setCurriculumContentFilter(resolved.content);
     const sp = new URLSearchParams(window.location.search);
-    sp.set("tab", key);
+    sp.set("tab", resolved.tab);
+    if (resolved.content !== "all") sp.set("content", resolved.content);
+    else sp.delete("content");
+    router.replace(`?${sp.toString()}`, { scroll: false });
+  };
+  const openCurriculum = (content: CurriculumContentFilter = "all") => {
+    setActiveTabState("curriculum");
+    setCurriculumContentFilter(content);
+    const sp = new URLSearchParams(window.location.search);
+    sp.set("tab", "curriculum");
+    if (content === "all") sp.delete("content"); else sp.set("content", content);
     router.replace(`?${sp.toString()}`, { scroll: false });
   };
   const [watched,      setWatched]      = useState<Set<string>>(new Set());
@@ -265,7 +294,7 @@ export default function StudentClassDetailPage() {
   const [storedScores, setStoredScores] = useState<StoredExamScore[]>([]);
   // Bài giảng + video chữa bài + tài liệu lấy từ lộ trình của lớp
   const [curriculumLectures, setCurriculumLectures] = useState<LectureCard[]>([]);
-  const [curriculumMaterials, setCurriculumMaterials] = useState<StoredClassMaterial[]>([]);
+  const [, setCurriculumMaterials] = useState<StoredClassMaterial[]>([]);
   // Bộ lọc / tìm kiếm cho các tab (giảm ngợp thông tin)
   const [lecFilter, setLecFilter] = useState<"all" | "lecture" | "solution">("all");
   const [lecQuery, setLecQuery]   = useState("");
@@ -288,8 +317,8 @@ export default function StudentClassDetailPage() {
       if (!m.packages || m.packages.length === 0) return true;
       return studentPkg ? m.packages.includes(studentPkg) : false;
     });
-    return [...curriculumMaterials, ...realMats].sort(recentFirst);
-  }, [uploadedMaterials, studentPkg, curriculumMaterials]);
+    return realMats.sort(recentFirst);
+  }, [uploadedMaterials, studentPkg]);
 
   useEffect(() => {
     // Load submissions for homework status
@@ -340,6 +369,9 @@ export default function StudentClassDetailPage() {
                 description: (lesson as any).description,
                 due_date: (lesson as any).due_date ?? s.date ?? today,
                 created_at: created, kind: "file",
+                source: "curriculum" as const,
+                chapter_id: ch.id, chapter_title: ch.title, chapter_order: curriculumChapters.indexOf(ch),
+                session_id: s.id, session_title: s.title, session_order: ch.sessions.indexOf(s),
               }));
             } else if (lesson.type === "exam") {
               currHomeworkLoaders.push(async () => {
@@ -355,6 +387,9 @@ export default function StudentClassDetailPage() {
                   due_date: (lesson as any).exam_opens_at?.slice(0, 10) ?? s.date ?? today,
                   created_at: created,
                   kind: "exam" as const,
+                  source: "curriculum" as const,
+                  chapter_id: ch.id, chapter_title: ch.title, chapter_order: curriculumChapters.indexOf(ch),
+                  session_id: s.id, session_title: s.title, session_order: ch.sessions.indexOf(s),
                   exam_done: !!result,
                   exam_score: result ? Math.round((result.score + manual) * 100) / 100 : undefined,
                   exam_total: result?.total,
@@ -574,12 +609,10 @@ export default function StudentClassDetailPage() {
 
   const TABS: { key: TabKey; label: string; icon: React.ElementType; badge?: number | string }[] = [
     { key: "overview",    label: "Tổng quan",  icon: BookOpen },
-    { key: "curriculum",  label: "Lộ trình",   icon: Map },
-    { key: "homework",    label: "Bài tập",    icon: CheckCircle2, badge: incompleteClassHomework.length },
-    { key: "sessions",    label: "Buổi học",   icon: CalendarDays },
-    { key: "materials",   label: "Tài liệu",   icon: FileText,     badge: materials.length },
-    { key: "attendance",  label: "Chuyên cần", icon: CheckSquare },
-    { key: "lectures",    label: "Bài giảng",  icon: Presentation, badge: publishedLectures.length },
+    { key: "curriculum",  label: "Học theo lộ trình", icon: Map },
+    { key: "homework",    label: "Việc cần làm", icon: CheckCircle2, badge: incompleteClassHomework.length },
+    { key: "sessions",    label: "Lịch & chuyên cần", icon: CalendarDays },
+    { key: "materials",   label: "Thư viện", icon: FileText, badge: materials.length || undefined },
     { key: "notes",       label: "Ghi chú",    icon: StickyNote,   badge: notes.length > 0 ? notes.length : undefined },
   ];
 
@@ -685,10 +718,10 @@ export default function StudentClassDetailPage() {
               totalLectures={publishedLectures.length}
               attendanceRate={attendanceRate}
               avgScore={avgScore}
-              onOpenCurriculum={() => setActiveTab("curriculum")}
+              onOpenCurriculum={() => openCurriculum()}
               onOpenHomework={() => setActiveTab("homework")}
               onOpenSessions={() => setActiveTab("sessions")}
-              onOpenLectures={() => setActiveTab("lectures")}
+              onOpenLectures={() => openCurriculum("lecture")}
               onOpenNotes={() => setActiveTab("notes")}
               onWatchLecture={(lessonId) => router.push(`/student/classes/${classId}/learn/${lessonId}`)}
             />
@@ -766,11 +799,11 @@ export default function StudentClassDetailPage() {
                     const attMeta = rec ? ATTENDANCE_META[rec.status] : null;
                     const AttIcon = attMeta?.icon;
                     const currSession = curriculumByDate[session.date];
-                    const sessionHomework = classHomework.filter(hw => {
-                      if (!hw.due_date) return false;
-                      const diff = Math.abs(new Date(hw.due_date).getTime() - new Date(session.date).getTime());
-                      return diff <= 7 * 86400 * 1000;
-                    });
+                    // Chỉ hiển thị bài được liên kết đúng buổi trong lộ trình.
+                    // Không đoán theo khoảng ngày vì có thể gắn nhầm bài của buổi kế tiếp.
+                    const sessionHomework = currSession
+                      ? classHomework.filter(hw => hw.session_id === currSession.id)
+                      : [];
                     const sessionDateObj = new Date(session.date + "T12:00:00");
                     const dayName = DAY_VI[schedule.find(sc => DAY_INDEX[sc.day] === sessionDateObj.getDay())?.day ?? ""] ?? "";
                     return (
@@ -854,6 +887,7 @@ export default function StudentClassDetailPage() {
           {/* ── Curriculum ── */}
           {activeTab === "curriculum" && (
             <CurriculumView
+              key={`curriculum:${curriculumContentFilter}`}
               classId={classId}
               watched={watched}
               submissions={submissions.map(s => ({ homework_id: s.homework_id, status: s.status }))}
@@ -862,6 +896,7 @@ export default function StudentClassDetailPage() {
               isLoading={curriculumLoading}
               isRefreshing={curriculumRefreshing}
               onRetry={retryCurriculum}
+              initialTypeFilter={curriculumContentFilter}
             />
           )}
 

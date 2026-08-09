@@ -102,6 +102,12 @@ export interface Homework {
   assigned_to?: string[] | null;
   /** "curriculum" = lấy từ lộ trình, undefined = tạo trực tiếp từ tab Bài tập */
   source?: "curriculum";
+  chapter_id?: string;
+  chapter_title?: string;
+  chapter_order?: number;
+  session_id?: string;
+  session_title?: string;
+  session_order?: number;
   /** "file" = học sinh nộp file (mặc định); "exam" = làm câu hỏi trên hệ thống */
   kind?: "file" | "exam";
   /** File đề bài đính kèm (kind "file") */
