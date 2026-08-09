@@ -962,8 +962,15 @@ export async function getStudentCurriculum(classId: string): Promise<CurriculumC
     `/api/student/curriculum/${encodeURIComponent(classId)}`,
     { cache: "no-store", credentials: "same-origin" },
   );
-  if (!response.ok) return [];
-  return response.json() as Promise<CurriculumChapter[]>;
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null) as { error?: string } | null;
+    const error = new Error(payload?.error || "student_curriculum_unavailable");
+    Object.assign(error, { status: response.status });
+    throw error;
+  }
+  const payload = await response.json() as unknown;
+  if (!Array.isArray(payload)) throw new Error("student_curriculum_invalid_response");
+  return payload as CurriculumChapter[];
 }
 
 export interface StudentLessonProgress {

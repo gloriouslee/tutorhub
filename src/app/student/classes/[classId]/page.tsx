@@ -9,9 +9,10 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { LearningModeBadge } from "@/components/shared";
 import { getSubmissionsByStudent, type SubmissionRecord } from "@/lib/supabase/submissions";
-import { kvGet, getTeacherHomework, getAllTeacherAttendance, getClassScheduleOverride, getStudentPackages, getStudentCurriculum, getStudentLessonProgress, saveStudentLessonProgress, getClassMaterials, getExamResult, getExamScoresByStudent, incrementMaterialDownload, isAssignedToStudent, type StudentPackage, type CurriculumSession, type StoredClassMaterial, type StoredExamScore } from "@/lib/storage";
+import { kvGet, getTeacherHomework, getAllTeacherAttendance, getClassScheduleOverride, getStudentPackages, getStudentLessonProgress, saveStudentLessonProgress, getClassMaterials, getExamResult, getExamScoresByStudent, incrementMaterialDownload, isAssignedToStudent, type StudentPackage, type CurriculumSession, type StoredClassMaterial, type StoredExamScore } from "@/lib/storage";
 import CurriculumView from "@/components/student/CurriculumView";
 import StudentOverviewTab from "@/components/student/StudentOverviewTab";
+import { useStudentCurriculum } from "@/hooks/useStudentCurriculum";
 import type { Class } from "@/types";
 import {
   BookOpen, Clock, Video, ArrowLeft, FileText, Download,
@@ -244,6 +245,17 @@ export default function StudentClassDetailPage() {
     ? (myClasses.find((item) => item.id === classId) ?? null)
     : undefined;
   const tutorId = cls?.tutor_id ?? "";
+  const {
+    chapters: curriculumChapters,
+    error: curriculumError,
+    isLoading: curriculumLoading,
+    isRefreshing: curriculumRefreshing,
+    retry: retryCurriculum,
+  } = useStudentCurriculum({
+    classId,
+    studentId,
+    enabled: ready && Boolean(studentId && cls),
+  });
   const [scheduleOverride, setScheduleOverride] = useState<ClassInfo["schedule"] | null>(null);
   const [teacherHomework, setTeacherHomework] = useState<HomeworkItem[]>([]);
   const [manualHomeworkLoaded, setManualHomeworkLoaded] = useState(false);
@@ -296,9 +308,18 @@ export default function StudentClassDetailPage() {
     });
     // Load attendance records
     loadSavedAttendance(classId, studentId).then(setSavedAttendance);
-    // Load curriculum → build date map + đẩy bài tập / bài giảng / video chữa bài / tài liệu về các tab
+    // Load session notes written by teacher
+    kvGet<Record<string, string>>(`tutorhub_session_notes_${classId}`, {}).then(setSessionNotes);
+  }, [classId, studentId]);
+
+  useEffect(() => {
+    if (curriculumChapters === undefined) {
+      if (!curriculumLoading) setCurriculumHomeworkLoaded(true);
+      return;
+    }
+    let cancelled = false;
     setCurriculumHomeworkLoaded(false);
-    getStudentCurriculum(classId).then(async chapters => {
+    void (async () => {
       const today = new Date().toISOString().slice(0, 10);
       const byDate: Record<string, CurriculumSession> = {};
       const currHomeworkLoaders: Array<() => Promise<HomeworkItem>> = [];
@@ -306,9 +327,9 @@ export default function StudentClassDetailPage() {
       const matCards: StoredClassMaterial[] = [];
       // Tra tiêu đề bài tập (để hiển thị "Chữa cho: …" trên video chữa bài)
       const titleById: Record<string, string> = {};
-      chapters.forEach(ch => ch.sessions.forEach(s => s.lessons.forEach(l => { titleById[l.id] = l.title; })));
+      curriculumChapters.forEach(ch => ch.sessions.forEach(s => s.lessons.forEach(l => { titleById[l.id] = l.title; })));
 
-      for (const ch of chapters) {
+      for (const ch of curriculumChapters) {
         for (const s of ch.sessions) {
           if (s.date) byDate[s.date] = s;
           for (const lesson of s.lessons) {
@@ -368,6 +389,7 @@ export default function StudentClassDetailPage() {
         8,
         (loadHomework) => loadHomework(),
       );
+      if (cancelled) return;
       setCurriculumByDate(byDate);
       setCurriculumLectures(lectureCards);
       setCurriculumMaterials(matCards);
@@ -378,10 +400,11 @@ export default function StudentClassDetailPage() {
           return fresh.length > 0 ? [...prev, ...fresh] : prev;
         });
       }
-    }).catch(() => undefined).finally(() => setCurriculumHomeworkLoaded(true));
-    // Load session notes written by teacher
-    kvGet<Record<string, string>>(`tutorhub_session_notes_${classId}`, {}).then(setSessionNotes);
-  }, [classId, studentId, tutorId]);
+    })().catch(() => undefined).finally(() => {
+      if (!cancelled) setCurriculumHomeworkLoaded(true);
+    });
+    return () => { cancelled = true; };
+  }, [classId, curriculumChapters, curriculumLoading, studentId, tutorId]);
 
   const homeworkLoading =
     !manualHomeworkLoaded
@@ -842,6 +865,11 @@ export default function StudentClassDetailPage() {
               classId={classId}
               watched={watched}
               submissions={submissions.map(s => ({ homework_id: s.homework_id, status: s.status }))}
+              chapters={curriculumChapters}
+              error={curriculumError}
+              isLoading={curriculumLoading}
+              isRefreshing={curriculumRefreshing}
+              onRetry={retryCurriculum}
             />
           )}
 

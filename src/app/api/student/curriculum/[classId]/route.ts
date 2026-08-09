@@ -44,12 +44,15 @@ export async function GET(
   }
   const { classId } = await params;
   const admin = createAdminClient();
-  const { data: enrolled } = await admin
+  const { data: enrolled, error: enrollmentError } = await admin
     .from("classes")
     .select("id")
     .eq("id", classId)
     .contains("student_ids", [actor.studentId])
     .maybeSingle();
+  if (enrollmentError) {
+    return NextResponse.json({ error: "curriculum_unavailable" }, { status: 500 });
+  }
   if (!enrolled) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }

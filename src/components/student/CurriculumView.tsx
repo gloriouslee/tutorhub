@@ -4,8 +4,9 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { getStudentCurriculum, type CurriculumLesson } from "@/lib/storage";
+import { type CurriculumChapter, type CurriculumLesson } from "@/lib/storage";
 import {
+  AlertTriangle,
   ArrowRight,
   BookOpen,
   CalendarDays,
@@ -15,10 +16,12 @@ import {
   Circle,
   FileText,
   ListTree,
+  Loader2,
   Lock,
   NotebookPen,
   PenSquare,
   PlayCircle,
+  RefreshCw,
   Sparkles,
   Video,
 } from "lucide-react";
@@ -37,6 +40,11 @@ interface Props {
   classId: string;
   watched: Set<string>;
   submissions: { homework_id: string; status: "submitted" | "graded" | "returned" }[];
+  chapters: CurriculumChapter[] | undefined;
+  error: Error | null;
+  isLoading: boolean;
+  isRefreshing: boolean;
+  onRetry: () => Promise<void>;
 }
 
 function examLocked(lesson: CurriculumLesson, completed: boolean) {
@@ -47,31 +55,28 @@ function examLocked(lesson: CurriculumLesson, completed: boolean) {
   return true;
 }
 
-export default function CurriculumView({ classId, watched, submissions }: Props) {
+export default function CurriculumView({
+  classId,
+  watched,
+  submissions,
+  chapters,
+  error,
+  isLoading,
+  isRefreshing,
+  onRetry,
+}: Props) {
   const router = useRouter();
-  const [chapters, setChapters] = useState<Awaited<ReturnType<typeof getStudentCurriculum>>>([]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    getStudentCurriculum(classId)
-      .then((data) => {
-        if (cancelled) return;
-        setChapters(data);
-        const open = new Set<string>();
-        if (data[0]) {
-          open.add(data[0].id);
-          if (data[0].sessions[0]) open.add(data[0].sessions[0].id);
-        }
-        setExpanded(open);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => { cancelled = true; };
-  }, [classId]);
+    if (!chapters?.[0]) return;
+    setExpanded((current) => {
+      if (current.size > 0) return current;
+      const open = new Set<string>([chapters[0].id]);
+      if (chapters[0].sessions[0]) open.add(chapters[0].sessions[0].id);
+      return open;
+    });
+  }, [chapters]);
 
   function toggle(id: string) {
     setExpanded((current) => {
@@ -89,7 +94,7 @@ export default function CurriculumView({ classId, watched, submissions }: Props)
     return watched.has(lesson.id);
   }
 
-  if (loading) {
+  if (isLoading) {
     return (
       <div className="space-y-3" role="status" aria-live="polite">
         <div className="h-44 animate-pulse rounded-2xl bg-muted/75" />
@@ -99,7 +104,22 @@ export default function CurriculumView({ classId, watched, submissions }: Props)
     );
   }
 
-  if (chapters.length === 0) {
+  if (error && chapters === undefined) {
+    return (
+      <div className="rounded-2xl border border-amber-200 bg-amber-50/70 px-5 py-12 text-center dark:border-amber-900 dark:bg-amber-950/20">
+        <AlertTriangle className="mx-auto h-10 w-10 text-amber-500" />
+        <p className="mt-3 text-sm font-semibold text-foreground">Không thể tải lộ trình học</p>
+        <p className="mt-1 text-xs text-muted-foreground">Dữ liệu của lớp vẫn được giữ nguyên. Hãy kiểm tra kết nối và thử lại.</p>
+        <Button className="mt-4" size="sm" variant="outline" onClick={() => void onRetry().catch(() => undefined)}>
+          <RefreshCw className="mr-1.5 h-4 w-4" /> Thử lại
+        </Button>
+      </div>
+    );
+  }
+
+  const resolvedChapters = chapters ?? [];
+
+  if (resolvedChapters.length === 0) {
     return (
       <div className="rounded-2xl border-2 border-dashed border-border/60 py-16 text-center">
         <BookOpen className="mx-auto mb-3 h-10 w-10 text-muted-foreground/25" />
@@ -108,7 +128,7 @@ export default function CurriculumView({ classId, watched, submissions }: Props)
     );
   }
 
-  const allLessons = chapters.flatMap((chapter) => chapter.sessions.flatMap((session) => session.lessons));
+  const allLessons = resolvedChapters.flatMap((chapter) => chapter.sessions.flatMap((session) => session.lessons));
   const completedCount = allLessons.filter(isCompleted).length;
   const totalCount = allLessons.length;
   const completionPct = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
@@ -116,6 +136,16 @@ export default function CurriculumView({ classId, watched, submissions }: Props)
 
   return (
     <div className="space-y-4">
+      {error && (
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50/70 px-3.5 py-2.5 text-xs dark:border-amber-900 dark:bg-amber-950/20">
+          <span className="flex items-center gap-2 text-amber-800 dark:text-amber-300">
+            <AlertTriangle className="h-4 w-4 shrink-0" /> Không thể cập nhật lộ trình. Bạn đang xem dữ liệu đã lưu gần nhất.
+          </span>
+          <Button size="sm" variant="ghost" className="h-7 shrink-0 px-2 text-xs" onClick={() => void onRetry().catch(() => undefined)}>
+            Thử lại
+          </Button>
+        </div>
+      )}
       <section className="relative overflow-hidden rounded-2xl border border-primary/20 bg-gradient-to-br from-primary/[0.12] via-card to-card p-5 shadow-sm md:p-6">
         <div className="pointer-events-none absolute -right-16 -top-20 h-56 w-56 rounded-full bg-primary/10 blur-3xl" />
         <div className="relative flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
@@ -157,13 +187,28 @@ export default function CurriculumView({ classId, watched, submissions }: Props)
             <ListTree className="h-4 w-4 text-primary" />
             <h3 className="text-sm font-bold text-foreground">Nội dung lộ trình</h3>
           </div>
-          <p className="mt-1 text-xs text-muted-foreground">{chapters.length} chương · {totalCount} nội dung</p>
+          <p className="mt-1 text-xs text-muted-foreground">{resolvedChapters.length} chương · {totalCount} nội dung</p>
         </div>
-        <Badge variant="outline" className="text-[10px]">Bấm vào bài để mở player</Badge>
+        <div className="flex items-center gap-1.5">
+          <Badge variant="outline" className="text-[10px]">
+            {isRefreshing ? <><Loader2 className="mr-1 h-3 w-3 animate-spin" />Đang cập nhật</> : "Bấm vào bài để mở player"}
+          </Badge>
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-7 w-7"
+            disabled={isRefreshing}
+            onClick={() => void onRetry().catch(() => undefined)}
+            aria-label="Làm mới lộ trình"
+            title="Làm mới lộ trình"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${isRefreshing ? "animate-spin" : ""}`} />
+          </Button>
+        </div>
       </div>
 
       <div className="space-y-3">
-        {chapters.map((chapter, chapterIndex) => {
+        {resolvedChapters.map((chapter, chapterIndex) => {
           const chapterLessons = chapter.sessions.flatMap((session) => session.lessons);
           const chapterDone = chapterLessons.filter(isCompleted).length;
           const chapterOpen = expanded.has(chapter.id);

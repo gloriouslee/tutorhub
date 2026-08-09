@@ -569,7 +569,7 @@ test("student portal keeps paid material, submissions and progress server-scoped
   assert.match(curriculumRoute, /\.contains\("student_ids", \[actor\.studentId\]\)/);
   assert.match(curriculumRoute, /questions: _questions/);
   assert.match(progressRoute, /actor\?\.role !== "student"/);
-  assert.match(classPage, /getStudentCurriculum/);
+  assert.match(classPage, /useStudentCurriculum/);
   assert.match(classPage, /getStudentLessonProgress/);
   assert.doesNotMatch(classPage, /tutorhub_watched|getCurriculum\(/);
   assert.match(player, /saveStudentLessonProgress/);
@@ -652,6 +652,34 @@ test("cache policy speeds shared and versioned data without caching private stat
   assert.match(accountHook, /fetch\("\/api\/account\/context", \{ cache: "no-store" \}\)/);
   assert.match(accountHook, /ready: current\.context !== null/);
   assert.match(accountRoute, /"Cache-Control": "private, no-store"/);
+});
+
+test("student curriculum cache deduplicates requests without hiding load failures", async () => {
+  const hook = await read("src/hooks/useStudentCurriculum.ts");
+  const storage = await read("src/lib/storage.ts");
+  const route = await read("src/app/api/student/curriculum/[classId]/route.ts");
+  const studentClass = await read("src/app/student/classes/[classId]/page.tsx");
+  const curriculum = await read("src/components/student/CurriculumView.tsx");
+  const player = await read("src/components/student/ClassLearningPlayer.tsx");
+
+  // Cache phải tách theo học sinh/lớp, gộp request đang chạy và chỉ làm mới
+  // nền sau TTL hoặc khi người dùng quay lại cửa sổ.
+  assert.match(hook, /STUDENT_CURRICULUM_CACHE_TTL_MS = 2 \* 60_000/);
+  assert.match(hook, /`\$\{studentId\}:\$\{classId\}`/);
+  assert.match(hook, /if \(entry\.promise\) return entry\.promise/);
+  assert.match(hook, /window\.addEventListener\("focus", revalidateIfStale\)/);
+  assert.match(studentClass, /useStudentCurriculum\(\{/);
+  assert.match(player, /useStudentCurriculum\(\{/);
+  assert.doesNotMatch(studentClass, /getStudentCurriculum\(classId\)/);
+
+  // Lỗi mạng/quyền không được phép biến thành [] rồi hiện nhầm thông báo
+  // "giáo viên chưa thiết lập"; dữ liệu cá nhân hóa vẫn không cache ở HTTP.
+  assert.match(storage, /export async function getStudentCurriculum[\s\S]{0,700}if \(!response\.ok\)[\s\S]{0,320}throw error/);
+  assert.match(curriculum, /Không thể tải lộ trình học/);
+  assert.match(curriculum, /Bạn đang xem dữ liệu đã lưu gần nhất/);
+  assert.match(curriculum, /aria-label="Làm mới lộ trình"/);
+  assert.match(route, /if \(enrollmentError\)/);
+  assert.match(route, /"Cache-Control": "private, no-store"/);
 });
 
 test("homework navigation and data loading always provide immediate feedback", async () => {

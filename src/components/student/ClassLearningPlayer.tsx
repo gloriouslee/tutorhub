@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
-  getStudentCurriculum,
   getStudentLessonProgress,
   saveStudentLessonProgress,
   type CurriculumChapter,
@@ -14,7 +13,9 @@ import {
 } from "@/lib/storage";
 import { getSubmissionsByStudent, type SubmissionRecord } from "@/lib/supabase/submissions";
 import { useStudentContext } from "@/hooks/useStudentContext";
+import { useStudentCurriculum } from "@/hooks/useStudentCurriculum";
 import {
+  AlertTriangle,
   ArrowLeft,
   BookOpen,
   Check,
@@ -36,6 +37,7 @@ import {
   PanelRightOpen,
   PenSquare,
   PlayCircle,
+  RefreshCw,
   Save,
   StickyNote,
   Video,
@@ -54,6 +56,8 @@ type Props = {
   classId: string;
   requestedLessonId: string;
 };
+
+const EMPTY_CHAPTERS: CurriculumChapter[] = [];
 
 const LESSON_META: Record<CurriculumLesson["type"], { label: string; icon: React.ElementType; color: string; bg: string }> = {
   lecture: { label: "Bài giảng", icon: PlayCircle, color: "text-blue-600", bg: "bg-blue-100 dark:bg-blue-950" },
@@ -236,7 +240,6 @@ function CourseOutline({
 export default function ClassLearningPlayer({ classId, requestedLessonId }: Props) {
   const router = useRouter();
   const { studentId, myClasses, assignedClassId, ready } = useStudentContext();
-  const [chapters, setChapters] = useState<CurriculumChapter[]>([]);
   const [progress, setProgress] = useState<StudentLessonProgress[]>([]);
   const [submissions, setSubmissions] = useState<SubmissionRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -255,6 +258,18 @@ export default function ClassLearningPlayer({ classId, requestedLessonId }: Prop
   const hasAccess = cls
     ? (cls.student_ids ?? []).includes(studentId) || assignedClassId === classId
     : false;
+  const {
+    chapters: cachedChapters,
+    error: curriculumError,
+    isLoading: curriculumLoading,
+    isRefreshing: curriculumRefreshing,
+    retry: retryCurriculum,
+  } = useStudentCurriculum({
+    classId,
+    studentId,
+    enabled: ready && Boolean(studentId && cls && hasAccess),
+  });
+  const chapters = cachedChapters ?? EMPTY_CHAPTERS;
 
   useEffect(() => {
     if (!ready || !studentId || !cls || !hasAccess) return;
@@ -262,13 +277,11 @@ export default function ClassLearningPlayer({ classId, requestedLessonId }: Prop
     setLoading(true);
     setLoadError("");
     Promise.all([
-      getStudentCurriculum(classId),
       getStudentLessonProgress(classId),
       getSubmissionsByStudent(studentId),
     ])
-      .then(([curriculum, lessonProgress, studentSubmissions]) => {
+      .then(([lessonProgress, studentSubmissions]) => {
         if (cancelled) return;
-        setChapters(curriculum);
         setProgress(lessonProgress);
         setSubmissions(studentSubmissions);
       })
@@ -431,7 +444,7 @@ export default function ClassLearningPlayer({ classId, requestedLessonId }: Prop
     );
   }
 
-  if (loading) {
+  if (loading || curriculumLoading) {
     return (
       <main className="flex min-h-dvh items-center justify-center bg-background" aria-busy="true">
         <div className="text-center">
@@ -442,15 +455,32 @@ export default function ClassLearningPlayer({ classId, requestedLessonId }: Prop
     );
   }
 
-  if (loadError || !activeLesson || lessons.length === 0) {
+  const curriculumUnavailable = Boolean(curriculumError && cachedChapters === undefined);
+
+  if (loadError || curriculumUnavailable || !activeLesson || lessons.length === 0) {
+    const requestFailed = Boolean(loadError || curriculumUnavailable);
     return (
       <main className="flex min-h-dvh items-center justify-center bg-background p-6 text-center">
         <div>
-          <BookOpen className="mx-auto h-12 w-12 text-muted-foreground/35" />
-          <h1 className="mt-4 text-lg font-bold text-foreground">{loadError || "Lớp chưa có nội dung để bắt đầu học"}</h1>
-          <Button className="mt-4" variant="outline" onClick={() => router.push(`/student/classes/${classId}?tab=curriculum`)}>
-            <ArrowLeft className="mr-1.5 h-4 w-4" /> Quay lại lộ trình
-          </Button>
+          {requestFailed
+            ? <AlertTriangle className="mx-auto h-12 w-12 text-amber-500" />
+            : <BookOpen className="mx-auto h-12 w-12 text-muted-foreground/35" />}
+          <h1 className="mt-4 text-lg font-bold text-foreground">
+            {requestFailed ? loadError || "Không thể tải lộ trình học" : "Lớp chưa có nội dung để bắt đầu học"}
+          </h1>
+          <div className="mt-4 flex flex-wrap justify-center gap-2">
+            {requestFailed && (
+              <Button onClick={() => {
+                if (curriculumUnavailable) void retryCurriculum().catch(() => undefined);
+                else window.location.reload();
+              }}>
+                <RefreshCw className="mr-1.5 h-4 w-4" /> Thử lại
+              </Button>
+            )}
+            <Button variant="outline" onClick={() => router.push(`/student/classes/${classId}?tab=curriculum`)}>
+              <ArrowLeft className="mr-1.5 h-4 w-4" /> Quay lại lộ trình
+            </Button>
+          </div>
         </div>
       </main>
     );
@@ -524,6 +554,12 @@ export default function ClassLearningPlayer({ classId, requestedLessonId }: Prop
 
       <div className="flex min-h-0 flex-1">
         <section className="min-w-0 flex-1 overflow-y-auto bg-background">
+          {curriculumError && cachedChapters !== undefined && (
+            <div className="flex items-center justify-between gap-3 border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300">
+              <span className="flex items-center gap-2"><AlertTriangle className="h-4 w-4" />Đang hiển thị lộ trình đã lưu gần nhất.</span>
+              <button type="button" className="font-semibold underline-offset-2 hover:underline" onClick={() => void retryCurriculum().catch(() => undefined)}>Thử lại</button>
+            </div>
+          )}
           <div className="bg-black">
             {youtubeUrl ? (
               <div className="relative mx-auto aspect-video w-full max-w-[1280px]">
@@ -646,6 +682,7 @@ export default function ClassLearningPlayer({ classId, requestedLessonId }: Prop
               <div className="flex items-center gap-2">
                 <ListTree className="h-4 w-4 text-primary" />
                 <h2 className="text-sm font-bold text-foreground">Nội dung khóa học</h2>
+                {curriculumRefreshing && <Loader2 className="ml-auto h-3.5 w-3.5 animate-spin text-primary" />}
               </div>
               <div className="mt-3 flex items-center gap-2">
                 <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
