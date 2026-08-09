@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getRequestIdentity } from "@/lib/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { hasValidMutationOrigin } from "@/lib/request-security";
+import { parentCanAccessStudent } from "@/lib/guardian-server";
 
 const MAX_BYTES = 10 * 1024 * 1024;
 const ALLOWED_TYPES = new Set([
@@ -58,16 +59,11 @@ export async function POST(req: NextRequest) {
     if (typeof requestedChildId !== "string" || !requestedChildId) {
       return NextResponse.json({ error: "child_required" }, { status: 400 });
     }
-    const { data: child } = await createAdminClient()
-      .from("students")
-      .select("id")
-      .eq("id", requestedChildId)
-      .eq("parent_id", actor.parentId!)
-      .maybeSingle();
-    if (!child) {
+    const admin = createAdminClient();
+    if (!(await parentCanAccessStudent(admin, actor.parentId!, requestedChildId))) {
       return NextResponse.json({ error: "forbidden" }, { status: 403 });
     }
-    studentId = String(child.id);
+    studentId = requestedChildId;
   }
   if (
     !(file instanceof File)

@@ -19,6 +19,7 @@
 --     - supabase/migration_teacher_settings.sql
 --     - supabase/migrations/20260727140000_production_security.sql
 --     - supabase/migrations/20260727150001..150004_perrow_*.sql
+--     - supabase/migrations/20260809120000_student_guardians.sql
 --     - supabase/storage_open_policies.sql / storage_policies_v2.sql
 --
 --   IDEMPOTENT: safe to re-run. Uses create extension if not exists,
@@ -32,8 +33,8 @@
 -- ============================================================================
 --
 -- ─────────────────────────── COVERAGE MANIFEST ─────────────────────────────
--- TABLES (42)
---   Core (11):    profiles, parents, teachers, students, classes, payments,
+-- TABLES (43)
+--   Core (12):    profiles, parents, teachers, students, student_guardians, classes, payments,
 --                 attendance, notifications, homework, submissions, materials
 --   Domain (3):   class_registration_requests, purchase_transactions,
 --                 app_exam_scores
@@ -49,10 +50,10 @@
 --                 class_attendance, teacher_materials, parent_messages
 --   Infra (1):    api_rate_limits
 --
--- FUNCTIONS (16)
---   Auth helpers (9): get_my_role, my_student_id, my_teacher_id, my_parent_id,
+-- FUNCTIONS (17)
+--   Auth helpers (10): get_my_role, my_student_id, my_teacher_id, my_parent_id,
 --                     teaches_class, enrolled_in_class, parent_has_student,
---                     teaches_student, is_my_child
+--                     parent_id_has_student, teaches_student, is_my_child
 --   Trigger fn (1):   handle_new_user  (+ trigger on_auth_user_created)
 --   Secure RPC (6):   consume_rate_limit,
 --                     review_class_registration_request_secure,
@@ -161,8 +162,12 @@ as $$
   )
 $$;
 
--- parent owns a student (name used by the production-security policies).
-create or replace function public.parent_has_student(p_student_id text)
+-- Explicit parent id helper is also used by service-role RPCs where auth.uid()
+-- is intentionally unavailable.
+create or replace function public.parent_id_has_student(
+  p_parent_id text,
+  p_student_id text
+)
 returns boolean
 language sql
 stable
@@ -170,11 +175,26 @@ security definer
 set search_path = public, pg_temp
 as $$
   select exists (
-    select 1 from public.students
-    where id::text = p_student_id
-      and parent_id::text = public.my_parent_id()
+    select 1 from public.student_guardians sg
+    where sg.parent_id = p_parent_id
+      and sg.student_id = p_student_id
+      and sg.status = 'active'
+  ) or exists (
+    select 1 from public.students s
+    where s.id::text = p_student_id
+      and s.parent_id::text = p_parent_id
   )
 $$;
+
+-- Parent owns a student through an accepted guardian link. The legacy column
+-- remains as a compatibility fallback while old installations are migrated.
+create or replace function public.parent_has_student(p_student_id text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$ select public.parent_id_has_student(public.my_parent_id(), p_student_id) $$;
 
 -- A teacher "teaches" a student when the student is in one of the teacher's classes.
 create or replace function public.teaches_student(p_student_id text)
@@ -193,20 +213,14 @@ as $$
   )
 $$;
 
--- parent owns a student (name used by the per-row policies; equivalent to
--- parent_has_student, kept because both names are referenced by policies).
+-- Compatibility alias used by older per-row policies.
 create or replace function public.is_my_child(p_student_id text)
 returns boolean
 language sql
 stable
 security definer
 set search_path = public, pg_temp
-as $$
-  select exists (
-    select 1 from public.students s
-    where s.id::text = p_student_id and s.parent_id::text = public.my_parent_id()
-  )
-$$;
+as $$ select public.parent_has_student(p_student_id) $$;
 
 
 -- ─────────────────────────── 3. Core tables ────────────────────────────────
@@ -354,6 +368,46 @@ create table if not exists public.students (
   avatar_url    text,
   created_at    timestamptz default now()
 );
+
+-- Many-to-many guardian ownership. A link is usable only after the parent
+-- accepts the invitation and its status becomes active.
+create table if not exists public.student_guardians (
+  id uuid primary key default gen_random_uuid(),
+  student_id text not null references public.students(id) on delete cascade,
+  parent_id text not null references public.parents(id) on delete cascade,
+  relationship text not null default 'guardian'
+    check (relationship in ('mother', 'father', 'guardian', 'other')),
+  status text not null default 'pending'
+    check (status in ('pending', 'active', 'rejected', 'revoked')),
+  invited_email text,
+  invited_by_user_id uuid references public.profiles(id) on delete set null,
+  invited_by_role text check (invited_by_role in ('teacher', 'admin')),
+  accepted_at timestamptz,
+  rejected_at timestamptz,
+  revoked_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (student_id, parent_id)
+);
+
+insert into public.student_guardians (
+  student_id, parent_id, relationship, status, invited_email,
+  accepted_at, created_at, updated_at
+)
+select s.id, s.parent_id, 'guardian', 'active', p.email,
+  coalesce(s.created_at, now()), coalesce(s.created_at, now()), now()
+from public.students s
+join public.parents p on p.id = s.parent_id
+where s.parent_id is not null
+on conflict (student_id, parent_id) do nothing;
+
+create index if not exists student_guardians_parent_status_idx
+  on public.student_guardians(parent_id, status, student_id);
+create index if not exists student_guardians_student_status_idx
+  on public.student_guardians(student_id, status, parent_id);
+create index if not exists student_guardians_invited_email_idx
+  on public.student_guardians(lower(invited_email))
+  where invited_email is not null;
 
 create table if not exists public.classes (
   id            text primary key,
@@ -1074,11 +1128,9 @@ begin
     if actor_role = 'student' then
       p_child_id := actor_student_id;
     elsif actor_role = 'parent' then
-      if not exists (
-        select 1 from public.students
-        where id::text = p_child_id
-          and parent_id::text = actor_parent_id
-      ) then raise exception 'forbidden'; end if;
+      if not public.parent_id_has_student(actor_parent_id, p_child_id) then
+        raise exception 'forbidden';
+      end if;
     else
       raise exception 'forbidden';
     end if;
@@ -1177,6 +1229,7 @@ grant execute on function public.my_teacher_id()             to authenticated, s
 grant execute on function public.my_parent_id()              to authenticated, service_role;
 grant execute on function public.teaches_class(text)         to authenticated, service_role;
 grant execute on function public.enrolled_in_class(text)     to authenticated, service_role;
+grant execute on function public.parent_id_has_student(text, text) to authenticated, service_role;
 grant execute on function public.parent_has_student(text)    to authenticated, service_role;
 grant execute on function public.teaches_student(text)       to authenticated, service_role;
 grant execute on function public.is_my_child(text)           to authenticated, service_role;
@@ -1209,14 +1262,16 @@ create policy profiles_self_update on public.profiles
   with check (id = auth.uid());
 
 -- ── students / parents / teachers / classes ─────────────────────────────────
-grant select on public.students, public.parents, public.teachers, public.classes
+grant select on public.students, public.parents, public.teachers, public.classes,
+  public.student_guardians
   to authenticated;
+grant select, insert, update, delete on public.student_guardians to service_role;
 drop policy if exists students_scoped_select on public.students;
 create policy students_scoped_select on public.students
   for select to authenticated
   using (
     user_id::text = auth.uid()::text
-    or parent_id::text = public.my_parent_id()
+    or public.parent_has_student(id::text)
     or public.get_my_role() = 'admin'
     or (public.get_my_role() = 'teacher' and public.teaches_student(id))
   );
@@ -1224,6 +1279,14 @@ drop policy if exists parents_scoped_select on public.parents;
 create policy parents_scoped_select on public.parents
   for select to authenticated
   using (user_id::text = auth.uid()::text or public.get_my_role() = 'admin');
+drop policy if exists student_guardians_scoped_select on public.student_guardians;
+create policy student_guardians_scoped_select on public.student_guardians
+  for select to authenticated
+  using (
+    public.get_my_role() = 'admin'
+    or parent_id = public.my_parent_id()
+    or (public.get_my_role() = 'teacher' and public.teaches_student(student_id))
+  );
 drop policy if exists teachers_authenticated_select on public.teachers;
 create policy teachers_authenticated_select on public.teachers
   for select to authenticated using (true);
@@ -1239,13 +1302,8 @@ create policy classes_scoped_select on public.classes
       where student_id::text = public.my_student_id()
     )
     or exists (
-      select 1 from public.students s
-      where s.parent_id::text = public.my_parent_id()
-        and exists (
-          select 1
-          from unnest(classes.student_ids) student_id
-          where student_id::text = s.id::text
-        )
+      select 1 from unnest(classes.student_ids) student_id
+      where public.parent_has_student(student_id::text)
     )
   );
 -- Teachers manage their own classes directly (RLS-scoped); admins any.
@@ -1361,9 +1419,11 @@ create policy notifications_role_select on public.notifications
           public.get_my_role() = 'parent'
           and exists (
             select 1 from public.classes c
-            join public.students s on s.id = any(c.student_ids)
             where c.id = notifications.target_class_id
-              and s.parent_id = public.my_parent_id()
+              and exists (
+                select 1 from unnest(c.student_ids) student_id
+                where public.parent_has_student(student_id::text)
+              )
           )
         )
       )
@@ -1470,9 +1530,8 @@ create policy teacher_settings_read on public.kv_teacher_settings
         and (
           public.my_student_id() = any (c.student_ids)
           or exists (
-            select 1 from public.students s
-            where s.parent_id::text = public.my_parent_id()
-              and s.id::text = any (c.student_ids)
+            select 1 from unnest(c.student_ids) student_id
+            where public.parent_has_student(student_id::text)
           )
         )
     )
@@ -1561,9 +1620,11 @@ create policy homework_attachments_read on public.homework_attachments
     or public.enrolled_in_class(class_id)
     or exists (
       select 1 from public.classes c
-      join public.students s on s.id = any(c.student_ids)
       where c.id = homework_attachments.class_id
-        and s.parent_id = public.my_parent_id()
+        and exists (
+          select 1 from unnest(c.student_ids) student_id
+          where public.parent_has_student(student_id::text)
+        )
     )
   );
 drop policy if exists homework_attachments_teacher_write on public.homework_attachments;
@@ -1819,10 +1880,7 @@ begin
   if actor_role = 'student' then
     p_child_id := actor_student_id;
   elsif actor_role = 'parent' then
-    if not exists (
-      select 1 from public.students
-      where id::text = p_child_id and parent_id::text = actor_parent_id
-    ) then
+    if not public.parent_id_has_student(actor_parent_id, p_child_id) then
       raise exception 'forbidden';
     end if;
   else

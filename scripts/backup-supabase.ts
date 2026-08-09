@@ -37,6 +37,7 @@ const TABLES = [
   "profiles",
   "students",
   "parents",
+  "student_guardians",
   "teachers",
   "classes",
   "attendance",

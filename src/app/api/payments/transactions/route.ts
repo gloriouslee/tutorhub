@@ -4,6 +4,7 @@ import { logEvent } from "@/lib/logger";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isNonEmptyString } from "@/lib/validation";
 import { hasValidMutationOrigin } from "@/lib/request-security";
+import { getActiveChildIdsForParent } from "@/lib/guardian-server";
 
 type CatalogItem = {
   id?: unknown;
@@ -70,14 +71,7 @@ export async function GET(req: NextRequest) {
     if (!actor.parentId) {
       return NextResponse.json({ error: "parent_profile_required" }, { status: 403 });
     }
-    const { data: children, error: childError } = await admin
-      .from("students")
-      .select("id")
-      .eq("parent_id", actor.parentId);
-    if (childError) {
-      return NextResponse.json({ error: "payment_list_failed" }, { status: 500 });
-    }
-    const ids = (children ?? []).map((child) => String(child.id));
+    const ids = await getActiveChildIdsForParent(admin, actor.parentId);
     if (ids.length === 0) return NextResponse.json([]);
     query = query.in("student_id", ids);
   } else if (actor.role === "teacher") {

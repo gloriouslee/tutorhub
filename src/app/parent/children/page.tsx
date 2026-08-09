@@ -186,17 +186,17 @@ export default function ParentChildrenPage() {
             );
           })}
 
-          {/* Add New Child Card */}
-          <Card className="border-2 border-dashed shadow-none flex flex-col items-center justify-center p-8 bg-muted/10 hover:bg-muted/30 transition-colors text-center min-h-[400px] cursor-pointer group">
+          {/* Guardian links are verified through teacher/admin invitations. */}
+          <Card className="border-2 border-dashed shadow-none flex flex-col items-center justify-center p-8 bg-muted/10 hover:bg-muted/30 transition-colors text-center min-h-[400px] group">
             <div className="h-16 w-16 rounded-full bg-primary/10 flex items-center justify-center mb-4 group-hover:scale-110 group-hover:bg-primary/20 transition-all">
               <div className="text-3xl font-light text-primary">+</div>
             </div>
-            <h3 className="text-lg font-bold text-foreground mb-2">Đăng ký thêm học viên</h3>
+            <h3 className="text-lg font-bold text-foreground mb-2">Liên kết thêm học sinh</h3>
             <p className="text-sm text-muted-foreground max-w-[250px]">
-              Đăng ký thêm lớp học cho con thứ 2, thứ 3 của bạn để nhận ưu đãi lên đến 15% học phí.
+              Nhờ giáo viên gửi lời mời đến email tài khoản này, rồi xác nhận để bắt đầu theo dõi học sinh.
             </p>
-            <Button variant="outline" className="mt-6 font-semibold">
-              Đăng ký ngay
+            <Button variant="outline" className="mt-6 font-semibold" asChild>
+              <Link href="/parent/invitations">Kiểm tra lời mời</Link>
             </Button>
           </Card>
         </div>

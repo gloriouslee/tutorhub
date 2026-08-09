@@ -140,13 +140,29 @@ export default function ParentDashboard() {
             Đang theo dõi {children.length} con
             {nextDue ? ` · Học phí hạn ${new Date(nextDue.due_date).toLocaleDateString("vi-VN")}` : ""}
           </p>
-          <Link href="/parent/payments">
+          <Link href={children.length > 0 ? "/parent/payments" : "/parent/invitations"}>
             <Button size="sm" className="bg-white/20 hover:bg-white/30 text-white border-0 mt-4">
-              Xem học phí <ArrowRight className="h-3.5 w-3.5" />
+              {children.length > 0 ? "Xem học phí" : "Kiểm tra lời mời"}
+              <ArrowRight className="h-3.5 w-3.5" />
             </Button>
           </Link>
         </div>
       </div>
+
+      {ready && children.length === 0 && (
+        <Card className="border-dashed border-primary/30">
+          <CardContent className="flex flex-col items-center px-6 py-10 text-center">
+            <Users className="mb-3 h-10 w-10 text-primary/50" />
+            <h3 className="font-semibold">Tài khoản chưa liên kết học sinh</h3>
+            <p className="mt-2 max-w-lg text-sm text-muted-foreground">
+              Hãy nhờ giáo viên gửi lời mời đến đúng email tài khoản này, sau đó xác nhận liên kết để xem tiến độ, lịch học và học phí.
+            </p>
+            <Button asChild className="mt-5">
+              <Link href="/parent/invitations">Mở danh sách lời mời</Link>
+            </Button>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Child selector */}
       {children.length > 1 && (

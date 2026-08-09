@@ -18,6 +18,7 @@ import {
   upsertStudent,
 } from "@/lib/storage";
 import { Student } from "@/types";
+import { StudentGuardianManager } from "@/components/guardians/StudentGuardianManager";
 
 export default function AdminStudentsPage() {
   const [students, setStudents] = useState<Student[]>([]);
@@ -253,7 +254,12 @@ export default function AdminStudentsPage() {
                             ) : <span className="text-xs text-muted-foreground">—</span>}
                           </td>
                           <td className="p-4">
-                            <div className="flex items-center gap-2">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <StudentGuardianManager
+                                studentId={student.id}
+                                studentName={student.full_name}
+                                compact
+                              />
                               <Button size="sm" variant="outline" onClick={() => handleOpenEditModal(student)}>
                                 <Edit className="h-3 w-3 mr-1" /> Sửa
                               </Button>

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getRequestIdentity } from "@/lib/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { getActiveChildIdsForParent, parentCanAccessStudent } from "@/lib/guardian-server";
 
 const BUCKETS = new Set([
   "class-materials",
@@ -61,11 +62,7 @@ export async function GET(req: NextRequest) {
           .limit(1);
         allowed ||= Boolean(data?.length);
       } else if (ownerTeacher?.id && actor.role === "parent" && actor.parentId) {
-        const { data: children } = await admin
-          .from("students")
-          .select("id")
-          .eq("parent_id", actor.parentId);
-        const childIds = (children ?? []).map(child => String(child.id));
+        const childIds = await getActiveChildIdsForParent(admin, actor.parentId);
         if (childIds.length > 0) {
           const { data } = await admin
             .from("classes")
@@ -82,13 +79,7 @@ export async function GET(req: NextRequest) {
     if (actor.role === "student") {
       allowed ||= actor.studentId === studentId;
     } else if (actor.role === "parent" && actor.parentId) {
-      const { data } = await admin
-        .from("students")
-        .select("id")
-        .eq("id", studentId)
-        .eq("parent_id", actor.parentId)
-        .maybeSingle();
-      allowed ||= Boolean(data);
+      allowed ||= await parentCanAccessStudent(admin, actor.parentId, studentId);
     } else if (actor.role === "teacher" && actor.teacherId) {
       const { data } = await admin
         .from("classes")
@@ -211,11 +202,7 @@ export async function GET(req: NextRequest) {
         allowed = entitled;
       }
     } else if (actor.role === "parent" && actor.parentId) {
-      const { data: children } = await admin
-        .from("students")
-        .select("id")
-        .eq("parent_id", actor.parentId);
-      const childIds = (children ?? []).map((child) => String(child.id));
+      const childIds = await getActiveChildIdsForParent(admin, actor.parentId);
       if (childIds.length > 0) {
         const [core, extra] = await Promise.all([
           admin.from("classes").select("id").eq("id", classId).overlaps("student_ids", childIds).maybeSingle(),
@@ -235,15 +222,10 @@ export async function GET(req: NextRequest) {
   }
   if (bucket === "homework-submissions" && actor.role === "parent") {
     const submissionStudentId = segments[2] ?? "";
-    const { data: child } = actor.parentId
-      ? await admin
-          .from("students")
-          .select("id")
-          .eq("id", submissionStudentId)
-          .eq("parent_id", actor.parentId)
-          .maybeSingle()
-      : { data: null };
-    if (segments[1] !== "submissions" || !child) allowed = false;
+    const isChild = actor.parentId
+      ? await parentCanAccessStudent(admin, actor.parentId, submissionStudentId)
+      : false;
+    if (segments[1] !== "submissions" || !isChild) allowed = false;
   }
   // Parent portal does not expose class material files. This also prevents a
   // copied URL from bypassing a student's package entitlement.

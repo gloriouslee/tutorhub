@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { isNonEmptyString } from "@/lib/validation";
 import { hasValidMutationOrigin } from "@/lib/request-security";
 import { logEvent } from "@/lib/logger";
+import { getActiveChildIdsForParent } from "@/lib/guardian-server";
 
 type Invoice = {
   id: string;
@@ -42,11 +43,7 @@ export async function GET(req: NextRequest) {
   }
   const admin = createAdminClient();
   if (actor.role === "parent" && actor.parentId) {
-    const { data: children } = await admin
-      .from("students")
-      .select("id")
-      .eq("parent_id", actor.parentId);
-    const ids = new Set((children ?? []).map((child) => String(child.id)));
+    const ids = new Set(await getActiveChildIdsForParent(admin, actor.parentId));
     return NextResponse.json(invoices.filter((invoice) => ids.has(invoice.child_id)));
   }
   if (actor.role === "teacher" && actor.teacherId) {

@@ -9,6 +9,7 @@ import { ProgressBar } from "@/components/shared";
 import { type StudentPackage } from "@/lib/storage";
 import type { ClassRegistrationRequest } from "@/lib/class-registration-types";
 import { resetAccountContextCache } from "@/hooks/useAccountContext";
+import { StudentGuardianManager } from "@/components/guardians/StudentGuardianManager";
 import { formatCurrency } from "@/lib/utils";
 import { Users, Trash2, MessageSquare, Clock, CheckCircle2, XCircle, ArrowRight } from "lucide-react";
 import { PACKAGE_TYPES } from "./classDetail.types";
@@ -342,7 +343,12 @@ export default function StudentsTab({
                     )}
                   </td>
                   <td className="p-4 text-right">
-                    <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="flex items-center justify-end gap-1 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100">
+                      <StudentGuardianManager
+                        studentId={student.id}
+                        studentName={student.full_name}
+                        compact
+                      />
                       <Button size="sm" variant="outline" onClick={() => onOpenComment(student)}
                         className="text-xs h-8 flex items-center gap-1 hover:bg-primary/5 hover:text-primary transition-all font-semibold">
                         <MessageSquare className="h-3.5 w-3.5" /> Nhận xét

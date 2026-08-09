@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getRequestIdentity } from "@/lib/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { getActiveChildIdsForParent } from "@/lib/guardian-server";
 import {
   DEFAULT_PORTAL_BRANDING,
   resolvePortalBranding,
@@ -126,15 +127,18 @@ export async function GET(req: NextRequest) {
   }
 
   if (identity.role === "parent" && identity.parentId) {
-    const { data: children, error: childError } = await admin
-      .from("students")
-      .select("id, full_name, grade, school")
-      .eq("parent_id", identity.parentId);
+    const childIds = await getActiveChildIdsForParent(admin, identity.parentId);
+    const { data: children, error: childError } =
+      childIds.length === 0
+        ? { data: [], error: null }
+        : await admin
+            .from("students")
+            .select("id, full_name, grade, school")
+            .in("id", childIds);
     if (childError) {
       return NextResponse.json({ error: "context_unavailable" }, { status: 500 });
     }
 
-    const childIds = (children ?? []).map((child) => String(child.id));
     const { data: classes, error: classError } =
       childIds.length === 0
         ? { data: [], error: null }

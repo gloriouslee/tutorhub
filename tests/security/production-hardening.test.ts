@@ -674,3 +674,64 @@ test("homework navigation and data loading always provide immediate feedback", a
   assert.match(teacherClass, /HomeworkPanelFallback/);
   assert.match(teacherClass, /persistedHomeworkLoaded/);
 });
+
+test("guardian links are many-to-many, consent-based, and RLS scoped", async () => {
+  const migration = await read(
+    "supabase/migrations/20260809120000_student_guardians.sql",
+  );
+  const canonical = await read("supabase/schema_canonical.sql");
+
+  for (const sql of [migration, canonical]) {
+    assert.match(sql, /create table if not exists public\.student_guardians/);
+    assert.match(sql, /unique \(student_id, parent_id\)/);
+    assert.match(sql, /status in \('pending', 'active', 'rejected', 'revoked'\)/);
+    assert.match(sql, /insert into public\.student_guardians/);
+    assert.match(sql, /create policy student_guardians_scoped_select/);
+    assert.match(sql, /public\.parent_id_has_student/);
+    assert.match(sql, /sg\.status = 'active'/);
+  }
+});
+
+test("teacher and admin guardian invitations require parent acceptance", async () => {
+  const collectionRoute = await read("src/app/api/guardians/route.ts");
+  const itemRoute = await read("src/app/api/guardians/[id]/route.ts");
+  const manager = await read(
+    "src/components/guardians/StudentGuardianManager.tsx",
+  );
+  const parentInvitations = await read("src/app/parent/invitations/page.tsx");
+  const teacherStudents = await read("src/components/teacher/StudentsTab.tsx");
+  const adminStudents = await read("src/app/admin/students/page.tsx");
+
+  assert.match(collectionRoute, /teacherCanManageStudent/);
+  assert.match(collectionRoute, /inviteUserByEmail/);
+  assert.match(collectionRoute, /shouldCreateUser: false/);
+  assert.match(collectionRoute, /status: "pending"/);
+  assert.match(collectionRoute, /consumeRateLimit/);
+  assert.match(itemRoute, /actor\?\.role !== "parent"/);
+  assert.match(itemRoute, /body\.action === "accept"/);
+  assert.match(itemRoute, /status: accepted \? "active" : "rejected"/);
+  assert.match(itemRoute, /replacement\?\.parent_id \?\? null/);
+  assert.match(manager, /\/api\/guardians/);
+  assert.match(parentInvitations, /resetAccountContextCache\(\)/);
+  assert.match(teacherStudents, /StudentGuardianManager/);
+  assert.match(adminStudents, /StudentGuardianManager/);
+});
+
+test("all parent-sensitive API reads use accepted guardian relationships", async () => {
+  const helper = await read("src/lib/guardian-server.ts");
+  const account = await read("src/app/api/account/context/route.ts");
+  const criticalRoutes = await Promise.all([
+    read("src/app/api/files/route.ts"),
+    read("src/app/api/exam-scores/route.ts"),
+    read("src/app/api/payments/invoices/route.ts"),
+    read("src/app/api/payments/transactions/route.ts"),
+    read("src/app/api/payments/receipts/route.ts"),
+  ]);
+
+  assert.match(helper, /\.eq\("status", "active"\)/);
+  assert.match(account, /getActiveChildIdsForParent/);
+  for (const route of criticalRoutes) {
+    assert.match(route, /getActiveChildIdsForParent|parentCanAccessStudent/);
+    assert.doesNotMatch(route, /\.eq\("parent_id", actor\.parentId/);
+  }
+});

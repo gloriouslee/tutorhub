@@ -60,7 +60,14 @@ export default function ResetPasswordPage() {
         cache: "no-store",
       });
       const identity = (await identityResponse.json()) as { role?: string };
-      router.push(identity.role ? `/${identity.role}` : "/login");
+      const requestedNext = new URLSearchParams(window.location.search).get("next");
+      const roleHome = identity.role ? `/${identity.role}` : "/login";
+      const safeNext =
+        requestedNext?.startsWith(`${roleHome}/`)
+        && !requestedNext.startsWith("//")
+          ? requestedNext
+          : roleHome;
+      router.push(safeNext);
       router.refresh();
     } catch {
       setError("Không thể kết nối hệ thống. Vui lòng thử lại.");

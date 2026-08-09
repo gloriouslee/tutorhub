@@ -3,6 +3,7 @@ import { getRequestIdentity } from "@/lib/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isNonEmptyString } from "@/lib/validation";
 import { hasValidMutationOrigin } from "@/lib/request-security";
+import { parentCanAccessStudent } from "@/lib/guardian-server";
 
 async function canAccessStudent(
   actor: NonNullable<Awaited<ReturnType<typeof getRequestIdentity>>>,
@@ -13,13 +14,7 @@ async function canAccessStudent(
   if (actor.role === "student") return actor.studentId === studentId;
   const admin = createAdminClient();
   if (actor.role === "parent" && actor.parentId) {
-    const { data } = await admin
-      .from("students")
-      .select("id")
-      .eq("id", studentId)
-      .eq("parent_id", actor.parentId)
-      .maybeSingle();
-    return Boolean(data);
+    return parentCanAccessStudent(admin, actor.parentId, studentId);
   }
   if (actor.role === "teacher" && actor.teacherId) {
     // Classes live in `classes` (admin) or `teacher_extra_classes` (teacher).

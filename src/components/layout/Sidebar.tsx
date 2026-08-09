@@ -9,7 +9,7 @@ import {
   LayoutDashboard, Bell, User, LogOut,
   Users, DollarSign, Settings, BarChart3, FileText,
   CheckSquare, BookMarked, MessageSquare, CircleHelp, X, Shield,
-  Loader2, PanelLeftClose,
+  Loader2, PanelLeftClose, UserRoundPlus,
 } from "lucide-react";
 import { UserAvatar } from "@/components/ui/avatar";
 import { UserRole } from "@/types";
@@ -31,7 +31,6 @@ const navConfig: Record<UserRole, NavItem[]> = {
   student: [
     { label: "Tổng quan",  href: "/student",               icon: LayoutDashboard },
     { label: "Lớp của tôi",href: "/student/classes",        icon: BookOpen },
-    { label: "Lịch học",   href: "/student/schedule",       icon: Calendar },
     { label: "Bài tập",    href: "/student/homework",       icon: ClipboardList },
     { label: "Hỏi đáp",     href: "/student/questions",      icon: CircleHelp },
     { label: "Tài liệu",   href: "/student/materials",      icon: BookMarked },
@@ -43,6 +42,7 @@ const navConfig: Record<UserRole, NavItem[]> = {
   parent: [
     { label: "Tổng quan",  href: "/parent",                 icon: LayoutDashboard },
     { label: "Con của tôi",href: "/parent/children",        icon: Users },
+    { label: "Liên kết",   href: "/parent/invitations",     icon: UserRoundPlus },
     { label: "Lịch học",   href: "/parent/schedule",        icon: Calendar },
     { label: "Tiến độ",    href: "/parent/progress",        icon: BarChart3 },
     { label: "Chuyên cần", href: "/parent/attendance",      icon: CheckSquare },
@@ -187,6 +187,10 @@ async function computeBadges(
   }
 
   if (role === "parent") {
+    const invitationsPromise = fetch("/api/guardians?mine=1&status=pending", {
+      cache: "no-store",
+      credentials: "same-origin",
+    }).catch(() => null);
     const { loadParentEventNotifications } = await import("@/lib/parent-data");
     // Broadcast + sự kiện sinh từ dữ liệu thật của các con — khớp trang thông báo
     const { unread, readIds, deletedIds } = await unreadBroadcasts("parent", "tutorhub_parent_notif_read", "tutorhub_parent_notif_deleted");
@@ -194,6 +198,13 @@ async function computeBadges(
     const eventUnread = events.filter(n => !deletedIds.has(n.id) && !readIds.has(n.id)).length;
     const total = unread + eventUnread;
     if (total > 0) result["/parent/notifications"] = total;
+    const invitationsResponse = await invitationsPromise;
+    if (invitationsResponse?.ok) {
+      const invitations = await invitationsResponse.json() as unknown[];
+      if (invitations.length > 0) {
+        result["/parent/invitations"] = invitations.length;
+      }
+    }
   }
 
   if (role === "teacher") {
