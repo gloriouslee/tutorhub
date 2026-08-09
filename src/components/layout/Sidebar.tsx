@@ -8,7 +8,7 @@ import {
   Send,
   BookOpen, Calendar, ClipboardList, GraduationCap,
   LayoutDashboard, User, LogOut,
-  Users, DollarSign, Settings, BarChart3, FileText,
+  Users, DollarSign, Settings, BarChart3,
   CheckSquare, BookMarked, MessageSquare, X, Shield,
   Loader2, PanelLeftClose, UserRoundPlus,
 } from "lucide-react";
@@ -50,9 +50,8 @@ const navConfig: Record<UserRole, NavItem[]> = {
   teacher: [
     { label: "Tổng quan",  href: "/teacher",                icon: LayoutDashboard },
     { label: "Lớp của tôi",href: "/teacher/classes",        icon: BookOpen },
-    { label: "Bài tập",    href: "/teacher/homework",       icon: ClipboardList },
+    { label: "Bài tập & chấm bài", href: "/teacher/homework", icon: ClipboardList },
     { label: "Điểm danh",  href: "/teacher/attendance",     icon: CheckSquare },
-    { label: "Bài nộp",    href: "/teacher/submissions",    icon: FileText },
     { label: "Cộng đồng",   href: "/teacher/questions",      icon: Users },
     { label: "Tài liệu",   href: "/teacher/materials",      icon: BookMarked },
     { label: "Học viên",   href: "/teacher/students",       icon: Users },

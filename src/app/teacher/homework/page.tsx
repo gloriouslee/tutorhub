@@ -1,553 +1,567 @@
 "use client";
 
-import { toLocalDateKey } from "@/lib/utils";
-
-import { useState, useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import PortalLayout from "@/components/layout/PortalLayout";
-import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SectionHeader } from "@/components/shared";
 import { HomeworkLoadingState } from "@/components/shared/HomeworkLoadingState";
 import { useTeacherContext } from "@/hooks/useTeacherContext";
-import { getCurriculum, getAllExamResults, getTeacherHomework, upsertTeacherHomework, removeTeacherHomework, getTeacherExtraClasses, getHwSubmissions } from "@/lib/storage";
-import { FileText, Plus, Calendar, CheckCircle2, Clock, X, Trash2, Edit2, ArrowRight, BookOpen, NotebookPen, PenSquare, Download } from "lucide-react";
+import SubmissionGrader, {
+  type GradableSubmission,
+} from "@/components/teacher/SubmissionGrader";
+import {
+  getAllExamResults, getCurriculum, getHwSubmissions, getStudents,
+  getTeacherHomework, removeTeacherHomework, upsertTeacherHomework,
+} from "@/lib/storage";
+import { getSubmissionsByHomeworks } from "@/lib/supabase/submissions";
+import { toLocalDateKey } from "@/lib/utils";
+import {
+  ArrowRight, BookOpen, Calendar, ChevronDown, ChevronRight, Download,
+  Edit2, FileText, PenSquare, Plus, Trash2, X,
+} from "lucide-react";
 
-// ── Constants ─────────────────────────────────────────────────────────────────
-
-// ── Types ─────────────────────────────────────────────────────────────────────
-interface Homework {
+interface Assignment {
   id: string;
-  class_id: string;
+  classId: string;
   title: string;
   description?: string;
-  due_date: string;
-  created_at: string;
+  kind: "file" | "exam";
   source?: "curriculum";
-  kind?: "file" | "exam";
-  file_url?: string;
-  exam_status?: "draft" | "open" | "closed";
-  exam_submitted?: number; // số học sinh đã làm (kind exam)
+  dueDate: string;
+  createdAt: string;
+  examStatus?: "draft" | "open" | "closed";
+  fileUrl?: string;
+  submitted: number;
+  ungraded: number;
 }
 
-interface Submission {
-  id: string;
-  homework_id: string;
-  student_id: string;
-  score?: number;
-}
-
-interface ExtraClass {
-  id: string;
-  class_name: string;
-  student_ids: string[];
-  tutor_id: string;
-  [key: string]: unknown;
-}
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-async function loadExtraClasses(): Promise<ExtraClass[]> {
-  try { return await getTeacherExtraClasses<ExtraClass>(); } catch { return []; }
-}
-
-async function loadHw(classIds: string[]): Promise<Homework[]> {
-  try {
-    return await getTeacherHomework<Homework>(classIds);
-  } catch { return []; }
-}
-
-// Persist a single homework row (insert or update), then reflect the change locally.
-async function upsertHw(item: Homework, fallback: Homework[]): Promise<Homework[]> {
-  await upsertTeacherHomework(item);
-  const exists = fallback.some(h => h.id === item.id);
-  return exists ? fallback.map(h => (h.id === item.id ? item : h)) : [item, ...fallback];
-}
-
-async function removeHw(id: string, fallback: Homework[]): Promise<Homework[]> {
-  await removeTeacherHomework(id);
-  return fallback.filter(h => h.id !== id);
-}
-
-async function loadSubs(classIds: string[]): Promise<Submission[]> {
-  try {
-    return await getHwSubmissions<Submission>({ classIds });
-  } catch {
-    return [];
-  }
-}
-
-// Bài tập từ lộ trình (nộp file + làm câu hỏi) cho các lớp của giáo viên.
-async function loadCurriculumHw(classes: { id: string }[]): Promise<Homework[]> {
-  const today = toLocalDateKey(new Date());
-  const perClass = await Promise.all(classes.map(async c => {
-    const out: Homework[] = [];
-    let chapters;
-    try { chapters = await getCurriculum(c.id); } catch { return out; }
-    const exams: { lessonId: string; homeworkIndex: number }[] = [];
-    for (const ch of chapters) {
-      for (const s of ch.sessions) {
-        for (const lesson of s.lessons) {
-          if (lesson.type === "homework") {
-            out.push({
-              id: lesson.id, class_id: c.id, title: lesson.title, description: lesson.description,
-              due_date: lesson.due_date ?? s.date ?? today, created_at: s.date ?? today,
-              source: "curriculum", kind: "file", file_url: lesson.file_url,
-            });
-          } else if (lesson.type === "exam") {
-            const homeworkIndex = out.length;
-            out.push({
-              id: lesson.id, class_id: c.id, title: lesson.title, description: lesson.description,
-              due_date: lesson.exam_opens_at?.slice(0, 10) ?? s.date ?? today, created_at: s.date ?? today,
-              source: "curriculum", kind: "exam", exam_status: lesson.exam_status ?? "draft",
-              exam_submitted: 0,
-            });
-            exams.push({ lessonId: lesson.id, homeworkIndex });
-          }
-        }
-      }
-    }
-    const resultCounts = await Promise.all(
-      exams.map(exam => getAllExamResults(c.id, exam.lessonId).then(results => results.length).catch(() => 0)),
-    );
-    exams.forEach((exam, index) => { out[exam.homeworkIndex].exam_submitted = resultCounts[index]; });
-    return out;
-  }));
-  return perClass.flat();
-}
+type Tab = "todo" | "all" | "exam";
 
 function isOverdue(dueDate: string): boolean {
-  const d = new Date(dueDate);
-  d.setHours(23, 59, 59, 999);
-  return d < new Date();
+  const due = new Date(dueDate);
+  due.setHours(23, 59, 59, 999);
+  return due < new Date();
 }
 
-function dueStatus(dueDate: string): { label: string; color: string; dot: string } {
-  const d = new Date(dueDate);
-  d.setHours(23, 59, 59, 999);
-  const days = Math.ceil((d.getTime() - Date.now()) / 86400000);
-  if (days < 0)  return { label: "Quá hạn",        color: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",         dot: "bg-red-500" };
-  if (days === 0) return { label: "Hôm nay",        color: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400", dot: "bg-amber-500" };
-  if (days <= 3)  return { label: `Còn ${days} ngày`, color: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400", dot: "bg-orange-400" };
-  return              { label: "Đang mở",          color: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400", dot: "bg-emerald-500" };
+function dueLabel(dueDate: string): { text: string; className: string } {
+  const due = new Date(dueDate);
+  due.setHours(23, 59, 59, 999);
+  const days = Math.ceil((due.getTime() - Date.now()) / 86_400_000);
+  if (days < 0) return { text: "Quá hạn", className: "text-red-600 dark:text-red-400" };
+  if (days === 0) return { text: "Hết hạn hôm nay", className: "text-amber-600 dark:text-amber-400" };
+  if (days <= 3) return { text: `Còn ${days} ngày`, className: "text-orange-600 dark:text-orange-400" };
+  return { text: new Date(dueDate).toLocaleDateString("vi-VN"), className: "text-muted-foreground" };
 }
 
-// ── Page ──────────────────────────────────────────────────────────────────────
+const EXAM_BADGE = {
+  open: { text: "Đang mở", className: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" },
+  closed: { text: "Đã đóng", className: "bg-muted text-muted-foreground" },
+  draft: { text: "Nháp", className: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400" },
+} as const;
+
 export default function TeacherHomeworkPage() {
   const router = useRouter();
-  const {
-    teacherId,
-    teacherName,
-    myClasses: baseClasses,
-    ready,
-  } = useTeacherContext();
+  const { teacherId, teacherName, myClasses, ready } = useTeacherContext();
 
-  const [myClasses,    setMyClasses]    = useState<{ id: string; class_name: string; student_ids?: string[] }[]>([]);
-  const [homeworks,    setHomeworks]    = useState<Homework[]>([]);
-  const [submissions,  setSubmissions]  = useState<Submission[]>([]);
+  const [assignments, setAssignments] = useState<Assignment[]>([]);
+  const [submissions, setSubmissions] = useState<GradableSubmission[]>([]);
   const [loadingHomework, setLoadingHomework] = useState(true);
-  const [filterClass,  setFilterClass]  = useState("all");
-  const [filterStatus, setFilterStatus] = useState<"all" | "open" | "overdue">("all");
-  const [modalOpen,    setModalOpen]    = useState(false);
-  const [editTarget,   setEditTarget]   = useState<Homework | null>(null);
+  const [tab, setTab] = useState<Tab>("todo");
+  const [classFilter, setClassFilter] = useState("all");
+  const [expanded, setExpanded] = useState<string | null>(null);
 
-  // Form state
-  const [fTitle, setFTitle] = useState("");
-  const [fClass, setFClass] = useState("");
-  const [fDue,   setFDue]   = useState("");
-  const [fDesc,  setFDesc]  = useState("");
-  const [fErr,   setFErr]   = useState("");
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editTarget, setEditTarget] = useState<Assignment | null>(null);
+  const [form, setForm] = useState({ title: "", classId: "", due: "", description: "" });
+  const [formError, setFormError] = useState("");
+
+  const classById = useMemo(
+    () => new Map(myClasses.map((cls) => [cls.id, cls])),
+    [myClasses],
+  );
 
   useEffect(() => {
-    if (!ready) return;
-    if (!teacherId) {
-      setLoadingHomework(false);
+    if (!ready || !teacherId) {
+      if (ready) setLoadingHomework(false);
       return;
     }
-
     let cancelled = false;
     setLoadingHomework(true);
 
     (async () => {
-      // Build the class list assigned to the current teacher.
-      const extra = (await loadExtraClasses()).filter(c => c.tutor_id === teacherId);
-      const all = [
-        ...baseClasses.map(c => ({ id: c.id, class_name: c.class_name, student_ids: c.student_ids })),
-        ...extra.map(c => ({ id: c.id, class_name: c.class_name, student_ids: c.student_ids })),
-      ];
-      const allIds = all.map(c => c.id);
+      const classIds = myClasses.map((cls) => cls.id);
+      const today = toLocalDateKey(new Date());
 
-      // These sources are independent. Loading them together avoids making the
-      // user wait for homework, then curriculum, then submissions in sequence.
-      const [manual, curriculum, loadedSubmissions] = await Promise.all([
-        loadHw(allIds),
-        loadCurriculumHw(all),
-        loadSubs(allIds),
+      const [manual, curriculumPerClass, students] = await Promise.all([
+        getTeacherHomework<Record<string, unknown>>(classIds).catch(() => []),
+        Promise.all(myClasses.map(async (cls) => {
+          const chapters = await getCurriculum(cls.id).catch(() => []);
+          const rows: Assignment[] = [];
+          const examIndexes: { lessonId: string; row: number }[] = [];
+          chapters.forEach((chapter) =>
+            chapter.sessions.forEach((session) =>
+              session.lessons.forEach((lesson) => {
+                if (lesson.type === "homework") {
+                  rows.push({
+                    id: lesson.id, classId: cls.id, title: lesson.title,
+                    description: lesson.description, kind: "file", source: "curriculum",
+                    dueDate: lesson.due_date ?? session.date ?? today,
+                    createdAt: session.date ?? today,
+                    fileUrl: lesson.file_url, submitted: 0, ungraded: 0,
+                  });
+                } else if (lesson.type === "exam") {
+                  examIndexes.push({ lessonId: lesson.id, row: rows.length });
+                  rows.push({
+                    id: lesson.id, classId: cls.id, title: lesson.title,
+                    description: lesson.description, kind: "exam", source: "curriculum",
+                    dueDate: lesson.exam_opens_at?.slice(0, 10) ?? session.date ?? today,
+                    createdAt: session.date ?? today,
+                    examStatus: lesson.exam_status ?? "draft",
+                    submitted: 0, ungraded: 0,
+                  });
+                }
+              }),
+            ),
+          );
+          const counts = await Promise.all(
+            examIndexes.map((exam) =>
+              getAllExamResults(cls.id, exam.lessonId).then((r) => r.length).catch(() => 0),
+            ),
+          );
+          examIndexes.forEach((exam, index) => { rows[exam.row].submitted = counts[index]; });
+          return rows;
+        })),
+        getStudents().catch(() => []),
       ]);
       if (cancelled) return;
 
-      const currIds = new Set(curriculum.map(h => h.id));
-      setMyClasses(all);
-      setFClass(all[0]?.id ?? "");
-      setHomeworks([...manual.filter(h => !currIds.has(h.id)), ...curriculum]);
-      setSubmissions(loadedSubmissions);
-    })().finally(() => {
-      if (!cancelled) setLoadingHomework(false);
-    });
+      const curriculum = curriculumPerClass.flat();
+      const curriculumIds = new Set(curriculum.map((row) => row.id));
+      const manualRows: Assignment[] = manual
+        .filter((row) => !curriculumIds.has(String(row.id)))
+        .map((row) => ({
+          id: String(row.id),
+          classId: String(row.class_id),
+          title: String(row.title ?? ""),
+          description: row.description ? String(row.description) : undefined,
+          kind: "file",
+          dueDate: String(row.due_date ?? today),
+          createdAt: String(row.created_at ?? row.due_date ?? today),
+          submitted: 0,
+          ungraded: 0,
+        }));
 
-    return () => {
-      cancelled = true;
-    };
-  }, [ready, teacherId, baseClasses]);
+      const all = [...manualRows, ...curriculum];
+      const names = new Map(students.map((student) => [student.id, student.full_name]));
+      const withName = (rows: GradableSubmission[]) =>
+        rows.map((row) => ({
+          ...row,
+          student_name: row.student_name || names.get(row.student_id) || row.student_id,
+        }));
+
+      // Nguồn Supabase là nguồn thật; bản cục bộ chỉ dùng khi chưa đồng bộ được.
+      const remote = await getSubmissionsByHomeworks(all.map((row) => row.id))
+        .catch(() => [] as GradableSubmission[]);
+      const loaded = remote.length > 0
+        ? withName(remote as GradableSubmission[])
+        : withName(await getHwSubmissions<GradableSubmission>({ classIds }).catch(() => []));
+      if (cancelled) return;
+
+      all.forEach((row) => {
+        if (row.kind === "exam") return;
+        const mine = loaded.filter((sub) => sub.homework_id === row.id);
+        row.submitted = mine.length;
+        row.ungraded = mine.filter((sub) => sub.score == null).length;
+      });
+
+      setAssignments(all);
+      setSubmissions(loaded);
+      setForm((current) => ({ ...current, classId: current.classId || classIds[0] || "" }));
+    })().finally(() => { if (!cancelled) setLoadingHomework(false); });
+
+    return () => { cancelled = true; };
+  }, [ready, teacherId, myClasses]);
+
+  const totalUngraded = assignments.reduce((sum, row) => sum + row.ungraded, 0);
+  // Chỉ bài thi đã mở mới thật sự "đang chạy"; bản nháp học viên chưa nhìn thấy.
+  const liveExams = assignments.filter(
+    (row) => row.kind === "exam" && row.examStatus === "open",
+  ).length;
+  const overdueFile = assignments.filter(
+    (row) => row.kind === "file" && isOverdue(row.dueDate),
+  ).length;
+
+  const rows = useMemo(() => {
+    const filtered = assignments.filter((row) => {
+      if (classFilter !== "all" && row.classId !== classFilter) return false;
+      if (tab === "exam") return row.kind === "exam";
+      if (tab === "todo") return row.kind === "file" && row.ungraded > 0;
+      return true;
+    });
+    // Việc cần làm lên trước: nhiều bài chưa chấm nhất, rồi tới hạn gần nhất.
+    return filtered.sort((a, b) =>
+      b.ungraded - a.ungraded || a.dueDate.localeCompare(b.dueDate),
+    );
+  }, [assignments, tab, classFilter]);
 
   function openCreate() {
     setEditTarget(null);
-    setFTitle(""); setFClass(myClasses[0]?.id ?? ""); setFDue(""); setFDesc(""); setFErr("");
+    setForm({ title: "", classId: myClasses[0]?.id ?? "", due: "", description: "" });
+    setFormError("");
     setModalOpen(true);
   }
 
-  function openEdit(hw: Homework) {
-    setEditTarget(hw);
-    setFTitle(hw.title); setFClass(hw.class_id); setFDue(hw.due_date); setFDesc(hw.description ?? ""); setFErr("");
+  function openEdit(row: Assignment) {
+    setEditTarget(row);
+    setForm({
+      title: row.title, classId: row.classId, due: row.dueDate,
+      description: row.description ?? "",
+    });
+    setFormError("");
     setModalOpen(true);
   }
 
   async function handleSave() {
-    if (!fTitle.trim()) { setFErr("Vui lòng nhập tiêu đề bài tập."); return; }
-    if (!fDue)          { setFErr("Vui lòng chọn hạn nộp."); return; }
-    setFErr("");
-
-    const item: Homework = editTarget
-      ? { ...editTarget, title: fTitle.trim(), class_id: fClass, due_date: fDue, description: fDesc }
+    if (!form.title.trim()) { setFormError("Vui lòng nhập tiêu đề bài tập."); return; }
+    if (!form.due) { setFormError("Vui lòng chọn hạn nộp."); return; }
+    const row: Assignment = editTarget
+      ? { ...editTarget, title: form.title.trim(), classId: form.classId, dueDate: form.due, description: form.description }
       : {
-          id:          `hw_${crypto.randomUUID()}`,
-          class_id:    fClass,
-          title:       fTitle.trim(),
-          description: fDesc,
-          due_date:    fDue,
-          created_at:  toLocalDateKey(new Date()),
+          id: `hw_${crypto.randomUUID()}`,
+          classId: form.classId,
+          title: form.title.trim(),
+          description: form.description,
+          kind: "file",
+          dueDate: form.due,
+          createdAt: toLocalDateKey(new Date()),
+          submitted: 0,
+          ungraded: 0,
         };
     try {
-      setHomeworks(await upsertHw(item, homeworks));
+      await upsertTeacherHomework({
+        id: row.id, class_id: row.classId, title: row.title,
+        description: row.description, due_date: row.dueDate, created_at: row.createdAt,
+      });
+      setAssignments((current) =>
+        current.some((item) => item.id === row.id)
+          ? current.map((item) => (item.id === row.id ? row : item))
+          : [row, ...current],
+      );
       setModalOpen(false);
     } catch {
-      setFErr("Không thể lưu bài tập. Dữ liệu cũ vẫn được giữ nguyên.");
+      setFormError("Không thể lưu bài tập. Dữ liệu cũ vẫn được giữ nguyên.");
     }
   }
 
   async function handleDelete(id: string) {
     if (!confirm("Bạn có chắc muốn xoá bài tập này không?")) return;
     try {
-      setHomeworks(await removeHw(id, homeworks));
+      await removeTeacherHomework(id);
+      setAssignments((current) => current.filter((row) => row.id !== id));
     } catch {
       alert("Không thể xóa bài tập. Dữ liệu cũ vẫn được giữ nguyên.");
     }
   }
 
-  // Submission stats per homework
-  const subStats = useMemo(() => {
-    const map: Record<string, { submitted: number; ungraded: number }> = {};
-    homeworks.forEach(hw => {
-      const subs = submissions.filter(s => s.homework_id === hw.id);
-      map[hw.id] = { submitted: subs.length, ungraded: subs.filter(s => s.score == null).length };
-    });
-    return map;
-  }, [homeworks, submissions]);
-
-  // Bài "quá hạn": chỉ áp dụng cho bài nộp file; bài làm câu hỏi tính theo trạng thái mở/đóng.
-  const isHwOverdue = (h: Homework) => h.kind !== "exam" && isOverdue(h.due_date);
-
-  const displayed = useMemo(() =>
-    homeworks.filter(hw => {
-      if (filterClass !== "all" && hw.class_id !== filterClass) return false;
-      if (filterStatus === "open"    &&  isHwOverdue(hw)) return false;
-      if (filterStatus === "overdue" && !isHwOverdue(hw)) return false;
-      return true;
-    }).sort((a, b) => (b.created_at ?? b.due_date ?? "").localeCompare(a.created_at ?? a.due_date ?? "")),
-    [homeworks, filterClass, filterStatus]
-  );
-
-  const openCount    = homeworks.filter(h => !isHwOverdue(h)).length;
-  const overdueCount = homeworks.filter(h =>  isHwOverdue(h)).length;
-
   if (loadingHomework) {
     return (
-      <PortalLayout role="teacher" userName={teacherName || "Giáo viên"} pageTitle="Quản lý Bài tập">
+      <PortalLayout role="teacher" userName={teacherName || "Giáo viên"} pageTitle="Bài tập & chấm bài">
         <HomeworkLoadingState />
       </PortalLayout>
     );
   }
 
   return (
-    <PortalLayout role="teacher" userName={teacherName || "Giáo viên"} pageTitle="Quản lý Bài tập">
-      <div className="space-y-6 max-w-6xl mx-auto">
+    <PortalLayout role="teacher" userName={teacherName || "Giáo viên"} pageTitle="Bài tập & chấm bài">
+      <div className="mx-auto max-w-6xl space-y-5">
         <SectionHeader
-          title="Bài tập đã giao"
-          subtitle={`${homeworks.length} bài tập · ${openCount} đang mở · ${overdueCount} quá hạn`}
+          title="Bài tập & chấm bài"
+          subtitle={
+            totalUngraded > 0
+              ? `${totalUngraded} bài đang chờ chấm · ${liveExams} bài thi đang mở · ${overdueFile} bài quá hạn`
+              : `Không còn bài nào chờ chấm · ${liveExams} bài thi đang mở`
+          }
           action={
             <Button size="sm" variant="gradient" onClick={openCreate}>
-              <Plus className="h-4 w-4 mr-1.5" /> Giao bài mới
+              <Plus className="mr-1.5 h-4 w-4" /> Giao bài mới
             </Button>
           }
         />
 
-        {/* ── Filters ──────────────────────────────────────── */}
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            onClick={() => setFilterClass("all")}
-            className={`px-3 py-1.5 text-xs font-semibold rounded-xl transition-all ${filterClass === "all" ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:bg-accent"}`}
-          >
-            Tất cả lớp
-          </button>
-          {myClasses.map(c => (
+          {([
+            { value: "todo", label: "Cần chấm", count: assignments.filter(r => r.kind === "file" && r.ungraded > 0).length },
+            { value: "all", label: "Tất cả bài tập", count: assignments.length },
+            { value: "exam", label: "Bài thi", count: assignments.filter(r => r.kind === "exam").length },
+          ] as const).map((option) => (
             <button
-              key={c.id}
-              onClick={() => setFilterClass(c.id)}
-              className={`px-3 py-1.5 text-xs font-semibold rounded-xl transition-all ${filterClass === c.id ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:bg-accent"}`}
+              key={option.value}
+              type="button"
+              onClick={() => { setTab(option.value); setExpanded(null); }}
+              className={`rounded-xl px-3 py-1.5 text-xs font-semibold transition-all ${
+                tab === option.value
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-muted text-muted-foreground hover:bg-accent"
+              }`}
             >
-              {c.class_name}
+              {option.label}
+              {option.count > 0 && (
+                <span className="ml-1.5 rounded-full bg-black/10 px-1.5 text-[10px] font-bold dark:bg-white/15">
+                  {option.count}
+                </span>
+              )}
             </button>
           ))}
-          <div className="w-px h-5 bg-border mx-1" />
-          {(["all", "open", "overdue"] as const).map(f => (
-            <button
-              key={f}
-              onClick={() => setFilterStatus(f)}
-              className={`px-3 py-1.5 text-xs font-semibold rounded-xl transition-all ${filterStatus === f ? "bg-foreground text-background" : "bg-muted text-muted-foreground hover:bg-accent"}`}
-            >
-              {{ all: "Tất cả", open: "Đang mở", overdue: "Quá hạn" }[f]}
-            </button>
-          ))}
+
+          {myClasses.length > 1 && (
+            <>
+              <div className="mx-1 h-5 w-px bg-border" />
+              <select
+                value={classFilter}
+                onChange={(event) => { setClassFilter(event.target.value); setExpanded(null); }}
+                className="h-8 rounded-xl border border-input bg-card px-2 text-xs font-semibold outline-none focus:ring-2 focus:ring-ring"
+              >
+                <option value="all">Tất cả lớp</option>
+                {myClasses.map((cls) => (
+                  <option key={cls.id} value={cls.id}>{cls.class_name}</option>
+                ))}
+              </select>
+            </>
+          )}
         </div>
 
-        {/* ── Grid ─────────────────────────────────────────── */}
-        {displayed.length === 0 ? (
-          <div className="py-16 text-center text-muted-foreground border-2 border-dashed border-border/50 rounded-2xl">
-            <FileText className="h-10 w-10 mx-auto mb-3 opacity-20" />
-            <p className="font-medium text-sm">Chưa có bài tập nào.</p>
-                    <p className="text-xs mt-1">Nhấn &quot;Giao bài mới&quot; để bắt đầu.</p>
+        {rows.length === 0 ? (
+          <div className="rounded-2xl border-2 border-dashed border-border/50 py-16 text-center text-muted-foreground">
+            <FileText className="mx-auto mb-3 h-10 w-10 opacity-20" />
+            <p className="text-sm font-medium">
+              {tab === "todo" ? "Không còn bài nào chờ chấm." : "Chưa có bài tập nào."}
+            </p>
+            {tab === "todo" && assignments.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setTab("all")}
+                className="mt-2 text-xs font-semibold text-primary hover:underline"
+              >
+                Xem tất cả bài tập
+              </button>
+            )}
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
-            {displayed.map((hw, i) => {
-              const cls    = myClasses.find(c => c.id === hw.class_id);
-              const isExam = hw.kind === "exam";
-              const status = dueStatus(hw.due_date);
-              const stats  = subStats[hw.id] ?? { submitted: 0, ungraded: 0 };
-              const total  = cls?.student_ids?.length ?? 0;
-              const submitted = isExam ? (hw.exam_submitted ?? 0) : stats.submitted;
-              const examBadge = hw.exam_status === "open"
-                ? { label: "● Đang mở", cls: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" }
-                : hw.exam_status === "closed"
-                ? { label: "Đã đóng", cls: "bg-muted text-muted-foreground" }
-                : { label: "Nháp", cls: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400" };
+          <div className="overflow-hidden rounded-2xl border border-border">
+            {/* Đầu bảng chỉ hiện trên màn rộng; mobile đọc theo từng dòng. */}
+            <div className="hidden grid-cols-[1fr_140px_120px_110px_40px] gap-3 border-b border-border bg-muted/40 px-4 py-2 text-[11px] font-bold uppercase tracking-wide text-muted-foreground md:grid">
+              <span>Bài tập</span>
+              <span>Lớp</span>
+              <span>Hạn / Trạng thái</span>
+              <span className="text-right">Đã nộp · Chờ chấm</span>
+              <span />
+            </div>
 
-              return (
-                <Card
-                  key={hw.id}
-                  className="hover:shadow-md hover:-translate-y-0.5 transition-all animate-fade-in flex flex-col group border-border/60"
-                  style={{ animationDelay: `${(i % 9) * 50}ms` }}
-                >
-                  <CardHeader className="pb-3 border-b border-border/50">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex items-start gap-2.5 min-w-0">
-                        <div className="p-2 bg-amber-500/10 rounded-lg shrink-0 mt-0.5">
-                          <NotebookPen className="h-4 w-4 text-amber-600 dark:text-amber-400" />
-                        </div>
+            <div className="divide-y divide-border">
+              {rows.map((row) => {
+                const cls = classById.get(row.classId);
+                const total = cls?.student_ids?.length ?? 0;
+                const isOpen = expanded === row.id;
+                const due = dueLabel(row.dueDate);
+                const rowSubmissions = submissions.filter((sub) => sub.homework_id === row.id);
+
+                return (
+                  <div key={row.id} className={isOpen ? "bg-muted/20" : ""}>
+                    <div className="grid grid-cols-1 items-center gap-2 px-4 py-3 md:grid-cols-[1fr_140px_120px_110px_40px] md:gap-3">
+                      <div className="flex min-w-0 items-start gap-2">
+                        <span className={`mt-0.5 shrink-0 rounded-lg p-1.5 ${row.kind === "exam" ? "bg-rose-500/10" : "bg-amber-500/10"}`}>
+                          {row.kind === "exam"
+                            ? <PenSquare className="h-3.5 w-3.5 text-rose-600 dark:text-rose-400" />
+                            : <FileText className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />}
+                        </span>
                         <div className="min-w-0">
-                          <CardTitle className="text-sm line-clamp-2 leading-snug">{hw.title}</CardTitle>
-                          <div className="flex items-center gap-1 mt-1">
-                            <BookOpen className="h-3 w-3 text-muted-foreground shrink-0" />
-                            <p className="text-xs text-muted-foreground truncate">{cls?.class_name ?? hw.class_id}</p>
+                          <p className="truncate text-sm font-semibold text-foreground">{row.title}</p>
+                          <div className="mt-0.5 flex flex-wrap items-center gap-2">
+                            {row.source === "curriculum" && (
+                              <span className="text-[10px] font-semibold text-muted-foreground">Từ lộ trình</span>
+                            )}
+                            {row.fileUrl && (
+                              <a
+                                href={row.fileUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline"
+                              >
+                                <Download className="h-3 w-3" /> Đề bài
+                              </a>
+                            )}
                           </div>
                         </div>
                       </div>
-                      {/* Hover actions — chỉ cho bài tạo thủ công (không phải từ lộ trình) */}
-                      {hw.source !== "curriculum" && (
-                        <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <button
-                            onClick={() => openEdit(hw)}
-                            className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 transition-all"
-                            title="Chỉnh sửa"
-                          >
-                            <Edit2 className="h-3.5 w-3.5" />
-                          </button>
-                          <button
-                            onClick={() => handleDelete(hw.id)}
-                            className="p-1.5 rounded-lg text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/10 transition-all"
-                            title="Xoá"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        </div>
-                      )}
-                    </div>
 
-                    {/* Status + kind */}
-                    <div className="flex items-center justify-between mt-2.5 gap-2 flex-wrap">
-                      {isExam ? (
-                        <>
-                          <span className={`inline-flex items-center gap-1.5 text-[11px] font-semibold px-2 py-0.5 rounded-full ${examBadge.cls}`}>
-                            {examBadge.label}
-                          </span>
-                          <span className="flex items-center gap-1 text-[11px] font-semibold text-rose-600 dark:text-rose-400">
-                            <PenSquare className="h-3 w-3 shrink-0" /> Làm trên hệ thống
-                          </span>
-                        </>
+                      <span className="flex items-center gap-1 truncate text-xs text-muted-foreground">
+                        <BookOpen className="h-3 w-3 shrink-0 md:hidden" />
+                        {cls?.class_name ?? row.classId}
+                      </span>
+
+                      {row.kind === "exam" ? (
+                        <span className={`w-fit rounded-full px-2 py-0.5 text-[11px] font-semibold ${EXAM_BADGE[row.examStatus ?? "draft"].className}`}>
+                          {EXAM_BADGE[row.examStatus ?? "draft"].text}
+                        </span>
                       ) : (
-                        <>
-                          <span className={`inline-flex items-center gap-1.5 text-[11px] font-semibold px-2 py-0.5 rounded-full ${status.color}`}>
-                            <span className={`h-1.5 w-1.5 rounded-full ${status.dot}`} />
-                            {status.label}
-                          </span>
-                          <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
-                            <Calendar className="h-3 w-3 shrink-0" />
-                            {new Date(hw.due_date).toLocaleDateString("vi-VN")}
-                          </span>
-                        </>
+                        <span className={`flex items-center gap-1 text-xs font-medium ${due.className}`}>
+                          <Calendar className="h-3 w-3 shrink-0" />
+                          {due.text}
+                        </span>
                       )}
+
+                      <div className="flex items-center gap-2 md:justify-end">
+                        <span className="text-sm font-bold text-foreground">
+                          {row.submitted}
+                          {total > 0 && <span className="text-xs font-normal text-muted-foreground">/{total}</span>}
+                        </span>
+                        {row.ungraded > 0 && (
+                          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
+                            {row.ungraded} chờ
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center justify-end gap-1">
+                        {row.source !== "curriculum" && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => openEdit(row)}
+                              title="Chỉnh sửa"
+                              className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary"
+                            >
+                              <Edit2 className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDelete(row.id)}
+                              title="Xoá"
+                              className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-900/10"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </>
+                        )}
+                        {row.kind === "exam" ? (
+                          <button
+                            type="button"
+                            onClick={() => router.push(`/teacher/classes/${row.classId}?tab=curriculum`)}
+                            title="Mở & chấm trên lộ trình"
+                            className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                          >
+                            <ArrowRight className="h-4 w-4" />
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setExpanded(isOpen ? null : row.id)}
+                            title={isOpen ? "Thu gọn" : "Xem & chấm bài nộp"}
+                            className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                          >
+                            {isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                          </button>
+                        )}
+                      </div>
                     </div>
-                  </CardHeader>
 
-                  <CardContent className="py-3.5 flex-1 space-y-3">
-                    {hw.description && (
-                      <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">{hw.description}</p>
-                    )}
-
-                    {/* File đề bài đính kèm (kind file) */}
-                    {!isExam && hw.file_url && (
-                      <a
-                        href={hw.file_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline"
-                      >
-                        <Download className="h-3.5 w-3.5" /> Đề bài đính kèm
-                      </a>
-                    )}
-
-                    {/* Submission stats */}
-                    {isExam ? (
-                      <div className="bg-emerald-50 dark:bg-emerald-900/20 p-2.5 rounded-xl border border-emerald-100 dark:border-emerald-800/50">
-                        <div className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 mb-1">
-                          <CheckCircle2 className="h-3.5 w-3.5" />
-                          <span className="text-[10px] font-bold uppercase tracking-wide">Đã làm bài</span>
-                        </div>
-                        <p className="text-lg font-bold text-emerald-700 dark:text-emerald-300 leading-none">
-                          {submitted}
-                          {total > 0 && <span className="text-xs font-normal opacity-60 ml-1">/ {total}</span>}
-                        </p>
-                      </div>
-                    ) : (
-                      <div className="grid grid-cols-2 gap-2">
-                        <div className="bg-emerald-50 dark:bg-emerald-900/20 p-2.5 rounded-xl border border-emerald-100 dark:border-emerald-800/50">
-                          <div className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 mb-1">
-                            <CheckCircle2 className="h-3.5 w-3.5" />
-                            <span className="text-[10px] font-bold uppercase tracking-wide">Đã nộp</span>
-                          </div>
-                          <p className="text-lg font-bold text-emerald-700 dark:text-emerald-300 leading-none">
-                            {submitted}
-                            {total > 0 && <span className="text-xs font-normal opacity-60 ml-1">/ {total}</span>}
+                    {isOpen && (
+                      <div className="space-y-2 border-t border-border/60 bg-card px-4 py-3">
+                        {rowSubmissions.length === 0 ? (
+                          <p className="py-4 text-center text-xs text-muted-foreground">
+                            Chưa có học viên nào nộp bài.
                           </p>
-                        </div>
-                        <div className="bg-amber-50 dark:bg-amber-900/20 p-2.5 rounded-xl border border-amber-100 dark:border-amber-800/50">
-                          <div className="flex items-center gap-1.5 text-amber-600 dark:text-amber-400 mb-1">
-                            <Clock className="h-3.5 w-3.5" />
-                            <span className="text-[10px] font-bold uppercase tracking-wide">Chưa chấm</span>
-                          </div>
-                          <p className="text-lg font-bold text-amber-700 dark:text-amber-300 leading-none">
-                            {stats.ungraded}
-                          </p>
-                        </div>
+                        ) : (
+                          rowSubmissions.map((sub) => (
+                            <SubmissionGrader
+                              key={sub.id}
+                              submission={sub}
+                              classId={row.classId}
+                              homeworkTitle={row.title}
+                              onGraded={(patch) => {
+                                setSubmissions((current) =>
+                                  current.map((item) =>
+                                    item.id === sub.id ? { ...item, ...patch } : item,
+                                  ),
+                                );
+                                setAssignments((current) =>
+                                  current.map((item) =>
+                                    item.id === row.id && sub.score == null
+                                      ? { ...item, ungraded: Math.max(0, item.ungraded - 1) }
+                                      : item,
+                                  ),
+                                );
+                              }}
+                            />
+                          ))
+                        )}
                       </div>
                     )}
-                  </CardContent>
-
-                  <CardFooter className="pt-0 pb-3.5 px-4">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="w-full text-xs hover:bg-primary/5 hover:text-primary hover:border-primary/40 transition-colors group/btn"
-                      onClick={() => router.push(isExam
-                        ? `/teacher/classes/${hw.class_id}?tab=curriculum`
-                        : `/teacher/submissions?hw=${hw.id}`)}
-                    >
-                      {isExam ? "Mở & chấm trên lộ trình" : "Xem bài nộp & Chấm bài"}
-                      <ArrowRight className="h-3.5 w-3.5 ml-1.5 group-hover/btn:translate-x-0.5 transition-transform" />
-                    </Button>
-                  </CardFooter>
-                </Card>
-              );
-            })}
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
       </div>
 
-      {/* ── Modal ──────────────────────────────────────────── */}
       {modalOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in"
-          onClick={e => { if (e.target === e.currentTarget) setModalOpen(false); }}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
+          onClick={(event) => { if (event.target === event.currentTarget) setModalOpen(false); }}
         >
-          <div className="bg-card w-full max-w-lg rounded-2xl shadow-xl border border-border overflow-hidden">
-            <div className="p-4 border-b border-border/50 flex justify-between items-center bg-muted/30">
-              <h2 className="font-bold text-base flex items-center gap-2">
+          <div className="w-full max-w-lg overflow-hidden rounded-2xl border border-border bg-card shadow-xl">
+            <div className="flex items-center justify-between border-b border-border/50 bg-muted/30 p-4">
+              <h2 className="flex items-center gap-2 text-base font-bold">
                 <FileText className="h-4 w-4 text-primary" />
                 {editTarget ? "Chỉnh sửa bài tập" : "Giao bài tập mới"}
               </h2>
-              <button onClick={() => setModalOpen(false)} className="p-1.5 rounded-lg hover:bg-accent text-muted-foreground">
+              <button
+                type="button"
+                onClick={() => setModalOpen(false)}
+                className="rounded-lg p-1.5 text-muted-foreground hover:bg-accent"
+              >
                 <X className="h-4 w-4" />
               </button>
             </div>
-
-            <div className="p-5 space-y-4">
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Tiêu đề bài tập *</label>
-                <Input
-                  value={fTitle}
-                  onChange={e => { setFTitle(e.target.value); setFErr(""); }}
-                  placeholder="VD: Bài tập chương 3 — Tích phân"
-                  autoFocus
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Lớp *</label>
-                  <select
-                    value={fClass}
-                    onChange={e => setFClass(e.target.value)}
-                    className="w-full h-10 px-3 rounded-xl border border-input bg-card text-sm outline-none focus:ring-2 focus:ring-ring"
-                  >
-                    {myClasses.map(c => (
-                      <option key={c.id} value={c.id}>{c.class_name}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Hạn nộp *</label>
-                  <Input type="date" value={fDue} onChange={e => { setFDue(e.target.value); setFErr(""); }} />
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Mô tả / Yêu cầu</label>
-                <textarea
-                  value={fDesc}
-                  onChange={e => setFDesc(e.target.value)}
-                  rows={4}
-                  className="w-full rounded-xl border border-input bg-card px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring resize-none placeholder:text-muted-foreground"
-                  placeholder="Yêu cầu làm bài, lưu ý khi nộp bài..."
-                />
-              </div>
-
-              {fErr && <p className="text-xs text-destructive">{fErr}</p>}
+            <div className="space-y-3 p-4">
+              <Input
+                value={form.title}
+                onChange={(event) => setForm({ ...form, title: event.target.value })}
+                placeholder="Tiêu đề bài tập"
+              />
+              <select
+                value={form.classId}
+                onChange={(event) => setForm({ ...form, classId: event.target.value })}
+                className="h-10 w-full rounded-xl border border-input bg-card px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+              >
+                {myClasses.map((cls) => (
+                  <option key={cls.id} value={cls.id}>{cls.class_name}</option>
+                ))}
+              </select>
+              <Input
+                type="date"
+                value={form.due}
+                onChange={(event) => setForm({ ...form, due: event.target.value })}
+              />
+              <textarea
+                value={form.description}
+                onChange={(event) => setForm({ ...form, description: event.target.value })}
+                placeholder="Mô tả / yêu cầu bài tập"
+                rows={3}
+                className="w-full resize-none rounded-xl border border-input bg-card px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+              />
+              <p className="text-xs text-muted-foreground">
+                Học viên sẽ nộp bài bằng file. Bài thi làm trên hệ thống được soạn trong tab Lộ trình của lớp.
+              </p>
+              {formError && <p className="text-sm text-red-600" role="alert">{formError}</p>}
             </div>
-
-            <div className="p-4 border-t border-border/50 bg-muted/20 flex justify-end gap-3">
-              <Button variant="outline" onClick={() => setModalOpen(false)}>Huỷ</Button>
-              <Button variant="gradient" onClick={handleSave}>
-                {editTarget ? "Lưu thay đổi" : "Đăng bài"}
+            <div className="flex justify-end gap-2 border-t border-border/50 bg-muted/20 p-4">
+              <Button variant="outline" size="sm" onClick={() => setModalOpen(false)}>Huỷ</Button>
+              <Button variant="gradient" size="sm" onClick={handleSave}>
+                {editTarget ? "Lưu thay đổi" : "Giao bài"}
               </Button>
             </div>
           </div>

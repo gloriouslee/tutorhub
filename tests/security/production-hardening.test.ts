@@ -675,12 +675,26 @@ test("homework navigation and data loading always provide immediate feedback", a
 
   assert.match(teacherHomework, /loadingHomework/);
   assert.match(teacherHomework, /<HomeworkLoadingState \/>/);
-  assert.match(teacherHomework, /const \[manual, curriculum, loadedSubmissions\] = await Promise\.all/);
+  // Ba nguồn độc lập phải tải song song; bài nộp tải sau vì cần id bài tập.
+  assert.match(teacherHomework, /const \[manual, curriculumPerClass, students\] = await Promise\.all/);
+  // Chấm ngay trong hàng đợi, không điều hướng sang trang khác.
+  assert.match(teacherHomework, /<SubmissionGrader/);
 
   assert.match(studentClass, /homeworkLoading/);
   assert.match(studentClass, /Đang tải bài tập…/);
   assert.match(teacherClass, /HomeworkPanelFallback/);
   assert.match(teacherClass, /persistedHomeworkLoaded/);
+});
+
+test("teacher class curriculum uses a compact full-width workspace", async () => {
+  const classPage = await read("src/app/teacher/classes/[classId]/page.tsx");
+  const curriculum = await read("src/components/teacher/CurriculumTab.tsx");
+
+  assert.match(classPage, /max-w-\[1440px\] space-y-4/);
+  assert.match(classPage, /px-3 py-3 text-xs font-semibold/);
+  assert.match(curriculum, /w-full space-y-3/);
+  assert.match(curriculum, /Cấu trúc lộ trình/);
+  assert.doesNotMatch(curriculum, /max-w-3xl/);
 });
 
 test("guardian links are many-to-many, consent-based, and RLS scoped", async () => {
