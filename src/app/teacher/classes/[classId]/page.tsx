@@ -553,37 +553,37 @@ export default function TeacherClassDetailPage() {
 
   return (
     <PortalLayout role="teacher" userName={teacherName || "Giáo viên"} pageTitle={cls.class_name}>
-      <div className="space-y-6 max-w-6xl mx-auto">
-        <Link href="/teacher/classes" className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-primary transition-colors">
+      <div className="mx-auto max-w-[1440px] space-y-4">
+        <Link href="/teacher/classes" className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-primary">
           <ArrowLeft className="h-4 w-4" /> Quay lại danh sách lớp
         </Link>
 
         {/* Header */}
         <div className="rounded-2xl overflow-hidden border border-border/50 shadow-sm">
-          <div className="p-6 md:p-8 text-white relative" style={{ background: `linear-gradient(135deg, ${cls.color} 0%, #000 250%)` }}>
-            <div className="flex flex-col md:flex-row gap-5 items-start">
-              <div className="h-16 w-16 bg-white/20 rounded-2xl flex items-center justify-center backdrop-blur-md border border-white/30 shadow-lg shrink-0">
-                <BookOpen className="h-8 w-8" />
+          <div className="relative p-4 text-white md:p-5" style={{ background: `linear-gradient(135deg, ${cls.color} 0%, #000 250%)` }}>
+            <div className="flex flex-col items-start gap-4 md:flex-row md:items-center">
+              <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl border border-white/30 bg-white/20 shadow-md backdrop-blur-md">
+                <BookOpen className="h-7 w-7" />
               </div>
               <div className="flex-1 min-w-0">
-                <div className="flex flex-wrap items-center gap-2 mb-2">
+                <div className="mb-1.5 flex flex-wrap items-center gap-2">
                   <LearningModeBadge mode={cls.learning_mode} />
                   <Badge className="bg-amber-500/80 text-white border-0 text-[10px]">Giáo viên</Badge>
                 </div>
-                <h1 className="text-2xl md:text-3xl font-bold leading-tight">{cls.class_name}</h1>
-                <p className="text-white/70 mt-1 font-medium">{cls.subject}</p>
+                <h1 className="text-2xl font-bold leading-tight">{cls.class_name}</h1>
+                <p className="mt-0.5 text-sm font-medium text-white/70">{cls.subject}</p>
               </div>
-              <div className="flex flex-wrap gap-3 shrink-0">
-                <div className="bg-white/10 backdrop-blur px-4 py-2 rounded-xl text-center border border-white/20">
-                  <p className="text-2xl font-bold">{lectureMaterials.length}</p>
+              <div className="flex shrink-0 flex-wrap gap-2">
+                <div className="min-w-[76px] rounded-xl border border-white/20 bg-white/10 px-3 py-1.5 text-center backdrop-blur">
+                  <p className="text-xl font-bold leading-tight">{lectureMaterials.length}</p>
                   <p className="text-[11px] text-white/60">Bài giảng</p>
                 </div>
-                <div className="bg-white/10 backdrop-blur px-4 py-2 rounded-xl text-center border border-white/20">
-                  <p className="text-2xl font-bold">{materials.length}</p>
+                <div className="min-w-[76px] rounded-xl border border-white/20 bg-white/10 px-3 py-1.5 text-center backdrop-blur">
+                  <p className="text-xl font-bold leading-tight">{materials.length}</p>
                   <p className="text-[11px] text-white/60">Tài liệu</p>
                 </div>
-                <div className="bg-white/10 backdrop-blur px-4 py-2 rounded-xl text-center border border-white/20">
-                  <p className="text-2xl font-bold">{classStudents.length}</p>
+                <div className="min-w-[76px] rounded-xl border border-white/20 bg-white/10 px-3 py-1.5 text-center backdrop-blur">
+                  <p className="text-xl font-bold leading-tight">{classStudents.length}</p>
                   <p className="text-[11px] text-white/60">Học viên</p>
                 </div>
               </div>
@@ -591,11 +591,11 @@ export default function TeacherClassDetailPage() {
           </div>
 
           {/* Tabs */}
-          <div className="bg-card border-b border-border px-4 md:px-8 flex gap-1 overflow-x-auto">
+          <div className="flex gap-0 overflow-x-auto border-b border-border bg-card px-2 md:px-3">
             {TABS.map(tab => (
               <button key={tab.key} onClick={() => setActiveTab(tab.key)}
-                className={`flex items-center gap-2 px-4 py-3.5 text-sm font-medium border-b-2 transition-all whitespace-nowrap ${activeTab === tab.key ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground hover:border-border"}`}>
-                <tab.icon className="h-4 w-4" />{tab.label}
+                className={`flex items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-3 text-xs font-semibold transition-all ${activeTab === tab.key ? "border-primary bg-primary/5 text-primary" : "border-transparent text-muted-foreground hover:border-border hover:bg-muted/40 hover:text-foreground"}`}>
+                <tab.icon className="h-3.5 w-3.5" />{tab.label}
               </button>
             ))}
           </div>

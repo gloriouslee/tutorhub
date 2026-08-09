@@ -5,7 +5,6 @@ import { toLocalDateKey } from "@/lib/utils";
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
   getCurriculum, mutateCurriculum, getAllExamResults, addNotification,
@@ -16,8 +15,8 @@ import ExamEditorModal from "@/components/teacher/ExamEditorModal";
 import ExamGradingView from "@/components/teacher/ExamGradingView";
 import {
   Plus, ChevronDown, ChevronRight, Trash2, Edit2, X, Check,
-  PlayCircle, FileText, ClipboardList, Video, Eye, EyeOff,
-  GripVertical, BookOpen, CalendarDays, Link2, Link2Off,
+  PlayCircle, FileText, Video, Eye, EyeOff,
+  GripVertical, BookOpen, CalendarDays,
   Upload, Loader2, AlertCircle, PenSquare, Lock, Unlock,
   Clock, Users, User, NotebookPen,
 } from "lucide-react";
@@ -110,7 +109,8 @@ function LessonModal({
   function toggleStudent(id: string) {
     setSelectedIds(prev => {
       const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
   }
@@ -535,7 +535,6 @@ export default function CurriculumTab({ classId, schedule, students = [], gradeL
         }
       }
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [classId]);
 
   const [examResultsMap, setExamResultsMap] = useState<Record<string, StoredExamResult[]>>({});
@@ -594,7 +593,12 @@ export default function CurriculumTab({ classId, schedule, students = [], gradeL
   }
 
   function toggle(id: string) {
-    setExpanded(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+    setExpanded(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   }
 
   function updateExamField(chapterId: string, sessionId: string, lessonId: string, patch: Partial<CurriculumLesson>) {
@@ -725,21 +729,29 @@ export default function CurriculumTab({ classId, schedule, students = [], gradeL
   chapters.forEach(ch => ch.sessions.forEach(s => s.lessons.forEach(l => { lessonTitleById[l.id] = l.title; })));
 
   return (
-    <div className="space-y-4 max-w-3xl">
+    <div className="w-full space-y-3">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-sm text-muted-foreground">
-            {chapters.length} chương · {totalSessions} buổi · {totalLessons} nội dung
-          </p>
+      <div className="flex flex-col gap-3 rounded-xl border border-border/60 bg-card px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+            <BookOpen className="h-4 w-4" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-foreground">Cấu trúc lộ trình</p>
+            <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+              <span><strong className="font-semibold text-foreground">{chapters.length}</strong> chương</span>
+              <span><strong className="font-semibold text-foreground">{totalSessions}</strong> buổi</span>
+              <span><strong className="font-semibold text-foreground">{totalLessons}</strong> nội dung</span>
+            </div>
+          </div>
         </div>
-        <Button size="sm" variant="gradient" onClick={addChapter}>
+        <Button size="sm" variant="gradient" onClick={addChapter} className="shrink-0">
           <Plus className="h-4 w-4 mr-1.5" /> Thêm chương
         </Button>
       </div>
 
       {chapters.length === 0 && (
-        <div className="py-20 text-center border-2 border-dashed border-border/50 rounded-2xl">
+        <div className="rounded-2xl border-2 border-dashed border-border/50 py-14 text-center">
           <BookOpen className="h-12 w-12 text-muted-foreground/20 mx-auto mb-4" />
           <h3 className="text-sm font-semibold text-foreground">Chưa có lộ trình nào</h3>
           <p className="text-xs text-muted-foreground mt-1 mb-4">Bắt đầu bằng cách thêm chương đầu tiên.</p>
@@ -753,10 +765,10 @@ export default function CurriculumTab({ classId, schedule, students = [], gradeL
       {chapters.map((chapter, ci) => {
         const chExpanded = expanded.has(chapter.id);
         return (
-          <div key={chapter.id} className="border border-border/60 rounded-2xl overflow-hidden bg-card">
+          <div key={chapter.id} className="overflow-hidden rounded-xl border border-border/60 bg-card shadow-sm">
             {/* Chapter header */}
             <div
-              className="flex items-center gap-3 px-4 py-3 bg-muted/30 cursor-pointer select-none hover:bg-muted/50 transition-colors"
+              className="flex cursor-pointer select-none items-center gap-2.5 bg-muted/30 px-3.5 py-2.5 transition-colors hover:bg-muted/50"
               onClick={() => toggle(chapter.id)}
             >
               <GripVertical className="h-4 w-4 text-muted-foreground/40 shrink-0" />
@@ -789,7 +801,7 @@ export default function CurriculumTab({ classId, schedule, students = [], gradeL
                     <div key={session.id} className="bg-card">
                       {/* Session header — wraps on mobile so the title isn't squeezed */}
                       <div
-                        className="flex flex-wrap items-center gap-x-2 gap-y-1.5 px-5 py-2.5 cursor-pointer select-none hover:bg-muted/30 transition-colors"
+                        className="flex cursor-pointer select-none flex-wrap items-center gap-x-2 gap-y-1.5 px-4 py-2 transition-colors hover:bg-muted/30"
                         onClick={() => toggle(session.id)}
                       >
                         {/* Left: chevron + số buổi + tên (chiếm cả hàng trên mobile) */}
@@ -858,7 +870,7 @@ export default function CurriculumTab({ classId, schedule, students = [], gradeL
 
                       {/* Lessons */}
                       {sExpanded && (
-                        <div className="px-5 pb-3 space-y-1.5">
+                        <div className="space-y-1.5 px-4 pb-2.5">
                           {session.lessons.length === 0 && (
                             <p className="text-xs text-muted-foreground py-2 italic">Chưa có nội dung. Nhấn + để thêm.</p>
                           )}
@@ -871,7 +883,7 @@ export default function CurriculumTab({ classId, schedule, students = [], gradeL
                             return (
                               <div key={lesson.id} className="space-y-0">
                                 <div
-                                  className={`flex flex-wrap items-center gap-x-3 gap-y-2 p-2.5 rounded-xl border transition-colors ${lesson.is_published ? "border-border/50 bg-background" : "border-dashed border-border/40 bg-muted/20 opacity-70"}`}
+                                  className={`flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border p-2.5 transition-colors ${lesson.is_published ? "border-border/50 bg-background hover:border-border" : "border-dashed border-border/40 bg-muted/20 opacity-70"}`}
                                 >
                                   {/* Left: icon + nội dung (chiếm cả hàng trên mobile) */}
                                   <div className="flex items-center gap-3 min-w-0 basis-full sm:basis-0 sm:flex-1">
@@ -990,7 +1002,7 @@ export default function CurriculumTab({ classId, schedule, students = [], gradeL
                 })}
 
                 {/* Add session */}
-                <div className="px-4 py-2.5">
+                <div className="px-4 py-2">
                   <button
                     onClick={() => addSession(chapter.id)}
                     className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary transition-colors"
