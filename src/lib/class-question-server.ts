@@ -78,9 +78,17 @@ export async function getQuestionForActor(
   if (!question) return { question: null, allowed: false };
 
   if (actor.role === "student" && actor.studentId) {
+    const { data: classRow, error: classError } = await admin
+      .from("classes")
+      .select("id")
+      .eq("id", question.class_id)
+      .contains("student_ids", [actor.studentId])
+      .maybeSingle();
+    if (classError) throw classError;
     return {
       question,
-      allowed: String(question.student_id) === actor.studentId,
+      allowed: Boolean(classRow),
+      ownsQuestion: String(question.student_id) === actor.studentId,
     };
   }
   if (actor.role === "teacher" && actor.teacherId) {
@@ -91,14 +99,15 @@ export async function getQuestionForActor(
       .eq("tutor_id", actor.teacherId)
       .maybeSingle();
     if (classError) throw classError;
-    return { question, allowed: Boolean(classRow) };
+    return { question, allowed: Boolean(classRow), ownsQuestion: false };
   }
-  return { question, allowed: false };
+  return { question, allowed: false, ownsQuestion: false };
 }
 
 export async function hydrateQuestionRows(
   admin: AdminClient,
   rows: Record<string, unknown>[],
+  viewerUserId: string,
 ): Promise<ClassQuestionThread[]> {
   if (rows.length === 0) return [];
   const questionIds = rows.map((row) => String(row.id));
@@ -107,7 +116,7 @@ export async function hydrateQuestionRows(
   const [messagesResult, studentsResult, classesResult] = await Promise.all([
     admin
       .from("class_question_messages")
-      .select("id,question_id,author_role,author_name,content,attachment_url,attachment_name,attachment_size,created_at")
+      .select("id,question_id,author_user_id,author_role,author_name,content,attachment_url,attachment_name,attachment_size,created_at")
       .in("question_id", questionIds)
       .order("created_at", { ascending: true }),
     admin.from("students").select("id,full_name").in("id", studentIds),
@@ -135,6 +144,7 @@ export async function hydrateQuestionRows(
       attachment_name: raw.attachment_name ? String(raw.attachment_name) : null,
       attachment_size: raw.attachment_size ? String(raw.attachment_size) : null,
       created_at: String(raw.created_at),
+      is_own: String(raw.author_user_id) === viewerUserId,
     });
     messagesByQuestion.set(questionId, messages);
   }

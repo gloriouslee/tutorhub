@@ -9,7 +9,7 @@ import {
   BookOpen, Calendar, ClipboardList, GraduationCap,
   LayoutDashboard, User, LogOut,
   Users, DollarSign, Settings, BarChart3, FileText,
-  CheckSquare, BookMarked, MessageSquare, CircleHelp, X, Shield,
+  CheckSquare, BookMarked, MessageSquare, X, Shield,
   Loader2, PanelLeftClose, UserRoundPlus,
 } from "lucide-react";
 import { UserAvatar } from "@/components/ui/avatar";
@@ -32,7 +32,7 @@ const navConfig: Record<UserRole, NavItem[]> = {
     { label: "Tổng quan",  href: "/student",               icon: LayoutDashboard },
     { label: "Lớp của tôi",href: "/student/classes",        icon: BookOpen },
     { label: "Bài tập",    href: "/student/homework",       icon: ClipboardList },
-    { label: "Hỏi đáp",     href: "/student/questions",      icon: CircleHelp },
+    { label: "Cộng đồng",   href: "/student/questions",      icon: Users },
     { label: "Tài liệu",   href: "/student/materials",      icon: BookMarked },
     { label: "Điểm thi",   href: "/student/scores",         icon: GraduationCap },
     { label: "Thanh toán", href: "/student/payments",       icon: DollarSign },
@@ -53,7 +53,7 @@ const navConfig: Record<UserRole, NavItem[]> = {
     { label: "Bài tập",    href: "/teacher/homework",       icon: ClipboardList },
     { label: "Điểm danh",  href: "/teacher/attendance",     icon: CheckSquare },
     { label: "Bài nộp",    href: "/teacher/submissions",    icon: FileText },
-    { label: "Hỏi đáp",     href: "/teacher/questions",      icon: CircleHelp },
+    { label: "Cộng đồng",   href: "/teacher/questions",      icon: Users },
     { label: "Tài liệu",   href: "/teacher/materials",      icon: BookMarked },
     { label: "Học viên",   href: "/teacher/students",       icon: Users },
     { label: "Xu hướng",   href: "/teacher/analytics",      icon: BarChart3 },

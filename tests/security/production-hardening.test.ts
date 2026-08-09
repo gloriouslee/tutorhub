@@ -255,13 +255,14 @@ test("class catalog exposes session-only roadmap and sanitized materials", async
   assert.doesNotMatch(catalogRoute, /video_url|file_url|exam_content/);
 });
 
-test("class questions are private, class-scoped conversations", async () => {
+test("class questions are class-scoped community discussions", async () => {
   const collectionRoute = await read("src/app/api/questions/route.ts");
   const messageRoute = await read(
     "src/app/api/questions/[id]/messages/route.ts",
   );
   const statusRoute = await read("src/app/api/questions/[id]/route.ts");
   const server = await read("src/lib/class-question-server.ts");
+  const workspace = await read("src/components/questions/QuestionsWorkspace.tsx");
   const sidebar = await read("src/components/layout/Sidebar.tsx");
   const migration = await read(
     "supabase/migrations/20260805120000_class_questions.sql",
@@ -275,6 +276,13 @@ test("class questions are private, class-scoped conversations", async () => {
   assert.match(messageRoute, /getQuestionForActor/);
   assert.match(messageRoute, /question\.status === "closed"/);
   assert.match(statusRoute, /getQuestionForActor/);
+  assert.match(statusRoute, /only_author_can_update/);
+  assert.match(collectionRoute, /query\.in\("class_id", classIds\)/);
+  assert.match(server, /ownsQuestion/);
+  assert.match(server, /viewerUserId/);
+  assert.match(workspace, /Cộng đồng học tập/);
+  assert.match(workspace, /message\.is_own/);
+  assert.match(workspace, /Đăng lên cộng đồng/);
   assert.match(server, /homework-submissions/);
   assert.match(server, /submissions\/\$\{studentId\}\/questions/);
   assert.match(sidebar, /\/student\/questions/);

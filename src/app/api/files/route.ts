@@ -213,10 +213,28 @@ export async function GET(req: NextRequest) {
     }
   }
   // Homework submissions are per-student (path: classId/submissions/<studentId>/…).
-  // A student may only fetch their OWN submission files, never a classmate's.
-  // Teachers/admin keep full class access via the checks above.
+  // Community attachments are the only exception: an enrolled classmate may
+  // read a file when its exact protected URL is referenced by a discussion.
   if (bucket === "homework-submissions" && actor.role === "student") {
-    if (segments[1] !== "submissions" || segments[2] !== actor.studentId) {
+    const ownsFile = segments[1] === "submissions" && segments[2] === actor.studentId;
+    let isCommunityAttachment = false;
+    if (
+      !ownsFile
+      && allowed
+      && segments[1] === "submissions"
+      && segments[3] === "questions"
+    ) {
+      const expectedUrl =
+        `/api/files?bucket=homework-submissions&path=${encodeURIComponent(path)}`;
+      const { data: message } = await admin
+        .from("class_question_messages")
+        .select("id")
+        .eq("attachment_url", expectedUrl)
+        .limit(1)
+        .maybeSingle();
+      isCommunityAttachment = Boolean(message);
+    }
+    if (!ownsFile && !isCommunityAttachment) {
       allowed = false;
     }
   }

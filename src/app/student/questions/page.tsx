@@ -7,7 +7,7 @@ import { useStudentContext } from "@/hooks/useStudentContext";
 export default function StudentQuestionsPage() {
   const { studentId, studentName, myClasses, ready } = useStudentContext();
   return (
-    <PortalLayout role="student" userName={studentName || "Học viên"} pageTitle="Hỏi đáp">
+    <PortalLayout role="student" userName={studentName || "Học viên"} pageTitle="Cộng đồng">
       <QuestionsWorkspace
         role="student"
         classes={myClasses}

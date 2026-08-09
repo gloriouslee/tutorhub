@@ -9,6 +9,7 @@ export interface ClassQuestionMessage {
   attachment_name?: string | null;
   attachment_size?: string | null;
   created_at: string;
+  is_own: boolean;
 }
 
 export interface ClassQuestionThread {

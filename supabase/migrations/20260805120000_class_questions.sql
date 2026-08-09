@@ -1,6 +1,6 @@
--- Private student/teacher Q&A threads. These tables are API-only: route handlers
--- resolve the authenticated identity and enforce class ownership before using
--- the service role. No browser receives direct table grants.
+-- Class-scoped learning community discussions. These tables are API-only:
+-- route handlers verify class membership before using the service role. No
+-- browser receives direct table grants, so discussions cannot leak across classes.
 
 create table if not exists public.class_questions (
   id                uuid primary key default gen_random_uuid(),

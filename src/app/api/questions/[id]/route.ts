@@ -42,6 +42,9 @@ export async function PATCH(req: NextRequest, { params }: RouteContext) {
   if (!access.allowed) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
+  if (actor.role === "student" && !access.ownsQuestion) {
+    return NextResponse.json({ error: "only_author_can_update" }, { status: 403 });
+  }
 
   const now = new Date().toISOString();
   const { error } = await admin

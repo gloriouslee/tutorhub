@@ -89,7 +89,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       attachment_size: attachment?.size ?? null,
       created_at: now,
     })
-    .select("id,author_role,author_name,content,attachment_url,attachment_name,attachment_size,created_at")
+    .select("id,author_user_id,author_role,author_name,content,attachment_url,attachment_name,attachment_size,created_at")
     .single();
   if (messageError || !message) {
     return NextResponse.json({ error: "message_create_failed" }, { status: 500 });
@@ -119,6 +119,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
     attachment_name: message.attachment_name ? String(message.attachment_name) : null,
     attachment_size: message.attachment_size ? String(message.attachment_size) : null,
     created_at: String(message.created_at),
+    is_own: String(message.author_user_id) === actor.userId,
     status: nextStatus,
   };
   return NextResponse.json(response, { status: 201 });

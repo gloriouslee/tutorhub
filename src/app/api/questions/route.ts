@@ -24,7 +24,22 @@ export async function GET(req: NextRequest) {
   const admin = createAdminClient();
   let query = admin.from("class_questions").select("*");
   if (actor.role === "student" && actor.studentId) {
-    query = query.eq("student_id", actor.studentId);
+    const { data: classRows, error: classError } = await admin
+      .from("classes")
+      .select("id")
+      .contains("student_ids", [actor.studentId]);
+    if (classError) {
+      return NextResponse.json({ error: "question_list_failed" }, { status: 500 });
+    }
+    const classIds = (classRows ?? []).map((item) => String(item.id));
+    if (classIds.length === 0) {
+      return req.nextUrl.searchParams.get("summary") === "1"
+        ? NextResponse.json({ count: 0 })
+        : NextResponse.json([]);
+    }
+    query = req.nextUrl.searchParams.get("summary") === "1"
+      ? query.eq("student_id", actor.studentId)
+      : query.in("class_id", classIds);
   } else if (actor.role === "teacher" && actor.teacherId) {
     let classIds: string[];
     try {
@@ -59,7 +74,11 @@ export async function GET(req: NextRequest) {
   }
   try {
     return NextResponse.json(
-      await hydrateQuestionRows(admin, (data ?? []) as Record<string, unknown>[]),
+      await hydrateQuestionRows(
+        admin,
+        (data ?? []) as Record<string, unknown>[],
+        actor.userId,
+      ),
       { headers: { "Cache-Control": "private, no-store" } },
     );
   } catch {
@@ -155,7 +174,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const [created] = await hydrateQuestionRows(admin, [question]);
+    const [created] = await hydrateQuestionRows(admin, [question], actor.userId);
     return NextResponse.json(created, { status: 201 });
   } catch {
     return NextResponse.json({ error: "question_create_failed" }, { status: 500 });

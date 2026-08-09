@@ -7,7 +7,7 @@ import { useTeacherContext } from "@/hooks/useTeacherContext";
 export default function TeacherQuestionsPage() {
   const { teacherName, myClasses, ready } = useTeacherContext();
   return (
-    <PortalLayout role="teacher" userName={teacherName || "Giáo viên"} pageTitle="Hỏi đáp">
+    <PortalLayout role="teacher" userName={teacherName || "Giáo viên"} pageTitle="Cộng đồng">
       <QuestionsWorkspace role="teacher" classes={myClasses} ready={ready} />
     </PortalLayout>
   );

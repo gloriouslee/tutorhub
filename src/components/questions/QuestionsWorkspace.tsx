@@ -6,14 +6,19 @@ import {
   CircleHelp,
   Clock,
   FileText,
+  GraduationCap,
   Loader2,
+  MessageCircle,
   Paperclip,
   Plus,
   RefreshCw,
   RotateCcw,
+  Search,
   Send,
+  Users,
   X,
 } from "lucide-react";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -34,9 +39,9 @@ const STATUS_META: Record<
   ClassQuestionStatus,
   { label: string; variant: "warning" | "success" | "secondary" }
 > = {
-  open: { label: "Chờ trả lời", variant: "warning" },
-  answered: { label: "Đã trả lời", variant: "success" },
-  closed: { label: "Đã đóng", variant: "secondary" },
+  open: { label: "Đang thảo luận", variant: "warning" },
+  answered: { label: "Giáo viên đã trả lời", variant: "success" },
+  closed: { label: "Đã khép lại", variant: "secondary" },
 };
 
 function relativeTime(value: string) {
@@ -80,6 +85,8 @@ export default function QuestionsWorkspace({
   const [questions, setQuestions] = useState<ClassQuestionThread[]>([]);
   const [selectedId, setSelectedId] = useState("");
   const [filter, setFilter] = useState<"all" | ClassQuestionStatus>("all");
+  const [classFilter, setClassFilter] = useState("all");
+  const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [showComposer, setShowComposer] = useState(false);
@@ -123,10 +130,21 @@ export default function QuestionsWorkspace({
     void loadQuestions();
   }, [ready, role]);
 
-  const displayed = useMemo(
-    () => questions.filter((item) => filter === "all" || item.status === filter),
-    [filter, questions],
-  );
+  const displayed = useMemo(() => {
+    const query = search.trim().toLocaleLowerCase("vi");
+    return questions.filter((item) =>
+      (filter === "all" || item.status === filter)
+      && (classFilter === "all" || item.class_id === classFilter)
+      && (
+        !query
+        || item.title.toLocaleLowerCase("vi").includes(query)
+        || item.student_name.toLocaleLowerCase("vi").includes(query)
+        || item.messages.some((message) =>
+          message.content.toLocaleLowerCase("vi").includes(query),
+        )
+      )
+    );
+  }, [classFilter, filter, questions, search]);
   const selected = questions.find((item) => item.id === selectedId) ?? null;
 
   async function uploadAttachment(file: File | null, targetClassId: string) {
@@ -246,14 +264,19 @@ export default function QuestionsWorkspace({
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="text-xl font-bold text-foreground">Hỏi đáp bài học</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
+      <div className="flex flex-col gap-4 rounded-2xl border border-primary/20 bg-gradient-to-r from-primary/10 via-primary/5 to-transparent p-5 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-start gap-4">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm">
+            <Users className="h-5 w-5" />
+          </div>
+          <div>
+            <h1 className="text-xl font-bold text-foreground">Cộng đồng học tập</h1>
+            <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
             {role === "student"
-              ? "Gửi bài chưa hiểu cho giáo viên và theo dõi câu trả lời tại đây."
-              : "Tiếp nhận và giải đáp câu hỏi từ học viên trong các lớp bạn phụ trách."}
-          </p>
+                ? "Đặt câu hỏi, chia sẻ cách giải và cùng bạn học trao đổi trong các lớp của bạn."
+                : "Tham gia thảo luận, định hướng cách giải và xác nhận kiến thức cho cộng đồng lớp."}
+            </p>
+          </div>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={() => void loadQuestions()} disabled={loading}>
@@ -262,7 +285,7 @@ export default function QuestionsWorkspace({
           {role === "student" && (
             <Button size="sm" onClick={() => setShowComposer((current) => !current)}>
               {showComposer ? <X className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-              {showComposer ? "Đóng" : "Đặt câu hỏi"}
+              {showComposer ? "Đóng" : "Tạo bài thảo luận"}
             </Button>
           )}
         </div>
@@ -274,7 +297,7 @@ export default function QuestionsWorkspace({
             <form className="space-y-4" onSubmit={createQuestion}>
               <div className="grid gap-4 md:grid-cols-2">
                 <label className="space-y-1.5 text-sm font-medium">
-                  <span>Lớp cần hỏi</span>
+                  <span>Đăng trong cộng đồng lớp</span>
                   <select
                     value={classId}
                     onChange={(event) => setClassId(event.target.value)}
@@ -287,22 +310,22 @@ export default function QuestionsWorkspace({
                   </select>
                 </label>
                 <label className="space-y-1.5 text-sm font-medium">
-                  <span>Tiêu đề</span>
+                  <span>Tiêu đề bài đăng</span>
                   <Input
                     value={title}
                     onChange={(event) => setTitle(event.target.value)}
-                    placeholder="Ví dụ: Em chưa hiểu cách giải câu 3"
+                    placeholder="Ví dụ: Cùng thảo luận cách giải câu 3"
                     maxLength={160}
                     required
                   />
                 </label>
               </div>
               <label className="block space-y-1.5 text-sm font-medium">
-                <span>Mô tả phần chưa hiểu</span>
+                <span>Nội dung trao đổi</span>
                 <textarea
                   value={content}
                   onChange={(event) => setContent(event.target.value)}
-                  placeholder="Nêu rõ đề bài, bước em đang mắc và điều em muốn giáo viên giải thích..."
+                  placeholder="Chia sẻ đề bài, cách bạn đã thử và điều bạn muốn cộng đồng cùng thảo luận..."
                   maxLength={10_000}
                   rows={5}
                   className="w-full resize-y rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-ring"
@@ -327,7 +350,7 @@ export default function QuestionsWorkspace({
                 </label>
                 <Button type="submit" disabled={creating || classes.length === 0 || Boolean(validateFile(questionFile))}>
                   {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                  {creating ? "Đang gửi..." : "Gửi cho giáo viên"}
+                  {creating ? "Đang đăng..." : "Đăng lên cộng đồng"}
                 </Button>
               </div>
             </form>
@@ -337,7 +360,31 @@ export default function QuestionsWorkspace({
 
       {error && <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-600 dark:bg-red-950/20 dark:text-red-400">{error}</p>}
 
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-col gap-3 sm:flex-row">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Tìm chủ đề, nội dung hoặc người đăng..."
+            className="pl-9"
+            aria-label="Tìm trong cộng đồng"
+          />
+        </div>
+        <select
+          value={classFilter}
+          onChange={(event) => setClassFilter(event.target.value)}
+          aria-label="Lọc theo lớp"
+          className="h-10 rounded-xl border border-input bg-background px-3 text-sm sm:w-64"
+        >
+          <option value="all">Tất cả cộng đồng lớp</option>
+          {classes.map((item) => (
+            <option key={item.id} value={item.id}>{item.class_name}</option>
+          ))}
+        </select>
+      </div>
+
+      <div className="flex flex-wrap gap-2" aria-label="Lọc trạng thái thảo luận">
         {(["all", "open", "answered", "closed"] as const).map((item) => (
           <button
             key={item}
@@ -348,12 +395,12 @@ export default function QuestionsWorkspace({
                 : "bg-muted text-muted-foreground hover:bg-accent"
             }`}
           >
-            {item === "all" ? "Tất cả" : STATUS_META[item].label}
+            {item === "all" ? "Tất cả thảo luận" : STATUS_META[item].label}
           </button>
         ))}
       </div>
 
-      <div className="grid min-h-[560px] overflow-hidden rounded-2xl border border-border bg-card lg:grid-cols-[340px_minmax(0,1fr)]">
+      <div className="grid min-h-[600px] overflow-hidden rounded-2xl border border-border bg-card lg:grid-cols-[380px_minmax(0,1fr)]">
         <div className="border-b border-border lg:border-b-0 lg:border-r">
           {loading ? (
             <div className="flex items-center justify-center gap-2 p-10 text-sm text-muted-foreground">
@@ -362,7 +409,7 @@ export default function QuestionsWorkspace({
           ) : displayed.length === 0 ? (
             <div className="p-10 text-center text-muted-foreground">
               <CircleHelp className="mx-auto mb-3 h-9 w-9 opacity-30" />
-              <p className="text-sm font-medium">Chưa có câu hỏi trong mục này.</p>
+              <p className="text-sm font-medium">Chưa có bài thảo luận phù hợp.</p>
             </div>
           ) : (
             <div className="max-h-[560px] divide-y divide-border overflow-y-auto">
@@ -379,9 +426,12 @@ export default function QuestionsWorkspace({
                     <span className="text-[11px] text-muted-foreground">{relativeTime(item.last_message_at)}</span>
                   </div>
                   <p className="line-clamp-2 text-sm font-semibold text-foreground">{item.title}</p>
-                  <p className="mt-1 truncate text-xs text-muted-foreground">
-                    {role === "teacher" ? `${item.student_name} · ` : ""}{item.class_name}
-                  </p>
+                  <div className="mt-2 flex items-center justify-between gap-3 text-xs text-muted-foreground">
+                    <span className="min-w-0 truncate">{item.student_name} · {item.class_name}</span>
+                    <span className="flex shrink-0 items-center gap-1">
+                      <MessageCircle className="h-3.5 w-3.5" /> {Math.max(0, item.messages.length - 1)}
+                    </span>
+                  </div>
                 </button>
               ))}
             </div>
@@ -391,7 +441,7 @@ export default function QuestionsWorkspace({
         {!selected ? (
           <div className="flex flex-col items-center justify-center p-10 text-center text-muted-foreground">
             <CircleHelp className="mb-3 h-12 w-12 opacity-20" />
-            <p className="font-medium">Chọn một câu hỏi để xem nội dung trao đổi.</p>
+            <p className="font-medium">Chọn một chủ đề để tham gia thảo luận.</p>
           </div>
         ) : (
           <div className="flex min-h-0 flex-col">
@@ -403,70 +453,82 @@ export default function QuestionsWorkspace({
                     <span className="text-xs text-muted-foreground">{selected.class_name}</span>
                   </div>
                   <h2 className="font-bold text-foreground">{selected.title}</h2>
-                  {role === "teacher" && (
-                    <p className="mt-1 text-xs text-muted-foreground">Học viên: {selected.student_name}</p>
-                  )}
+                  <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <GraduationCap className="h-3.5 w-3.5" />
+                    Đăng bởi {selected.student_name} trong {selected.class_name}
+                  </p>
                 </div>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={updatingStatus}
-                  onClick={() => void changeStatus(selected.status === "closed" ? "open" : "closed")}
-                >
-                  {selected.status === "closed"
-                    ? <><RotateCcw className="h-4 w-4" /> Mở lại</>
-                    : <><CheckCircle2 className="h-4 w-4" /> {role === "student" ? "Đã hiểu" : "Đóng câu hỏi"}</>}
-                </Button>
+                {(role === "teacher" || selected.student_id === studentId) && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={updatingStatus}
+                    onClick={() => void changeStatus(selected.status === "closed" ? "open" : "closed")}
+                  >
+                    {selected.status === "closed"
+                      ? <><RotateCcw className="h-4 w-4" /> Mở lại thảo luận</>
+                      : <><CheckCircle2 className="h-4 w-4" /> Khép lại</>}
+                  </Button>
+                )}
               </div>
             </div>
 
             <div className="flex-1 space-y-4 overflow-y-auto bg-muted/20 p-4 sm:p-5">
-              {selected.messages.map((message) => {
-                const own = message.author_role === role;
-                return (
-                  <div key={message.id} className={`flex ${own ? "justify-end" : "justify-start"}`}>
-                    <div className={`max-w-[85%] rounded-2xl px-4 py-3 ${
-                      own
-                        ? "rounded-br-md bg-primary text-primary-foreground"
-                        : "rounded-bl-md border border-border bg-card text-foreground"
-                    }`}>
-                      <div className="mb-1 flex items-center gap-2 text-[11px] opacity-75">
-                        <span className="font-semibold">{message.author_name}</span>
-                        <span>·</span>
-                        <span>{relativeTime(message.created_at)}</span>
-                      </div>
-                      <p className="whitespace-pre-wrap text-sm leading-relaxed">{message.content}</p>
-                      {message.attachment_url && (
-                        <a
-                          href={message.attachment_url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className={`mt-3 flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium ${
-                            own ? "bg-white/15 hover:bg-white/20" : "bg-muted hover:bg-accent"
-                          }`}
-                        >
-                          <FileText className="h-4 w-4" />
-                          <span className="min-w-0 flex-1 truncate">{message.attachment_name ?? "Tệp đính kèm"}</span>
-                          {message.attachment_size && <span className="opacity-70">{message.attachment_size}</span>}
-                        </a>
+              {selected.messages.map((message, index) => (
+                <article key={message.id} className="flex items-start gap-3">
+                  <Avatar className="mt-0.5 h-9 w-9 shrink-0 border border-border">
+                    <AvatarFallback name={message.author_name} />
+                  </Avatar>
+                  <div className={`min-w-0 flex-1 rounded-2xl border p-4 ${
+                    message.author_role === "teacher"
+                      ? "border-primary/30 bg-primary/5"
+                      : "border-border bg-card"
+                  }`}>
+                    <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
+                      <span className="font-semibold text-foreground">{message.author_name}</span>
+                      {message.author_role === "teacher" ? (
+                        <Badge variant="success">Giáo viên</Badge>
+                      ) : (
+                        <Badge variant="outline">Học viên</Badge>
                       )}
+                      {message.is_own && <Badge variant="secondary">Bạn</Badge>}
+                      {index === 0 && <span className="text-muted-foreground">Bài đăng gốc</span>}
+                      <span className="ml-auto text-muted-foreground">{relativeTime(message.created_at)}</span>
                     </div>
+                    <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">
+                      {message.content}
+                    </p>
+                    {message.attachment_url && (
+                      <a
+                        href={message.attachment_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="mt-3 flex items-center gap-2 rounded-xl bg-muted px-3 py-2 text-xs font-medium hover:bg-accent"
+                      >
+                        <FileText className="h-4 w-4" />
+                        <span className="min-w-0 flex-1 truncate">{message.attachment_name ?? "Tệp đính kèm"}</span>
+                        {message.attachment_size && <span className="text-muted-foreground">{message.attachment_size}</span>}
+                      </a>
+                    )}
                   </div>
-                );
-              })}
+                </article>
+              ))}
             </div>
 
             <form className="border-t border-border p-4" onSubmit={sendReply}>
               {selected.status === "closed" ? (
                 <p className="flex items-center justify-center gap-2 py-3 text-sm text-muted-foreground">
-                  <CheckCircle2 className="h-4 w-4" /> Câu hỏi đã đóng. Mở lại để tiếp tục trao đổi.
+                  <CheckCircle2 className="h-4 w-4" /> Thảo luận đã khép lại. Chủ bài đăng hoặc giáo viên có thể mở lại.
                 </p>
               ) : (
                 <>
+                  <p className="mb-2 flex items-center gap-2 text-sm font-semibold">
+                    <MessageCircle className="h-4 w-4 text-primary" /> Tham gia thảo luận
+                  </p>
                   <textarea
                     value={reply}
                     onChange={(event) => setReply(event.target.value)}
-                    placeholder={role === "teacher" ? "Nhập lời giải hoặc hướng dẫn cho học viên..." : "Hỏi thêm hoặc bổ sung thông tin..."}
+                    placeholder={role === "teacher" ? "Định hướng cách giải hoặc xác nhận kiến thức cho cộng đồng..." : "Chia sẻ cách giải, góp ý hoặc đặt câu hỏi tiếp theo..."}
                     rows={3}
                     maxLength={10_000}
                     className="w-full resize-none rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-ring"
@@ -490,7 +552,7 @@ export default function QuestionsWorkspace({
                       </label>
                     ) : (
                       <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                        <Clock className="h-3.5 w-3.5" /> Trả lời sẽ chuyển trạng thái sang “Đã trả lời”
+                        <Clock className="h-3.5 w-3.5" /> Phản hồi của giáo viên sẽ được đánh dấu nổi bật
                       </span>
                     )}
                     <Button type="submit" size="sm" disabled={sending || !reply.trim() || Boolean(validateFile(replyFile))}>
