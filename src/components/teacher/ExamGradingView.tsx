@@ -117,6 +117,19 @@ export default function ExamGradingView({
   const selectedIdx = results.findIndex(r => r.student_id === selectedId);
   const maxTotal = useMemo(() => calcMaxScore(questions), [questions]);
 
+  // The grading overlay can mount while the teacher snapshot is still being
+  // refreshed. Keep the local list in sync so a later response is not hidden
+  // behind the empty array captured by useState on the first render.
+  useEffect(() => {
+    setResults(initialResults);
+    if (selectedId && initialResults.some((result) => result.student_id === selectedId)) return;
+
+    const next = initialResults[0] ?? null;
+    setSelectedId(next?.student_id ?? null);
+    setDraftScores({ ...(next?.manual_scores ?? {}) });
+    setDraftFeedback(next?.teacher_feedback ?? "");
+  }, [initialResults, selectedId]);
+
   function selectStudent(r: StoredExamResult) {
     setSelectedId(r.student_id);
     setDraftScores({ ...(r.manual_scores ?? {}) });

@@ -20,6 +20,21 @@ import { convertOmmlInDocumentXml, ommlFragmentToLatex } from "../../src/lib/omm
 
 const read = (path: string) => readFile(path, "utf8");
 
+test("teacher grading views keep submitted work visible for online and file assignments", async () => {
+  const curriculum = await read("src/components/teacher/CurriculumTab.tsx");
+  const examGrader = await read("src/components/teacher/ExamGradingView.tsx");
+  const homeworkTab = await read("src/components/teacher/HomeworkTab.tsx");
+  const fileGrader = await read("src/components/teacher/FileSubmissionGradingView.tsx");
+
+  assert.match(curriculum, /examResultsLoaded && targetId in examResultsMap/);
+  assert.match(examGrader, /setResults\(initialResults\)/);
+  assert.match(examGrader, /initialResults\.some\(\(result\) => result\.student_id === selectedId\)/);
+  assert.match(homeworkTab, /<FileSubmissionGradingView/);
+  assert.match(fileGrader, /createPortal\(/);
+  assert.match(fileGrader, /Chưa nộp \(\{shownMissingStudents\.length\}\)/);
+  assert.match(fileGrader, /<SubmissionGrader[\s\S]{0,300}defaultOpen/);
+});
+
 test("teacher portal branding accepts only uploaded portal logos", () => {
   assert.deepEqual(
     resolvePortalBranding({
@@ -825,6 +840,7 @@ test("homework navigation and data loading always provide immediate feedback", a
   const studentClassHomework = await read("src/components/student/StudentHomeworkTab.tsx");
   const teacherClass = await read("src/app/teacher/classes/[classId]/page.tsx");
   const teacherClassHomework = await read("src/components/teacher/HomeworkTab.tsx");
+  const teacherFileGrader = await read("src/components/teacher/FileSubmissionGradingView.tsx");
 
   assert.match(sidebar, /useLinkStatus/);
   assert.match(sidebar, /Đang mở/);
@@ -861,8 +877,9 @@ test("homework navigation and data loading always provide immediate feedback", a
   assert.match(teacherClassHomework, /Cần chấm/);
   assert.match(teacherClassHomework, /Chờ học sinh/);
   assert.match(teacherClassHomework, /Ưu tiên chấm tiếp theo/);
-  assert.match(teacherClassHomework, /<SubmissionGrader/);
-  assert.match(teacherClassHomework, /học sinh chưa nộp/);
+  assert.match(teacherClassHomework, /<FileSubmissionGradingView/);
+  assert.match(teacherFileGrader, /<SubmissionGrader/);
+  assert.match(teacherFileGrader, /Chưa nộp/);
 });
 
 test("teacher class curriculum uses a compact full-width workspace", async () => {

@@ -10,7 +10,7 @@ import {
   getCurriculum, mutateCurriculum, addNotification,
   type CurriculumChapter, type CurriculumSession, type CurriculumLesson, type StoredExamResult,
 } from "@/lib/storage";
-import { emptyTeacherSubmissionSnapshot, getTeacherSubmissionSnapshot } from "@/lib/teacher-submissions";
+import { getTeacherSubmissionSnapshot } from "@/lib/teacher-submissions";
 import { useWindowFocusRevision } from "@/hooks/useWindowFocusRevision";
 import { uploadClassFile } from "@/lib/upload";
 import ExamEditorModal from "@/components/teacher/ExamEditorModal";
@@ -617,17 +617,27 @@ export default function CurriculumTab({ classId, schedule, students = [], gradeL
   }, [classId]);
 
   const [examResultsMap, setExamResultsMap] = useState<Record<string, StoredExamResult[]>>({});
+  const [examResultsLoaded, setExamResultsLoaded] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      setExamResultsLoaded(false);
       const exams = chapters.flatMap(ch => ch.sessions).flatMap(session => session.lessons).filter(lesson => lesson.type === "exam");
-      const snapshot = await getTeacherSubmissionSnapshot(classId)
-        .catch(emptyTeacherSubmissionSnapshot);
-      const map = Object.fromEntries(
-        exams.map((exam) => [exam.id, snapshot.examResults[exam.id] ?? []]),
-      ) as Record<string, StoredExamResult[]>;
-      if (!cancelled) setExamResultsMap(map);
+      try {
+        const snapshot = await getTeacherSubmissionSnapshot(classId);
+        const map = Object.fromEntries(
+          exams.map((exam) => [exam.id, snapshot.examResults[exam.id] ?? []]),
+        ) as Record<string, StoredExamResult[]>;
+        if (!cancelled) {
+          setExamResultsMap(map);
+          setExamResultsLoaded(true);
+        }
+      } catch {
+        // Do not mark an API failure as a successfully loaded empty result set.
+        // The focus revision below will retry when the teacher returns to the tab.
+        if (!cancelled) setExamResultsLoaded(false);
+      }
     })();
     return () => { cancelled = true; };
   }, [chapters, classId, submissionRefreshRevision]);
@@ -654,13 +664,13 @@ export default function CurriculumTab({ classId, schedule, students = [], gradeL
     const targetId = gradeLessonId ?? urlGradeId;
     if (!targetId || gradingOpenedRef.current) return;
     const lesson = chapters.flatMap(ch => ch.sessions.flatMap(s => s.lessons)).find(l => l.id === targetId && l.type === "exam");
-    if (lesson && targetId in examResultsMap) {
+    if (lesson && examResultsLoaded && targetId in examResultsMap) {
       gradingOpenedRef.current = true;
       openGrading(lesson.id, lesson.title);
       onGradingOpened?.();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gradeLessonId, urlGradeId, chapters, examResultsMap]);
+  }, [gradeLessonId, urlGradeId, chapters, examResultsLoaded, examResultsMap]);
 
   // Merge-safe persist: apply the SAME pure mutation to local state AND to the
   // fresh document read right before writing (mutateCurriculum → kvUpdate),

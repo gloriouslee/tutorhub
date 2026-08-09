@@ -44,15 +44,17 @@ export default function SubmissionGrader({
   classId,
   homeworkTitle,
   onGraded,
+  defaultOpen = false,
 }: {
   submission: GradableSubmission;
   classId: string;
   homeworkTitle: string;
   onGraded: (patch: Partial<GradableSubmission>) => void;
+  defaultOpen?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
-  const [score, setScore] = useState("");
-  const [feedback, setFeedback] = useState("");
+  const [open, setOpen] = useState(defaultOpen);
+  const [score, setScore] = useState(() => defaultOpen && submission.score != null ? String(submission.score) : "");
+  const [feedback, setFeedback] = useState(() => defaultOpen ? (submission.feedback ?? "") : "");
   const [file, setFile] = useState<File | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [saving, setSaving] = useState(false);

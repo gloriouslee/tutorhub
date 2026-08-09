@@ -4,13 +4,11 @@ import { useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import SubmissionGrader, { type GradableSubmission } from "@/components/teacher/SubmissionGrader";
+import FileSubmissionGradingView from "@/components/teacher/FileSubmissionGradingView";
 import {
   ArrowRight,
   CalendarDays,
   CheckCircle2,
-  ChevronDown,
-  ChevronUp,
   Clock3,
   Download,
   Edit3,
@@ -142,11 +140,6 @@ export default function HomeworkTab({
   const [query, setQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
   const [sort, setSort] = useState<SortKey>("priority");
-
-  const studentNames = useMemo(
-    () => new Map(students.map((student) => [student.id, student.full_name])),
-    [students],
-  );
 
   const resolved = useMemo<HomeworkMetrics[]>(() => homeworks.map((homework) => {
     const assignedStudents = homework.assigned_to && homework.assigned_to.length > 0
@@ -458,7 +451,7 @@ export default function HomeworkTab({
                       ) : (
                         <Button size="sm" variant={item.pendingCount > 0 ? "gradient" : "outline"} onClick={() => setExpandedId(isExpanded ? null : homework.id)}>
                           {item.pendingCount > 0 ? `Chấm ${item.pendingCount} bài` : "Xem bài nộp"}
-                          {isExpanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                          <ArrowRight className="h-3.5 w-3.5" />
                         </Button>
                       )}
                       {homework.source !== "curriculum" && !isExam && (
@@ -475,74 +468,15 @@ export default function HomeworkTab({
                   </div>
 
                   {isExpanded && !isExam && (
-                    <div className="space-y-3 border-t border-border/60 bg-muted/15 px-4 py-4 sm:px-5">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div>
-                          <p className="text-sm font-bold text-foreground">Bài nộp của học sinh</p>
-                          <p className="text-xs text-muted-foreground">Bài chưa chấm được đưa lên trước để xử lý nhanh.</p>
-                        </div>
-                        <span className="text-xs font-semibold text-muted-foreground">{item.homeworkSubmissions.length} lượt nộp</span>
-                      </div>
-
-                      {submissionsLoading ? (
-                        <div className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-border py-8 text-xs text-muted-foreground" role="status">
-                          <Loader2 className="h-4 w-4 animate-spin" /> Đang tải bài nộp…
-                        </div>
-                      ) : item.homeworkSubmissions.length === 0 ? (
-                        <div className="rounded-xl border border-dashed border-border py-8 text-center">
-                          <Users className="mx-auto h-8 w-8 text-muted-foreground/25" />
-                          <p className="mt-2 text-xs font-medium text-muted-foreground">Chưa có học sinh nào nộp bài.</p>
-                        </div>
-                      ) : (
-                        <div className="space-y-2">
-                          {[...item.homeworkSubmissions]
-                            .sort((a, b) => Number(a.score != null) - Number(b.score != null) || (b.submitted_at ?? "").localeCompare(a.submitted_at ?? ""))
-                            .map((submission) => {
-                              if (submission.status === "returned") {
-                                return (
-                                  <div key={submission.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-rose-200 bg-rose-50/60 p-3 dark:border-rose-900 dark:bg-rose-950/15">
-                                    <div className="flex items-center gap-3">
-                                      <div className="flex h-9 w-9 items-center justify-center rounded-full bg-rose-100 text-rose-600 dark:bg-rose-950 dark:text-rose-400"><RotateCcw className="h-4 w-4" /></div>
-                                      <div>
-                                        <p className="text-sm font-semibold text-foreground">{submission.student_name || studentNames.get(submission.student_id) || submission.student_id}</p>
-                                        <p className="text-xs text-muted-foreground">Đã trả lại · chờ học sinh nộp phiên bản mới</p>
-                                      </div>
-                                    </div>
-                                    <span className="rounded-full bg-rose-100 px-2.5 py-1 text-[10px] font-bold text-rose-700 dark:bg-rose-950 dark:text-rose-300">Chờ làm lại</span>
-                                  </div>
-                                );
-                              }
-
-                              const gradable: GradableSubmission = {
-                                ...submission,
-                                student_name: submission.student_name || studentNames.get(submission.student_id) || submission.student_id,
-                              };
-                              return (
-                                <SubmissionGrader
-                                  key={submission.id}
-                                  submission={gradable}
-                                  classId={classId}
-                                  homeworkTitle={homework.title}
-                                  onGraded={(patch) => onSubmissionGraded?.(submission.id, patch)}
-                                />
-                              );
-                            })}
-                        </div>
-                      )}
-
-                      {item.missingCount > 0 && (
-                        <details className="rounded-xl border border-border/60 bg-card px-3 py-2.5">
-                          <summary className="cursor-pointer list-none text-xs font-semibold text-muted-foreground">
-                            <span className="inline-flex items-center gap-2"><Users className="h-3.5 w-3.5" />{item.missingCount} học sinh chưa nộp</span>
-                          </summary>
-                          <div className="mt-2 flex flex-wrap gap-1.5 border-t border-border/60 pt-2">
-                            {item.assignedStudents
-                              .filter((student) => !item.homeworkSubmissions.some((submission) => submission.student_id === student.id))
-                              .map((student) => <span key={student.id} className="rounded-full bg-muted px-2.5 py-1 text-[10px] font-medium text-muted-foreground">{student.full_name}</span>)}
-                          </div>
-                        </details>
-                      )}
-                    </div>
+                    <FileSubmissionGradingView
+                      classId={classId}
+                      homeworkTitle={homework.title}
+                      submissions={item.homeworkSubmissions}
+                      assignedStudents={item.assignedStudents}
+                      loading={submissionsLoading}
+                      onClose={() => setExpandedId(null)}
+                      onGraded={(submissionId, patch) => onSubmissionGraded?.(submissionId, patch)}
+                    />
                   )}
 
                 </CardContent>
