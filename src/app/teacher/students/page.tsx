@@ -17,11 +17,13 @@ import {
 } from "@/lib/storage";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { useTeacherContext } from "@/hooks/useTeacherContext";
+import { StudentGuardianPanel } from "@/components/guardians/StudentGuardianManager";
 import {
   Search, GraduationCap, BookOpen, CheckSquare,
   Star, MessageSquare, X, ChevronDown, ChevronUp,
   ArrowLeft, TrendingUp, ClipboardList, UserCheck,
   Clock, AlertCircle, CheckCircle2, XCircle, Target, Plus, Trash2,
+  UserRoundPlus,
 } from "lucide-react";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -53,7 +55,7 @@ interface HomeworkRecord {
   assigned_to?: string[] | null;
 }
 
-type DetailTab = "overview" | "scores" | "attendance" | "homework" | "comments";
+type DetailTab = "overview" | "scores" | "attendance" | "homework" | "comments" | "guardians";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function avgScore(studentId: string, classIds: string[], allScores: StoredExamScore[]): number | null {
@@ -278,6 +280,7 @@ function StudentDetailPanel({
     { key: "attendance", label: "Chuyên cần", Icon: CheckSquare },
     { key: "homework",   label: "Bài tập",    Icon: ClipboardList },
     { key: "comments",   label: "Nhận xét",   Icon: MessageSquare },
+    { key: "guardians",  label: "Phụ huynh",  Icon: UserRoundPlus },
   ];
 
   return (
@@ -710,6 +713,14 @@ function StudentDetailPanel({
 
       {/* ── Nhận xét ── */}
       {tab === "comments" && <CommentsTab studentId={student.id} />}
+
+      {/* ── Phụ huynh ── */}
+      {tab === "guardians" && (
+        <StudentGuardianPanel
+          studentId={student.id}
+          studentName={student.full_name}
+        />
+      )}
     </div>
   );
 }

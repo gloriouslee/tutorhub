@@ -699,7 +699,7 @@ test("teacher and admin guardian invitations require parent acceptance", async (
     "src/components/guardians/StudentGuardianManager.tsx",
   );
   const parentInvitations = await read("src/app/parent/invitations/page.tsx");
-  const teacherStudents = await read("src/components/teacher/StudentsTab.tsx");
+  const teacherStudents = await read("src/app/teacher/students/page.tsx");
   const adminStudents = await read("src/app/admin/students/page.tsx");
 
   assert.match(collectionRoute, /teacherCanManageStudent/);
@@ -713,7 +713,9 @@ test("teacher and admin guardian invitations require parent acceptance", async (
   assert.match(itemRoute, /replacement\?\.parent_id \?\? null/);
   assert.match(manager, /\/api\/guardians/);
   assert.match(parentInvitations, /resetAccountContextCache\(\)/);
-  assert.match(teacherStudents, /StudentGuardianManager/);
+  assert.match(teacherStudents, /StudentGuardianPanel/);
+  assert.match(teacherStudents, /key: "guardians"/);
+  assert.match(teacherStudents, /label: "Phụ huynh"/);
   assert.match(adminStudents, /StudentGuardianManager/);
 });
 
