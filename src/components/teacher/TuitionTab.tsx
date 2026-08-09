@@ -7,7 +7,7 @@ import {
   getInvoices, issueTuitionInvoice, confirmInvoicePaid, getAllTeacherAttendance,
   type ClassTuitionConfig, type StudentTuitionData, type TuitionPaymentRecord,
   type TuitionInvoice, type TuitionDiscount, type TeacherAttendanceRecord,
-  type PackagePrices,
+  type PackagePrices, type TuitionBillingMode,
 } from "@/lib/storage";
 import { formatCurrency } from "@/lib/utils";
 import {
@@ -55,29 +55,63 @@ function attendedSessions(att: TeacherAttendanceRecord[], classId: string, stude
   ).length;
 }
 
-interface FeeBreakdown { sessions: number; attended: number; overridden: boolean; unit: number; gross: number; discount?: TuitionDiscount; net: number; }
+interface FeeBreakdown {
+  mode: TuitionBillingMode;
+  sessions: number; attended: number; overridden: boolean;
+  unit: number; gross: number; discount?: TuitionDiscount; net: number;
+}
 
-// Đơn giá theo GÓI hiệu lực cho một kỳ: ưu tiên snapshot của kỳ đó; nếu chưa có
-// thì KẾ THỪA TIẾN (lấy kỳ đã cấu hình gần nhất TRƯỚC đó) — nên đặt giá kỳ này
-// không bao giờ thay đổi các kỳ trước. Cuối cùng fallback đơn giá cũ (toàn cục).
+/** Lớp chưa từng chọn cách tính thì vẫn tính theo buổi như trước. */
+export function billingMode(config: ClassTuitionConfig): TuitionBillingMode {
+  return config.billing_mode === "month" ? "month" : "session";
+}
+
+// Bảng giá hiệu lực cho một kỳ: ưu tiên snapshot của kỳ đó; nếu chưa có thì KẾ
+// THỪA TIẾN (lấy kỳ đã cấu hình gần nhất TRƯỚC đó) — nên đặt giá kỳ này không bao
+// giờ thay đổi các kỳ trước.
+function resolveSnapshot(
+  table: Record<string, PackagePrices> | undefined,
+  period: string,
+): PackagePrices | undefined {
+  const snapshots = table ?? {};
+  if (snapshots[period]) return snapshots[period];
+  const prior = Object.keys(snapshots).filter(k => k < period).sort();
+  return prior.length ? snapshots[prior[prior.length - 1]] : undefined;
+}
+
+/** Đơn giá/buổi theo gói. Cuối cùng fallback đơn giá cũ (toàn cục). */
 export function resolveUnitPrices(config: ClassTuitionConfig, period: string): PackagePrices {
-  const table = config.unit_prices ?? {};
-  if (table[period]) return table[period];
-  const prior = Object.keys(table).filter(k => k < period).sort();
-  if (prior.length) return table[prior[prior.length - 1]];
+  const snapshot = resolveSnapshot(config.unit_prices, period);
+  if (snapshot) return snapshot;
   const legacy = config.unit_price ?? 0;
   return { online: legacy, advanced: legacy, offline: legacy };
 }
 
+/** Giá trọn gói/tháng theo gói. */
+export function resolveMonthlyPrices(config: ClassTuitionConfig, period: string): PackagePrices {
+  return resolveSnapshot(config.monthly_prices, period)
+    ?? { online: 0, advanced: 0, offline: 0 };
+}
+
 function computeFee(config: ClassTuitionConfig, sData: StudentTuitionData, period: string, attended: number, pkg: PackageType): FeeBreakdown {
+  const mode = billingMode(config);
   const override = sData.session_overrides?.[period];
   const sessions = override ?? attended;
-  const unit = resolveUnitPrices(config, period)[pkg] ?? 0;
-  const gross = unit * sessions;
   const discount = sData.discounts?.[period];
+
+  // Trọn gói tháng: học phí không phụ thuộc số buổi đã đi. Vẫn giữ `sessions`
+  // để hiển thị tham khảo, nhưng nó không tham gia vào phép tính.
+  const unit = mode === "month"
+    ? (resolveMonthlyPrices(config, period)[pkg] ?? 0)
+    : (resolveUnitPrices(config, period)[pkg] ?? 0);
+  const gross = mode === "month" ? unit : unit * sessions;
+
   let net = gross;
   if (discount) net = discount.type === "percent" ? gross * (1 - discount.value / 100) : gross - discount.value;
-  return { sessions, attended, overridden: override !== undefined, unit, gross, discount, net: Math.max(0, Math.round(net)) };
+  return {
+    mode, sessions, attended, overridden: override !== undefined,
+    unit, gross, discount, net: Math.max(0, Math.round(net)),
+  };
 }
 
 function discountLabel(d?: TuitionDiscount): string {
@@ -341,12 +375,17 @@ function StudentCard({ student, config, period, classId, className, invoice, att
 
         {/* Fee breakdown row */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 items-end">
-          {/* Số buổi */}
+          {/* Số buổi — trọn gói tháng thì số buổi chỉ để tham khảo, không sửa được
+              vì nó không tham gia vào phép tính học phí. */}
           <div>
             <label className="text-[11px] font-medium text-muted-foreground block mb-1 flex items-center gap-1">
               <CalendarCheck className="h-3 w-3" /> Số buổi
             </label>
-            {editSess ? (
+            {fee.mode === "month" ? (
+              <p className="h-8 flex items-center text-sm text-muted-foreground">
+                {fee.attended} buổi <span className="ml-1 text-[10px]">(tham khảo)</span>
+              </p>
+            ) : editSess ? (
               <div className="flex items-center gap-1">
                 <input type="number" min={0} value={sessInput} autoFocus
                   onChange={e => setSessInput(e.target.value)}
@@ -363,7 +402,7 @@ function StudentCard({ student, config, period, classId, className, invoice, att
                   : <span className="text-[9px] text-muted-foreground">điểm danh</span>}
               </button>
             )}
-            {fee.overridden && !editSess && (
+            {fee.mode === "session" && fee.overridden && !editSess && (
               <button onClick={resetSessions} className="mt-1 text-[10px] text-muted-foreground hover:text-primary flex items-center gap-0.5">
                 <RotateCcw className="h-2.5 w-2.5" /> về {fee.attended} (điểm danh)
               </button>
@@ -372,7 +411,9 @@ function StudentCard({ student, config, period, classId, className, invoice, att
 
           {/* Đơn giá */}
           <div>
-            <label className="text-[11px] font-medium text-muted-foreground block mb-1">Đơn giá/buổi</label>
+            <label className="text-[11px] font-medium text-muted-foreground block mb-1">
+              {fee.mode === "month" ? "Trọn gói/tháng" : "Đơn giá/buổi"}
+            </label>
             <p className="h-8 flex items-center text-sm font-semibold text-foreground">{fee.unit > 0 ? formatCurrency(fee.unit) : <span className="text-muted-foreground text-xs">Chưa đặt</span>}</p>
           </div>
 
@@ -443,28 +484,69 @@ function StudentCard({ student, config, period, classId, className, invoice, att
 // ── Config panel (đơn giá / buổi) ─────────────────────────────────────────────
 
 function ConfigPanel({ classId, config, period, onUpdate }: { classId: string; config: ClassTuitionConfig; period: string; onUpdate: () => void }) {
-  const effective = resolveUnitPrices(config, period);
-  const hasOwn = !!config.unit_prices?.[period];
-  const [inputs, setInputs] = useState<PackagePrices>(effective);
+  const mode = billingMode(config);
+  const priceTable = mode === "month" ? config.monthly_prices : config.unit_prices;
+  const resolve = mode === "month" ? resolveMonthlyPrices : resolveUnitPrices;
+  const hasOwn = !!priceTable?.[period];
+  const [inputs, setInputs] = useState<PackagePrices>(() => resolve(config, period));
   const [saved, setSaved] = useState(false);
 
-  // Đồng bộ input khi đổi kỳ hoặc dữ liệu nguồn đổi
-  useEffect(() => { setInputs(resolveUnitPrices(config, period)); }, [period, config.unit_prices]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Đồng bộ input khi đổi kỳ, đổi cách tính, hoặc dữ liệu nguồn đổi
+  useEffect(() => { setInputs(resolve(config, period)); }, [period, mode, priceTable]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function save() {
     const cur = await getClassTuition(classId);
-    cur.unit_prices = { ...(cur.unit_prices ?? {}), [period]: {
+    const prices = {
       online: inputs.online || 0, advanced: inputs.advanced || 0, offline: inputs.offline || 0,
-    } };
+    };
+    // Hai bảng giá lưu tách biệt: đổi qua lại giữa hai cách tính không làm mất
+    // giá đã đặt của cách kia.
+    if (mode === "month") cur.monthly_prices = { ...(cur.monthly_prices ?? {}), [period]: prices };
+    else cur.unit_prices = { ...(cur.unit_prices ?? {}), [period]: prices };
     await saveClassTuition(classId, cur);
     setSaved(true); setTimeout(() => setSaved(false), 2500);
     onUpdate();
   }
 
+  async function switchMode(next: TuitionBillingMode) {
+    if (next === mode) return;
+    const cur = await getClassTuition(classId);
+    cur.billing_mode = next;
+    await saveClassTuition(classId, cur);
+    onUpdate();
+  }
+
+  const priceLabel = mode === "month" ? "Trọn gói / tháng" : "Đơn giá / buổi";
+
   return (
     <div className="p-4 rounded-2xl border border-border bg-muted/20 space-y-3">
-      <div className="flex items-center justify-between">
-        <p className="text-sm font-semibold text-foreground">Đơn giá / buổi theo gói — {periodLabel(period)}</p>
+      <div>
+        <p className="text-sm font-semibold text-foreground mb-2">Cách tính học phí</p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          {([
+            { value: "session", label: "Theo buổi thực tế", hint: "Đơn giá × số buổi đã đi (theo điểm danh)" },
+            { value: "month", label: "Trọn gói theo tháng", hint: "Một mức cố định mỗi tháng, không phụ thuộc số buổi" },
+          ] as const).map(option => (
+            <button
+              key={option.value}
+              onClick={() => switchMode(option.value)}
+              className={`text-left p-3 rounded-xl border transition-colors ${
+                mode === option.value
+                  ? "border-primary bg-primary/5"
+                  : "border-border hover:border-primary/40 hover:bg-muted/40"
+              }`}
+            >
+              <span className={`text-sm font-semibold block ${mode === option.value ? "text-primary" : "text-foreground"}`}>
+                {option.label}
+              </span>
+              <span className="text-[11px] text-muted-foreground">{option.hint}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between pt-1">
+        <p className="text-sm font-semibold text-foreground">{priceLabel} theo gói — {periodLabel(period)}</p>
         {!hasOwn && <span className="text-[10px] text-muted-foreground bg-muted px-2 py-0.5 rounded-full">Kế thừa từ kỳ trước</span>}
       </div>
       <div className="grid grid-cols-3 gap-3">
@@ -483,11 +565,14 @@ function ConfigPanel({ classId, config, period, onUpdate }: { classId: string; c
         ))}
       </div>
       <div className="flex items-center gap-2">
-        <Button size="sm" variant="gradient" onClick={save}><Check className="h-3.5 w-3.5 mr-1" />Lưu đơn giá {periodLabel(period)}</Button>
+        <Button size="sm" variant="gradient" onClick={save}><Check className="h-3.5 w-3.5 mr-1" />Lưu giá {periodLabel(period)}</Button>
         {saved && <span className="text-xs text-emerald-600 flex items-center gap-1"><CheckCircle2 className="h-3.5 w-3.5" />Đã lưu</span>}
       </div>
       <p className="text-xs text-muted-foreground">
-        Đơn giá lưu riêng theo <strong>từng tháng</strong> — đổi giá tháng này <strong>không ảnh hưởng</strong> các tháng đã qua. Học phí = đơn giá (theo gói) × số buổi thực tế (từ điểm danh, chỉnh được) − giảm giá.
+        Giá lưu riêng theo <strong>từng tháng</strong> — đổi giá tháng này <strong>không ảnh hưởng</strong> các tháng đã qua.{" "}
+        {mode === "month"
+          ? <>Học phí = giá trọn gói (theo gói) − giảm giá. Số buổi điểm danh <strong>không</strong> ảnh hưởng số tiền.</>
+          : <>Học phí = đơn giá (theo gói) × số buổi thực tế (từ điểm danh, chỉnh được) − giảm giá.</>}
       </p>
     </div>
   );
@@ -557,7 +642,9 @@ export default function TuitionTab({ classId, className, students }: Props) {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h3 className="text-lg font-bold text-foreground">Quản lý học phí</h3>
-          <p className="text-sm text-muted-foreground">{students.length} học viên · Tính theo buổi thực tế</p>
+          <p className="text-sm text-muted-foreground">
+            {students.length} học viên · {billingMode(config) === "month" ? "Trọn gói theo tháng" : "Tính theo buổi thực tế"}
+          </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <input type="month" value={period} onChange={e => setPeriod(e.target.value)}

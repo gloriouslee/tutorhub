@@ -130,6 +130,52 @@ test("class registration tuition resolves all three session package prices", () 
   assert.equal(tuitionForPackage(tuition, "offline"), 150_000);
 });
 
+test("monthly billing quotes the flat monthly price, not the per-session one", () => {
+  const config = {
+    billing_mode: "month",
+    // Cả hai bảng cùng tồn tại: đổi cách tính không được làm mất giá của cách kia.
+    unit_prices: { "2026-07": { online: 90_000, advanced: 110_000, offline: 150_000 } },
+    monthly_prices: { "2026-07": { online: 700_000, advanced: 900_000, offline: 1_200_000 } },
+  };
+  assert.deepEqual(resolveRegistrationTuition(config, "2026-07"), {
+    period: "2026-07",
+    billing_unit: "month",
+    online: 700_000,
+    advanced: 900_000,
+    offline: 1_200_000,
+  });
+
+  // Kế thừa tiến vẫn áp dụng cho bảng giá tháng.
+  assert.equal(
+    resolveRegistrationTuition(config, "2026-09").online,
+    700_000,
+  );
+
+  // unit_price cũ là đơn giá MỘT BUỔI — không được dùng làm giá trọn gói tháng.
+  assert.equal(
+    resolveRegistrationTuition({ billing_mode: "month", unit_price: 90_000 }, "2026-07").online,
+    0,
+  );
+
+  // Thiếu billing_mode thì giữ nguyên cách tính theo buổi như các lớp đã cấu hình trước đây.
+  assert.equal(
+    resolveRegistrationTuition({ unit_prices: config.unit_prices }, "2026-07").billing_unit,
+    "session",
+  );
+});
+
+test("issuing tuition notifies the class without leaking one student's amount", async () => {
+  const route = await read("src/app/api/payments/invoices/route.ts");
+
+  // Phát hành mà không báo gì thì học viên không có cách nào biết là có hoá đơn mới.
+  assert.match(route, /invoice\.issue_notification_failed/);
+  assert.match(route, /target_role: "student"/);
+  // Thông báo gắn theo lớp -> tuyệt đối không kèm số tiền của một học viên.
+  assert.doesNotMatch(route, /content:[^\n]*invoice\.amount/);
+  // Phát hành hàng loạt gọi endpoint một lần mỗi học viên; chỉ được báo một lần.
+  assert.match(route, /if \(!existing\?\.length\)/);
+});
+
 test("class discovery hides enrolled and active registration classes", () => {
   assert.equal(isDiscoverableClass({ enrolled: true, registration_status: null }), false);
   assert.equal(isDiscoverableClass({ enrolled: false, registration_status: "pending" }), false);
@@ -688,6 +734,7 @@ test("homework navigation and data loading always provide immediate feedback", a
   const studentHomework = await read("src/app/student/homework/page.tsx");
   const teacherHomework = await read("src/app/teacher/homework/page.tsx");
   const studentClass = await read("src/app/student/classes/[classId]/page.tsx");
+  const studentClassHomework = await read("src/components/student/StudentHomeworkTab.tsx");
   const teacherClass = await read("src/app/teacher/classes/[classId]/page.tsx");
 
   assert.match(sidebar, /useLinkStatus/);
@@ -708,8 +755,15 @@ test("homework navigation and data loading always provide immediate feedback", a
   // Chấm ngay trong hàng đợi, không điều hướng sang trang khác.
   assert.match(teacherHomework, /<SubmissionGrader/);
 
-  assert.match(studentClass, /homeworkLoading/);
-  assert.match(studentClass, /Đang tải bài tập…/);
+  assert.match(studentClass, /<StudentHomeworkTab/);
+  assert.match(studentClass, /assignmentsLoading=\{!manualHomeworkLoaded && !curriculumHomeworkLoaded\}/);
+  assert.match(studentClass, /submissionsLoading=\{!homeworkSubmissionsLoaded\}/);
+  assert.match(studentClassHomework, /Cần làm lại/);
+  assert.match(studentClassHomework, /Chờ chấm/);
+  assert.match(studentClassHomework, /Ưu tiên tiếp theo/);
+  assert.match(studentClassHomework, /homeworkId=\$\{encodeURIComponent\(homework\.id\)\}/);
+  assert.match(studentHomework, /new URLSearchParams\(window\.location\.search\)/);
+  assert.match(studentHomework, /setModalType\(shouldSubmit \? "submit" : "detail"\)/);
   assert.match(teacherClass, /HomeworkPanelFallback/);
   assert.match(teacherClass, /persistedHomeworkLoaded/);
 });

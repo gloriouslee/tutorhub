@@ -192,7 +192,8 @@ export async function POST(req: NextRequest) {
     class_id: body.class_id,
     period: body.period,
   };
-  const { data, error } = await createAdminClient().rpc("mutate_invoice_secure", {
+  const admin = createAdminClient();
+  const { data, error } = await admin.rpc("mutate_invoice_secure", {
     p_action: "issue",
     p_invoice_id: invoice.id,
     p_child_id: invoice.child_id,
@@ -206,5 +207,42 @@ export async function POST(req: NextRequest) {
       { status: forbidden ? 403 : 409 },
     );
   }
+
+  // Phát hành xong mà không báo gì thì học viên không có cách nào biết là có hoá
+  // đơn mới — trước đây chỉ luồng gửi biên lai mới sinh thông báo (cho giáo viên).
+  //
+  // Thông báo gắn theo LỚP chứ không theo từng học viên, vì bảng notifications
+  // chỉ lọc theo vai trò + lớp. Do đó tuyệt đối không đưa số tiền vào nội dung:
+  // học phí của một em sẽ hiển thị cho cả lớp. Số tiền cụ thể xem ở trang Thanh toán.
+  const notificationTitle = `Học phí tháng ${Number(month)}/${year}`;
+  const { data: existing } = await admin
+    .from("notifications")
+    .select("id")
+    .eq("target_class_id", invoice.class_id)
+    .eq("title", notificationTitle)
+    .limit(1);
+  // Phát hành hàng loạt gọi endpoint này một lần cho mỗi học viên; chỉ báo một lần.
+  if (!existing?.length) {
+    const { error: notificationError } = await admin.from("notifications").insert({
+      id: crypto.randomUUID(),
+      title: notificationTitle,
+      content: `Học phí ${body.class_name.trim()} tháng ${Number(month)}/${year} đã được phát hành. Vào mục Thanh toán để xem chi tiết và nộp biên lai.`,
+      target_role: "student",
+      target_class_id: invoice.class_id,
+      category: "payment",
+      sent_by: actor.displayName,
+      sender_user_id: actor.userId,
+      is_read: false,
+    });
+    if (notificationError) {
+      // Hoá đơn đã ghi thành công — hỏng thông báo không được làm hỏng cả thao tác.
+      logEvent("warn", "invoice.issue_notification_failed", {
+        actor_id: actor.userId,
+        class_id: invoice.class_id,
+        error: notificationError.message,
+      });
+    }
+  }
+
   return NextResponse.json(data, { status: 201 });
 }

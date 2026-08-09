@@ -39,8 +39,9 @@ const PACKAGE_LABEL: Record<RegistrationPackage, string> = {
   offline: "Gói Offline",
 };
 
-function tuitionLabel(amount: number) {
-  return amount > 0 ? `${formatCurrency(amount)}/buổi` : "Chưa cập nhật";
+function tuitionLabel(amount: number, unit: "session" | "month" = "session") {
+  if (amount <= 0) return "Chưa cập nhật";
+  return `${formatCurrency(amount)}${unit === "month" ? "/tháng" : "/buổi"}`;
 }
 
 function requestLabel(status?: string | null) {
@@ -180,10 +181,16 @@ function ClassDetailModal({
               <div>
                 <h3 className="font-semibold">Chọn gói đăng ký</h3>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Học phí theo buổi, áp dụng cho kỳ {item.tuition.period}.
+                  {item.tuition.billing_unit === "month"
+                    ? `Học phí trọn gói theo tháng, áp dụng cho kỳ ${item.tuition.period}.`
+                    : `Học phí theo buổi, áp dụng cho kỳ ${item.tuition.period}.`}
                 </p>
               </div>
-              <Badge variant="outline">Tính theo số buổi thực tế</Badge>
+              <Badge variant="outline">
+                {item.tuition.billing_unit === "month"
+                  ? "Trọn gói theo tháng"
+                  : "Tính theo số buổi thực tế"}
+              </Badge>
             </div>
             <div className="grid gap-3 sm:grid-cols-3">
               {(["online", "advanced", "offline"] as const).map((option) => {
@@ -223,7 +230,7 @@ function ClassDetailModal({
                       />
                     </span>
                     <p className="mt-3 text-lg font-bold text-primary">
-                      {tuitionLabel(amount)}
+                      {tuitionLabel(amount, item.tuition.billing_unit)}
                     </p>
                     <p className="mt-1 text-xs text-muted-foreground">
                       {option === "online"
@@ -479,19 +486,19 @@ export default function StudentDiscoveryCatalog({
                       <div>
                         <p className="text-muted-foreground">Online</p>
                         <p className="mt-1 font-semibold text-foreground">
-                          {tuitionLabel(item.tuition.online)}
+                          {tuitionLabel(item.tuition.online, item.tuition.billing_unit)}
                         </p>
                       </div>
                       <div className="border-l border-border pl-3">
                         <p className="text-muted-foreground">Nâng cao</p>
                         <p className="mt-1 font-semibold text-foreground">
-                          {tuitionLabel(item.tuition.advanced)}
+                          {tuitionLabel(item.tuition.advanced, item.tuition.billing_unit)}
                         </p>
                       </div>
                       <div className="border-l border-border pl-3">
                         <p className="text-muted-foreground">Offline</p>
                         <p className="mt-1 font-semibold text-foreground">
-                          {tuitionLabel(item.tuition.offline)}
+                          {tuitionLabel(item.tuition.offline, item.tuition.billing_unit)}
                         </p>
                       </div>
                     </div>

@@ -1168,7 +1168,12 @@ export interface TuitionInvoice {
 
 export async function getInvoices(): Promise<TuitionInvoice[]> {
   const response = await fetch("/api/payments/invoices", { cache: "no-store" });
-  if (!response.ok) return [];
+  if (!response.ok) {
+    // Trả [] cho mọi lỗi khiến "gọi hỏng" trông y hệt "chưa có hoá đơn nào": học
+    // viên thấy trang trống dù giáo viên đã phát hành. Ít nhất phải ghi lại.
+    reportQueryFailure("invoices", `HTTP ${response.status}`);
+    return [];
+  }
   return response.json() as Promise<TuitionInvoice[]>;
 }
 
@@ -1508,6 +1513,13 @@ export interface StudentTuitionData {
 
 export interface PackagePrices { online: number; advanced: number; offline: number; }
 
+/**
+ * Cách tính học phí của lớp:
+ *  - "session": đơn giá/buổi × số buổi thực đi (từ điểm danh, sửa tay được)
+ *  - "month"  : trọn gói theo tháng, không phụ thuộc số buổi
+ */
+export type TuitionBillingMode = "session" | "month";
+
 export interface ClassTuitionConfig {
   package_fees: {
     online: number;
@@ -1518,6 +1530,10 @@ export interface ClassTuitionConfig {
   // Đơn giá/buổi theo GÓI, lưu SNAPSHOT theo từng kỳ "YYYY-MM" để đổi giá tháng
   // này KHÔNG làm thay đổi các tháng đã qua.
   unit_prices?: Record<string, PackagePrices>;
+  // Mặc định "session" khi thiếu, để mọi lớp đã cấu hình trước đây giữ nguyên cách tính.
+  billing_mode?: TuitionBillingMode;
+  // Giá trọn gói/tháng theo gói — cũng snapshot theo kỳ như unit_prices.
+  monthly_prices?: Record<string, PackagePrices>;
   students: Record<string, StudentTuitionData>;
 }
 

@@ -9,7 +9,8 @@ export type RegistrationPackage = "online" | "advanced" | "offline";
 
 export interface ClassRegistrationTuition {
   period: string;
-  billing_unit: "session";
+  /** "session": đơn giá × số buổi thực đi · "month": trọn gói mỗi tháng */
+  billing_unit: "session" | "month";
   online: number;
   advanced: number;
   offline: number;
