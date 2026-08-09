@@ -13,14 +13,15 @@ import {
   getClassScheduleOverride,
   getOnlineLink, saveOnlineLink,
   getCurriculum, type CurriculumSession as CurriculumSessionData,
-  getAllExamResults,
   getStudentPackages, saveStudentPackages, type StudentPackage,
   getClassMaterials, type StoredClassMaterial,
   kvGet, kvUpdate,
   getClasses, getStudents, removeStudentFromClass,
   getTeacherHomework, upsertTeacherHomework, removeTeacherHomework,
-  getAllTeacherAttendance, getHwSubmissions,
+  getAllTeacherAttendance,
 } from "@/lib/storage";
+import { emptyTeacherSubmissionSnapshot, getTeacherSubmissionSnapshot } from "@/lib/teacher-submissions";
+import { useWindowFocusRevision } from "@/hooks/useWindowFocusRevision";
 import { toLocalDateKey } from "@/lib/utils";
 import { ClassSchedule, type Student } from "@/types";
 import { useTeacherContext } from "@/hooks/useTeacherContext";
@@ -112,6 +113,7 @@ export default function TeacherClassDetailPage() {
   const classId = params.classId as string;
   const router = useRouter();
   const { teacherName, myClasses, ready } = useTeacherContext();
+  const submissionRefreshRevision = useWindowFocusRevision();
 
   // Tab hiện tại đồng bộ với URL (?tab=) để nút back của trình duyệt khôi phục đúng tab.
   // Đọc từ URL khi mount + khi back/forward (popstate); mặc định "overview" để khớp SSR.
@@ -295,9 +297,11 @@ export default function TeacherClassDetailPage() {
           }
         }
       }
-      // Kết quả bài thi (kind "exam") → đếm số bài nộp + điểm từng học sinh
-      const examHws: Homework[] = await Promise.all(examLessons.map(async ex => {
-        const results = await getAllExamResults(classId, ex.id).catch(() => []);
+      // Một nguồn server-scoped cho cả bài thi trên hệ thống và bài nộp file.
+      const submissionSnapshot = await getTeacherSubmissionSnapshot(classId)
+        .catch(emptyTeacherSubmissionSnapshot);
+      const examHws: Homework[] = examLessons.map(ex => {
+        const results = submissionSnapshot.examResults[ex.id] ?? [];
         const exam_results: Record<string, { score: number; total: number; submitted_at?: string; duration_seconds?: number; attempt?: number }> = {};
         for (const r of results) {
           const manual = Object.values(r.manual_scores ?? {}).reduce((a, b) => a + b, 0);
@@ -319,7 +323,8 @@ export default function TeacherClassDetailPage() {
           exam_status: ex.exam_status,
           exam_results,
         };
-      }));
+      });
+      setSubmissions(submissionSnapshot.fileSubmissions);
       setCurriculumByDate(map);
       setCurrMaterials(currMats);
       setCurrLectures(currLecs);
@@ -335,7 +340,7 @@ export default function TeacherClassDetailPage() {
     })()
       .catch(() => undefined)
       .finally(() => setCurriculumHomeworkLoaded(true));
-  }, [classId, activeTab]);
+  }, [classId, activeTab, submissionRefreshRevision]);
 
   // Load persisted homework and submissions.
   useEffect(() => {
@@ -343,9 +348,9 @@ export default function TeacherClassDetailPage() {
     setPersistedHomeworkLoaded(false);
     Promise.all([
       getTeacherHomework<Homework>([classId]).catch(() => []),
-      getHwSubmissions<Submission>({ classIds: [classId] }).catch(() => []),
+      getTeacherSubmissionSnapshot(classId).catch(emptyTeacherSubmissionSnapshot),
     ])
-      .then(([all, rawSub]) => {
+      .then(([all, snapshot]) => {
         const base = all.filter(h => h.class_id === classId && h.source !== "curriculum");
         // Giữ lại các bài tập từ lộ trình mà effect curriculum đã nạp vào state,
         // tránh race giữa hai effect ghi đè lẫn nhau (mất bài tập lộ trình khi mới load).
@@ -354,10 +359,10 @@ export default function TeacherClassDetailPage() {
           const currIds = new Set(curr.map(h => h.id));
           return [...base.filter(h => !currIds.has(h.id)), ...curr];
         });
-        setSubmissions(rawSub);
+        setSubmissions(snapshot.fileSubmissions);
       })
       .finally(() => setPersistedHomeworkLoaded(true));
-  }, [classId, cls]);
+  }, [classId, cls, submissionRefreshRevision]);
 
   // Load attendance from localStorage
   useEffect(() => {

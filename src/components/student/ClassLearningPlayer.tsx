@@ -410,7 +410,7 @@ export default function ClassLearningPlayer({ classId, requestedLessonId }: Prop
   async function selectLesson(lessonId: string) {
     await saveCurrentNote();
     setOutlineOpen(false);
-    router.replace(`/student/classes/${classId}/learn/${lessonId}`, { scroll: false });
+    router.push(`/student/classes/${classId}/learn/${lessonId}`, { scroll: false });
   }
 
   async function markCompleteAndContinue() {
@@ -422,7 +422,7 @@ export default function ClassLearningPlayer({ classId, requestedLessonId }: Prop
         notes: noteDraft,
       });
       setProgress((current) => [saved, ...current.filter((item) => item.lesson_id !== saved.lesson_id)]);
-      if (nextLesson) router.replace(`/student/classes/${classId}/learn/${nextLesson.id}`, { scroll: false });
+      if (nextLesson) router.push(`/student/classes/${classId}/learn/${nextLesson.id}`, { scroll: false });
     } finally {
       setCompleting(false);
     }
@@ -503,11 +503,14 @@ export default function ClassLearningPlayer({ classId, requestedLessonId }: Prop
   }
 
   if (shouldRenderExamPlayer(activeLesson)) {
+    const returnLesson = previousLesson ?? nextLesson;
     return (
       <StudentExamPlayer
         classId={classId}
         lessonId={activeLesson.id}
-        onExit={() => router.push(`/student/classes/${classId}?tab=curriculum`)}
+        onExit={() => returnLesson
+          ? router.replace(`/student/classes/${classId}/learn/${returnLesson.id}`, { scroll: false })
+          : router.replace(`/student/classes/${classId}?tab=curriculum`, { scroll: false })}
       />
     );
   }

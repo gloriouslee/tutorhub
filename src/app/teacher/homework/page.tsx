@@ -12,10 +12,12 @@ import SubmissionGrader, {
   type GradableSubmission,
 } from "@/components/teacher/SubmissionGrader";
 import {
-  getAllExamResults, getCurriculum, getHwSubmissions, getStudents,
+  getCurriculum, getHwSubmissions, getStudents,
   getTeacherHomework, removeTeacherHomework, upsertTeacherHomework,
 } from "@/lib/storage";
 import { getSubmissionsByHomeworks } from "@/lib/supabase/submissions";
+import { getTeacherSubmissionSnapshot } from "@/lib/teacher-submissions";
+import { useWindowFocusRevision } from "@/hooks/useWindowFocusRevision";
 import { toLocalDateKey } from "@/lib/utils";
 import {
   ArrowRight, BookOpen, Calendar, ChevronDown, ChevronRight, Download,
@@ -64,6 +66,7 @@ const EXAM_BADGE = {
 export default function TeacherHomeworkPage() {
   const router = useRouter();
   const { teacherId, teacherName, myClasses, ready } = useTeacherContext();
+  const submissionRefreshRevision = useWindowFocusRevision();
 
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [submissions, setSubmissions] = useState<GradableSubmission[]>([]);
@@ -99,7 +102,6 @@ export default function TeacherHomeworkPage() {
         Promise.all(myClasses.map(async (cls) => {
           const chapters = await getCurriculum(cls.id).catch(() => []);
           const rows: Assignment[] = [];
-          const examIndexes: { lessonId: string; row: number }[] = [];
           chapters.forEach((chapter) =>
             chapter.sessions.forEach((session) =>
               session.lessons.forEach((lesson) => {
@@ -112,7 +114,6 @@ export default function TeacherHomeworkPage() {
                     fileUrl: lesson.file_url, submitted: 0, ungraded: 0,
                   });
                 } else if (lesson.type === "exam") {
-                  examIndexes.push({ lessonId: lesson.id, row: rows.length });
                   rows.push({
                     id: lesson.id, classId: cls.id, title: lesson.title,
                     description: lesson.description, kind: "exam", source: "curriculum",
@@ -125,12 +126,6 @@ export default function TeacherHomeworkPage() {
               }),
             ),
           );
-          const counts = await Promise.all(
-            examIndexes.map((exam) =>
-              getAllExamResults(cls.id, exam.lessonId).then((r) => r.length).catch(() => 0),
-            ),
-          );
-          examIndexes.forEach((exam, index) => { rows[exam.row].submitted = counts[index]; });
           return rows;
         })),
         getStudents().catch(() => []),
@@ -161,16 +156,25 @@ export default function TeacherHomeworkPage() {
           student_name: row.student_name || names.get(row.student_id) || row.student_id,
         }));
 
-      // Nguồn Supabase là nguồn thật; bản cục bộ chỉ dùng khi chưa đồng bộ được.
-      const remote = await getSubmissionsByHomeworks(all.map((row) => row.id))
-        .catch(() => [] as GradableSubmission[]);
+      // Nguồn server-scoped dùng chung cho bài thi và file; fallback giữ tương thích dữ liệu cũ.
+      const snapshots = await Promise.all(myClasses.map(async (cls) => ({
+        classId: cls.id,
+        snapshot: await getTeacherSubmissionSnapshot(cls.id).catch(() => null),
+      })));
+      const snapshotFiles = snapshots.flatMap(({ snapshot }) => snapshot?.fileSubmissions ?? []);
+      const remote = snapshotFiles.length > 0
+        ? snapshotFiles as GradableSubmission[]
+        : await getSubmissionsByHomeworks(all.map((row) => row.id)).catch(() => [] as GradableSubmission[]);
       const loaded = remote.length > 0
         ? withName(remote as GradableSubmission[])
         : withName(await getHwSubmissions<GradableSubmission>({ classIds }).catch(() => []));
       if (cancelled) return;
 
       all.forEach((row) => {
-        if (row.kind === "exam") return;
+        if (row.kind === "exam") {
+          row.submitted = snapshots.find((item) => item.classId === row.classId)?.snapshot?.examResults[row.id]?.length ?? 0;
+          return;
+        }
         const mine = loaded.filter((sub) => sub.homework_id === row.id);
         row.submitted = mine.length;
         row.ungraded = mine.filter((sub) => sub.score == null).length;
@@ -182,7 +186,7 @@ export default function TeacherHomeworkPage() {
     })().finally(() => { if (!cancelled) setLoadingHomework(false); });
 
     return () => { cancelled = true; };
-  }, [ready, teacherId, myClasses]);
+  }, [ready, teacherId, myClasses, submissionRefreshRevision]);
 
   const totalUngraded = assignments.reduce((sum, row) => sum + row.ungraded, 0);
   // Chỉ bài thi đã mở mới thật sự "đang chạy"; bản nháp học viên chưa nhìn thấy.

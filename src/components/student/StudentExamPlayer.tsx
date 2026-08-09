@@ -9,7 +9,7 @@ import { renderMathInHtml } from "@/lib/mathRender";
 import {
   Clock, CheckCircle2, XCircle, AlertTriangle, Check,
   ChevronLeft, Flag, RotateCcw, BookOpen,
-  ChevronRight, LayoutGrid, X, Image as ImageIcon, MessageSquare,
+  ChevronRight, LayoutGrid, X, Image as ImageIcon, MessageSquare, Loader2,
 } from "lucide-react";
 import { useStudentContext } from "@/hooks/useStudentContext";
 import { uploadQuestionFile } from "@/lib/upload";
@@ -846,6 +846,8 @@ export default function StudentExamPlayer({
   const [showPanel,   setShowPanel]   = useState(false);
   const [examLocked,  setExamLocked]  = useState(false);
   const [lockReason,  setLockReason]  = useState("");
+  const [submitting,  setSubmitting]  = useState(false);
+  const [submitError, setSubmitError] = useState("");
   // null = đang kiểm tra quyền truy cập
   const [accessDenied, setAccessDenied] = useState<boolean | null>(null);
   // Thời điểm bắt đầu làm (tính thời lượng) + số lần đã làm trước đó (tính lần làm)
@@ -948,35 +950,52 @@ export default function StudentExamPlayer({
   }
 
   async function submit() {
+    if (submitting) return;
     // Thời lượng làm bài + lần làm thứ mấy (best-effort, gửi kèm khi nộp)
     const duration_seconds = startedAtRef.current
       ? Math.max(0, Math.round((Date.now() - startedAtRef.current) / 1000))
       : undefined;
     const attempt = prevAttemptRef.current + 1;
-    prevAttemptRef.current = attempt;
-    const response = await fetch(`/api/exam/${classId}/${lessonId}/submit`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ answers, duration_seconds, attempt }),
-    });
-    let data = response.ok ? await response.json() : null;
-    if (response.status === 409) {
-      const existing = await fetch(`/api/exam/${classId}/${lessonId}`, {
+    setSubmitting(true);
+    setSubmitError("");
+    try {
+      const response = await fetch(`/api/exam/${classId}/${lessonId}/submit`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ answers, duration_seconds, attempt }),
+      });
+      let data = response.ok ? await response.json() : null;
+      if (response.status === 409) {
+        const existing = await fetch(`/api/exam/${classId}/${lessonId}`, {
+          cache: "no-store",
+        });
+        if (existing.ok) data = await existing.json();
+      }
+      if (!data?.result) throw new Error("Bài chưa được máy chủ ghi nhận. Vui lòng thử nộp lại.");
+
+      // Read-after-write: chỉ báo thành công khi kết quả thật sự đọc lại được từ server.
+      const verification = await fetch(`/api/exam/${classId}/${lessonId}`, {
         cache: "no-store",
       });
-      if (existing.ok) data = await existing.json();
+      const verified = verification.ok ? await verification.json() : null;
+      if (!verified?.submitted || !verified?.result) {
+        throw new Error("Không thể xác nhận bài đã lưu. Vui lòng thử lại trước khi rời trang.");
+      }
+
+      if (Array.isArray(verified.questions) && verified.questions.length > 0) {
+        setQuestions(verified.questions as ExamQuestion[]);
+      }
+      await saveStudentLessonProgress(classId, lessonId, { completed: true });
+      prevAttemptRef.current = verified.result.attempt ?? attempt;
+      setResult(verified.result as ExamResult);
+      setSubmitted(true);
+      setShowConfirm(false);
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : "Không thể nộp bài. Vui lòng thử lại.");
+      setShowConfirm(true);
+    } finally {
+      setSubmitting(false);
     }
-    if (!data?.result) {
-      setLockReason("Không thể nộp bài an toàn. Bài chưa được ghi nhận; vui lòng thử lại.");
-      return;
-    }
-    if (Array.isArray(data.questions) && data.questions.length > 0) {
-      setQuestions(data.questions as ExamQuestion[]);
-    }
-    await saveStudentLessonProgress(classId, lessonId, { completed: true });
-    setResult(data.result as ExamResult);
-    setSubmitted(true);
-    setShowConfirm(false);
   }
 
   async function retry() {
@@ -1250,13 +1269,19 @@ export default function StudentExamPlayer({
                   Còn {questions.length - answeredCount} câu chưa làm.
                 </p>
               )}
+              {submitError && (
+                <p className="mt-3 flex items-start gap-1.5 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-left text-xs font-medium text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300">
+                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />{submitError}
+                </p>
+              )}
             </div>
             <div className="flex gap-3">
-              <Button variant="outline" className="flex-1" onClick={() => setShowConfirm(false)}>
+              <Button variant="outline" className="flex-1" disabled={submitting} onClick={() => setShowConfirm(false)}>
                 Tiếp tục làm
               </Button>
-              <Button variant="gradient" className="flex-1" onClick={submit}>
-                <Check className="h-4 w-4 mr-1" />Nộp bài
+              <Button variant="gradient" className="flex-1" disabled={submitting} onClick={submit}>
+                {submitting ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Check className="h-4 w-4 mr-1" />}
+                {submitting ? "Đang ghi nhận…" : "Nộp bài"}
               </Button>
             </div>
           </div>

@@ -251,6 +251,9 @@ test("exam client has no client-side grading or direct retry deletion", async ()
   assert.doesNotMatch(examPlayer, /saveExamResult|kvDelete|calcAutoScore/);
   assert.match(examPlayer, /\/retry/);
   assert.match(examPlayer, /\/submit/);
+  assert.match(examPlayer, /Read-after-write/);
+  assert.match(examPlayer, /verified\?\.submitted/);
+  assert.match(examPlayer, /Bài chưa được máy chủ ghi nhận/);
 });
 
 test("class registration is student-created and teacher-reviewed", async () => {
@@ -581,6 +584,10 @@ test("teacher profile, schedule and submissions use canonical stores", async () 
   const storage = await read("src/lib/storage.ts");
   const submissionStore = await read("src/lib/supabase/submissions.ts");
   const settingsPage = await read("src/app/teacher/settings/page.tsx");
+  const snapshotRoute = await read("src/app/api/teacher/classes/[classId]/submissions/route.ts");
+  const classDetail = await read("src/app/teacher/classes/[classId]/page.tsx");
+  const curriculumTab = await read("src/components/teacher/CurriculumTab.tsx");
+  const homeworkPage = await read("src/app/teacher/homework/page.tsx");
 
   assert.match(profileRoute, /actor\?\.role !== "teacher"/);
   assert.match(profileRoute, /hasValidMutationOrigin/);
@@ -592,6 +599,15 @@ test("teacher profile, schedule and submissions use canonical stores", async () 
   assert.match(storage, /\.from\("kv_student_packages"\)[\s\S]{0,100}\.select\("id,value"\)/);
   assert.match(submissionStore, /\.from\("hw_submissions"\)/);
   assert.doesNotMatch(submissionStore, /\.from\("submissions"\)/);
+  assert.match(snapshotRoute, /identity\.role !== "teacher"/);
+  assert.match(snapshotRoute, /classScope\.tutor_id !== identity\.teacherId/);
+  assert.match(snapshotRoute, /\.from\("kv_exam_results"\)/);
+  assert.match(snapshotRoute, /\.from\("hw_submissions"\)/);
+  assert.match(snapshotRoute, /candidateStudentIds/);
+  assert.match(classDetail, /getTeacherSubmissionSnapshot/);
+  assert.match(curriculumTab, /getTeacherSubmissionSnapshot/);
+  assert.match(homeworkPage, /getTeacherSubmissionSnapshot/);
+  assert.match(classDetail, /useWindowFocusRevision/);
 });
 
 test("student portal keeps paid material, submissions and progress server-scoped", async () => {
@@ -926,6 +942,9 @@ test("student curriculum launches a focused full-screen learning player", async 
   assert.match(player, /Ghi chú bài học/);
   assert.match(player, /saveStudentLessonProgress/);
   assert.match(player, /<StudentExamPlayer/);
+  assert.match(player, /const returnLesson = previousLesson \?\? nextLesson/);
+  assert.match(player, /learn\/\$\{returnLesson\.id\}/);
+  assert.match(player, /router\.push\(`\/student\/classes\/\$\{classId\}\/learn\/\$\{lessonId\}/);
   assert.doesNotMatch(player, /router\.push\(`\/student\/classes\/\$\{classId\}\/exam/);
   assert.match(player, /lessonTypeById\.get\(item\.lesson_id\) !== "homework"/);
   assert.match(player, /submission\.status !== "returned"/);

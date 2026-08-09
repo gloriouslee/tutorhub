@@ -7,9 +7,11 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
-  getCurriculum, mutateCurriculum, getAllExamResults, addNotification,
+  getCurriculum, mutateCurriculum, addNotification,
   type CurriculumChapter, type CurriculumSession, type CurriculumLesson, type StoredExamResult,
 } from "@/lib/storage";
+import { emptyTeacherSubmissionSnapshot, getTeacherSubmissionSnapshot } from "@/lib/teacher-submissions";
+import { useWindowFocusRevision } from "@/hooks/useWindowFocusRevision";
 import { uploadClassFile } from "@/lib/upload";
 import ExamEditorModal from "@/components/teacher/ExamEditorModal";
 import ExamGradingView from "@/components/teacher/ExamGradingView";
@@ -538,6 +540,7 @@ function InlineEdit({ value, onSave, placeholder }: { value: string; onSave: (v:
 // ── Main component ────────────────────────────────────────────────────────────
 export default function CurriculumTab({ classId, schedule, students = [], gradeLessonId, onGradingOpened }: { classId: string; schedule: ClassSchedule[]; students?: StudentLite[]; gradeLessonId?: string | null; onGradingOpened?: () => void }) {
   const router = useRouter();
+  const submissionRefreshRevision = useWindowFocusRevision();
   const slots = generateSlots(schedule);
   const [chapters,     setChapters]     = useState<CurriculumChapter[]>([]);
   const [expanded,     setExpanded]     = useState<Set<string>>(new Set());
@@ -619,14 +622,15 @@ export default function CurriculumTab({ classId, schedule, students = [], gradeL
     let cancelled = false;
     (async () => {
       const exams = chapters.flatMap(ch => ch.sessions).flatMap(session => session.lessons).filter(lesson => lesson.type === "exam");
-      const entries = await Promise.all(
-        exams.map(async exam => [exam.id, await getAllExamResults(classId, exam.id)] as const),
-      );
-      const map = Object.fromEntries(entries) as Record<string, StoredExamResult[]>;
+      const snapshot = await getTeacherSubmissionSnapshot(classId)
+        .catch(emptyTeacherSubmissionSnapshot);
+      const map = Object.fromEntries(
+        exams.map((exam) => [exam.id, snapshot.examResults[exam.id] ?? []]),
+      ) as Record<string, StoredExamResult[]>;
       if (!cancelled) setExamResultsMap(map);
     })();
     return () => { cancelled = true; };
-  }, [chapters, classId]);
+  }, [chapters, classId, submissionRefreshRevision]);
 
   // Mở / đóng trình chấm — đồng bộ URL (?grade=) để reload vẫn ở trang chấm.
   function openGrading(lessonId: string, lessonTitle: string) {
