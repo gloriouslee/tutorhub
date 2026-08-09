@@ -37,14 +37,23 @@ import {
   type SavedAttendanceRecord,
 } from "@/components/teacher/classDetail.types";
 
-function DeferredPanelFallback() {
+function PanelFallback({ label }: { label: string }) {
   return (
-    <div className="space-y-3 p-6" aria-label="Đang tải nội dung">
+    <div role="status" aria-live="polite" className="space-y-3 p-6" aria-label={label}>
+      <p className="text-sm font-semibold text-muted-foreground">{label}</p>
       <div className="h-6 w-40 animate-pulse rounded-lg bg-muted" />
       <div className="h-28 animate-pulse rounded-2xl bg-muted/70" />
       <div className="h-28 animate-pulse rounded-2xl bg-muted/50" />
     </div>
   );
+}
+
+function DeferredPanelFallback() {
+  return <PanelFallback label="Đang tải nội dung…" />;
+}
+
+function HomeworkPanelFallback() {
+  return <PanelFallback label="Đang tải bài tập…" />;
 }
 
 const CurriculumTab = dynamic(() => import("@/components/teacher/CurriculumTab"), {
@@ -149,6 +158,8 @@ export default function TeacherClassDetailPage() {
   const [homeworks, setHomeworks] = useState<Homework[]>([]);
   const [homeworkModal, setHomeworkModal] = useState<{ open: boolean; editing?: Homework }>({ open: false });
   const [submissions, setSubmissions] = useState<Submission[]>([]);
+  const [curriculumHomeworkLoaded, setCurriculumHomeworkLoaded] = useState(false);
+  const [persistedHomeworkLoaded, setPersistedHomeworkLoaded] = useState(false);
 
   // Attendance state
   const [openAttendanceDate, setOpenAttendanceDate] = useState<string | null>(null);
@@ -217,6 +228,7 @@ export default function TeacherClassDetailPage() {
 
   // Build curriculum date-index + extract curriculum bài tập (nộp file + làm câu hỏi)
   useEffect(() => {
+    setCurriculumHomeworkLoaded(false);
     (async () => {
       const chapters = await getCurriculum(classId);
       const today = new Date().toISOString().slice(0, 10);
@@ -320,17 +332,21 @@ export default function TeacherClassDetailPage() {
           return [...kept, ...currHws];
         });
       }
-    })();
+    })()
+      .catch(() => undefined)
+      .finally(() => setCurriculumHomeworkLoaded(true));
   }, [classId, activeTab]);
 
   // Load persisted homework and submissions.
   useEffect(() => {
     if (!cls) return;
-    (async () => {
-      try {
-        const all = await getTeacherHomework<Homework>([classId]);
-        const forClass = all.filter(h => h.class_id === classId && h.source !== "curriculum");
-        const base: Homework[] = forClass;
+    setPersistedHomeworkLoaded(false);
+    Promise.all([
+      getTeacherHomework<Homework>([classId]).catch(() => []),
+      getHwSubmissions<Submission>({ classIds: [classId] }).catch(() => []),
+    ])
+      .then(([all, rawSub]) => {
+        const base = all.filter(h => h.class_id === classId && h.source !== "curriculum");
         // Giữ lại các bài tập từ lộ trình mà effect curriculum đã nạp vào state,
         // tránh race giữa hai effect ghi đè lẫn nhau (mất bài tập lộ trình khi mới load).
         setHomeworks(prev => {
@@ -338,19 +354,9 @@ export default function TeacherClassDetailPage() {
           const currIds = new Set(curr.map(h => h.id));
           return [...base.filter(h => !currIds.has(h.id)), ...curr];
         });
-      } catch {
-        setHomeworks([]);
-      }
-
-      try {
-        const rawSub = await getHwSubmissions<Submission>({
-          classIds: [classId],
-        });
         setSubmissions(rawSub);
-      } catch {
-        setSubmissions([]);
-      }
-    })();
+      })
+      .finally(() => setPersistedHomeworkLoaded(true));
   }, [classId, cls]);
 
   // Load attendance from localStorage
@@ -652,16 +658,20 @@ export default function TeacherClassDetailPage() {
 
           {/* ── Homework ── */}
           {activeTab === "homework" && (
-            <HomeworkTab
-              classId={classId}
-              homeworks={homeworks}
-              submissions={submissions}
-              students={classStudents}
-              onNewHomework={() => setHomeworkModal({ open: true })}
-              onEditHomework={hw => setHomeworkModal({ open: true, editing: hw })}
-              onDeleteHomework={handleDeleteHomework}
-              onGradeExam={gradeExamInCurriculum}
-            />
+            !curriculumHomeworkLoaded || !persistedHomeworkLoaded ? (
+              <HomeworkPanelFallback />
+            ) : (
+              <HomeworkTab
+                classId={classId}
+                homeworks={homeworks}
+                submissions={submissions}
+                students={classStudents}
+                onNewHomework={() => setHomeworkModal({ open: true })}
+                onEditHomework={hw => setHomeworkModal({ open: true, editing: hw })}
+                onDeleteHomework={handleDeleteHomework}
+                onGradeExam={gradeExamInCurriculum}
+              />
+            )
           )}
 
           {/* ── Schedule ── */}

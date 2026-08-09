@@ -6,6 +6,7 @@ import PortalLayout from "@/components/layout/PortalLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { SectionHeader } from "@/components/shared";
+import { HomeworkLoadingState } from "@/components/shared/HomeworkLoadingState";
 import { useStudentContext } from "@/hooks/useStudentContext";
 import {
   FileText, Clock, CheckCircle2, Upload, Calendar,
@@ -49,11 +50,17 @@ interface HomeworkItem {
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function StudentHomeworkPage() {
   const router = useRouter();
-  const { studentId: STUDENT_ID, studentName: STUDENT_NAME, myClasses } = useStudentContext();
+  const {
+    studentId: STUDENT_ID,
+    studentName: STUDENT_NAME,
+    myClasses,
+    ready,
+  } = useStudentContext();
   const myClassIds = myClasses.map(c => c.id);
   const [teacherHw,    setTeacherHw]    = useState<HomeworkItem[]>([]);
   const myHomework: HomeworkItem[] = teacherHw;
   const [submissions,  setSubmissions]  = useState<SubmissionRecord[]>([]);
+  const [loadingHomework, setLoadingHomework] = useState(true);
   const [filterTab,    setFilterTab]    = useState<FilterTab>("all");
   const [selectedHw,   setSelectedHw]   = useState<HomeworkItem | null>(null);
   const [modalType,    setModalType]    = useState<"submit" | "detail" | null>(null);
@@ -64,67 +71,93 @@ export default function StudentHomeworkPage() {
 
   useEffect(() => {
     const classKey = myClassIds.join(",");
-    if (!classKey) return;
+    if (!ready) return;
+    if (!STUDENT_ID) {
+      setLoadingHomework(false);
+      return;
+    }
 
-    // Load manually-created homework
-    getTeacherHomework<HomeworkItem>(myClassIds)
-      .then(all => setTeacherHw(prev => {
-        const manual = all.filter(h => myClassIds.includes(h.class_id) && isAssignedToStudent(h.assigned_to, STUDENT_ID));
-        const existingIds = new Set(prev.map(h => h.id));
-        const fresh = manual.filter(h => !existingIds.has(h.id));
-        return fresh.length > 0 ? [...prev, ...fresh] : prev.length === 0 ? manual : prev;
-      }));
+    if (!classKey) {
+      setTeacherHw([]);
+      setSubmissions([]);
+      setLoadingHomework(false);
+      return;
+    }
 
-    // Load curriculum bài tập: nộp file (type "homework") + làm câu hỏi (type "exam")
-    Promise.all(myClassIds.map(cid =>
-      getStudentCurriculum(cid).then(async chapters => {
-        const items: HomeworkItem[] = [];
-        const today = new Date().toISOString().slice(0, 10);
-        for (const ch of chapters) {
-          for (const s of ch.sessions) {
-            for (const lesson of s.lessons) {
-              if (lesson.type === "homework") {
-                items.push({
-                  id: lesson.id, class_id: cid, title: lesson.title,
-                  description: (lesson as any).description,
-                  due_date: (lesson as any).due_date ?? s.date ?? today,
-                  created_at: s.date, kind: "file",
-                  file_url: (lesson as any).file_url,
-                });
-              } else if (lesson.type === "exam") {
-                const result = await getExamResult(cid, lesson.id, STUDENT_ID).catch(() => null);
-                const manual = result ? Object.values(result.manual_scores ?? {}).reduce((a, b) => a + b, 0) : 0;
-                items.push({
-                  id: lesson.id, class_id: cid, title: lesson.title,
-                  description: (lesson as any).description,
-                  due_date: (lesson as any).exam_opens_at?.slice(0, 10) ?? s.date ?? today,
-                  created_at: s.date, kind: "exam",
-                  exam_done: !!result,
-                  exam_score: result ? Math.round((result.score + manual) * 100) / 100 : undefined,
-                  exam_total: result?.total,
-                });
-              }
+    let cancelled = false;
+    setLoadingHomework(true);
+
+    const curriculumPromise = Promise.all(myClassIds.map(async cid => {
+      const chapters = await getStudentCurriculum(cid).catch(() => []);
+      const items: HomeworkItem[] = [];
+      const examItems: Promise<HomeworkItem>[] = [];
+      const today = new Date().toISOString().slice(0, 10);
+
+      for (const ch of chapters) {
+        for (const s of ch.sessions) {
+          for (const lesson of s.lessons) {
+            if (lesson.type === "homework") {
+              items.push({
+                id: lesson.id, class_id: cid, title: lesson.title,
+                description: (lesson as any).description,
+                due_date: (lesson as any).due_date ?? s.date ?? today,
+                created_at: s.date, kind: "file",
+                file_url: (lesson as any).file_url,
+              });
+            } else if (lesson.type === "exam") {
+              examItems.push(
+                getExamResult(cid, lesson.id, STUDENT_ID)
+                  .catch(() => null)
+                  .then(result => {
+                    const manual = result
+                      ? Object.values(result.manual_scores ?? {}).reduce((a, b) => a + b, 0)
+                      : 0;
+                    return {
+                      id: lesson.id, class_id: cid, title: lesson.title,
+                      description: (lesson as any).description,
+                      due_date: (lesson as any).exam_opens_at?.slice(0, 10) ?? s.date ?? today,
+                      created_at: s.date, kind: "exam" as const,
+                      exam_done: !!result,
+                      exam_score: result ? Math.round((result.score + manual) * 100) / 100 : undefined,
+                      exam_total: result?.total,
+                    };
+                  }),
+              );
             }
           }
         }
-        return items;
-      })
-    )).then(results => {
-      const currHws = results.flat();
-      if (currHws.length > 0) {
-        setTeacherHw(prev => {
-          const existingIds = new Set(prev.map(h => h.id));
-          const fresh = currHws.filter(h => !existingIds.has(h.id));
-          return fresh.length > 0 ? [...prev, ...fresh] : prev;
-        });
       }
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [myClassIds.join(",")]);
 
-  useEffect(() => {
-    getSubmissionsByStudent(STUDENT_ID).then(setSubmissions);
-  }, [STUDENT_ID]);
+      return [...items, ...await Promise.all(examItems)];
+    }));
+
+    Promise.all([
+      getTeacherHomework<HomeworkItem>(myClassIds).catch(() => []),
+      curriculumPromise,
+      getSubmissionsByStudent(STUDENT_ID).catch(() => []),
+    ])
+      .then(([allManual, curriculumByClass, studentSubmissions]) => {
+        if (cancelled) return;
+        const manual = allManual.filter(h =>
+          myClassIds.includes(h.class_id)
+          && isAssignedToStudent(h.assigned_to, STUDENT_ID),
+        );
+        const merged = new Map<string, HomeworkItem>();
+        for (const item of [...manual, ...curriculumByClass.flat()]) {
+          merged.set(item.id, item);
+        }
+        setTeacherHw([...merged.values()]);
+        setSubmissions(studentSubmissions);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingHomework(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, STUDENT_ID, myClassIds.join(",")]);
 
   // Per-homework submission lookup
   function getSub(hwId: string) {
@@ -251,6 +284,14 @@ export default function StudentHomeworkPage() {
       setErrorMsg(error instanceof Error ? error.message : "Không thể nộp bài. Vui lòng thử lại.");
       setUploadState("idle");
     }
+  }
+
+  if (loadingHomework) {
+    return (
+      <PortalLayout role="student" userName={STUDENT_NAME} pageTitle="Bài tập">
+        <HomeworkLoadingState />
+      </PortalLayout>
+    );
   }
 
   return (

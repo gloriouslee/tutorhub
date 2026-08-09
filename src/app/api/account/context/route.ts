@@ -7,6 +7,10 @@ import {
   type PortalBranding,
 } from "@/lib/portal-branding";
 
+const PRIVATE_NO_STORE = {
+  headers: { "Cache-Control": "private, no-store" },
+};
+
 async function loadPortalBranding(
   admin: ReturnType<typeof createAdminClient>,
   teacherId: string | undefined,
@@ -78,15 +82,18 @@ export async function GET(req: NextRequest) {
       ? String(hydratedClasses[0].tutor_id)
       : undefined;
     const portalBranding = await loadPortalBranding(admin, primaryTeacherId);
-    return NextResponse.json({
-      role: identity.role,
-      studentId: identity.studentId,
-      studentName: identity.displayName,
-      classes: hydratedClasses,
-      assignedClassId: hydratedClasses[0]?.id ?? "",
-      portalBranding,
-      avatarUrl: identity.avatarUrl,
-    });
+    return NextResponse.json(
+      {
+        role: identity.role,
+        studentId: identity.studentId,
+        studentName: identity.displayName,
+        classes: hydratedClasses,
+        assignedClassId: hydratedClasses[0]?.id ?? "",
+        portalBranding,
+        avatarUrl: identity.avatarUrl,
+      },
+      PRIVATE_NO_STORE,
+    );
   }
 
   if (identity.role === "teacher" && identity.teacherId) {
@@ -101,18 +108,21 @@ export async function GET(req: NextRequest) {
     if (error) {
       return NextResponse.json({ error: "context_unavailable" }, { status: 500 });
     }
-    return NextResponse.json({
-      role: identity.role,
-      userId: identity.userId,
-      teacherId: identity.teacherId,
-      teacherName: identity.displayName,
-      classes: (classes ?? []).map((item) => ({
-        ...item,
-        tutor_name: identity.displayName,
-      })),
-      portalBranding,
-      avatarUrl: identity.avatarUrl,
-    });
+    return NextResponse.json(
+      {
+        role: identity.role,
+        userId: identity.userId,
+        teacherId: identity.teacherId,
+        teacherName: identity.displayName,
+        classes: (classes ?? []).map((item) => ({
+          ...item,
+          tutor_name: identity.displayName,
+        })),
+        portalBranding,
+        avatarUrl: identity.avatarUrl,
+      },
+      PRIVATE_NO_STORE,
+    );
   }
 
   if (identity.role === "parent" && identity.parentId) {
@@ -140,28 +150,34 @@ export async function GET(req: NextRequest) {
       admin,
       (classes ?? []) as Record<string, unknown>[],
     );
-    return NextResponse.json({
-      role: identity.role,
-      parentId: identity.parentId,
-      parentName: identity.displayName,
-      avatarUrl: identity.avatarUrl,
-      children: (children ?? []).map((child) => ({
-        id: String(child.id),
-        name: String(child.full_name),
-        grade: child.grade,
-        school: child.school,
-        classes: hydratedClasses.filter((item) =>
-          Array.isArray(item.student_ids)
-            ? item.student_ids.includes(String(child.id))
-            : false,
-        ),
-      })),
-    });
+    return NextResponse.json(
+      {
+        role: identity.role,
+        parentId: identity.parentId,
+        parentName: identity.displayName,
+        avatarUrl: identity.avatarUrl,
+        children: (children ?? []).map((child) => ({
+          id: String(child.id),
+          name: String(child.full_name),
+          grade: child.grade,
+          school: child.school,
+          classes: hydratedClasses.filter((item) =>
+            Array.isArray(item.student_ids)
+              ? item.student_ids.includes(String(child.id))
+              : false,
+          ),
+        })),
+      },
+      PRIVATE_NO_STORE,
+    );
   }
 
-  return NextResponse.json({
-    role: identity.role,
-    displayName: identity.displayName,
-    avatarUrl: identity.avatarUrl,
-  });
+  return NextResponse.json(
+    {
+      role: identity.role,
+      displayName: identity.displayName,
+      avatarUrl: identity.avatarUrl,
+    },
+    PRIVATE_NO_STORE,
+  );
 }

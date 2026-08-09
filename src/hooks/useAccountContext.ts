@@ -61,6 +61,10 @@ function getFreshCachedContext(): AccountContext | null {
   return cachedContext;
 }
 
+function getCachedContext(): AccountContext | null {
+  return cachedContext;
+}
+
 export function loadAccountContext(): Promise<AccountContext> {
   const cached = getFreshCachedContext();
   if (cached) return Promise.resolve(cached);
@@ -97,7 +101,10 @@ export function resetAccountContextCache() {
 }
 
 export function useAccountContext(): AccountContextState {
-  const cached = getFreshCachedContext();
+  // Render the last in-memory value immediately, even when its TTL elapsed,
+  // while loadAccountContext refreshes it in the background. Explicit resets
+  // still clear the module cache and a failed refresh clears the stale value.
+  const cached = getCachedContext();
   const [state, setState] = useState<AccountContextState>({
     context: cached,
     ready: cached !== null,
@@ -107,7 +114,10 @@ export function useAccountContext(): AccountContextState {
     let cancelled = false;
 
     const refresh = () => {
-      setState((current) => ({ context: current.context, ready: false }));
+      setState((current) => ({
+        context: current.context,
+        ready: current.context !== null,
+      }));
       loadAccountContext()
         .then((context) => {
           if (!cancelled) setState({ context, ready: true });

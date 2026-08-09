@@ -17,7 +17,7 @@ import {
   PlayCircle, StickyNote, Pin, Eye, ChevronRight, GraduationCap,
   Calendar, Presentation, Tag, Lock, ShieldAlert, CheckCircle2, AlertCircle,
   ExternalLink, Check, Map, CalendarDays, UserCheck, UserX, Timer, Minus,
-  ClipboardList, ChevronDown, Send, XCircle, CheckSquare, NotebookPen, PenSquare, Search,
+  ClipboardList, ChevronDown, Send, XCircle, CheckSquare, NotebookPen, PenSquare, Search, Loader2,
 } from "lucide-react";
 import { formatDate, mapWithConcurrency, toLocalDateKey } from "@/lib/utils";
 import { useStudentContext } from "@/hooks/useStudentContext";
@@ -245,6 +245,9 @@ export default function StudentClassDetailPage() {
   const tutorId = cls?.tutor_id ?? "";
   const [scheduleOverride, setScheduleOverride] = useState<ClassInfo["schedule"] | null>(null);
   const [teacherHomework, setTeacherHomework] = useState<HomeworkItem[]>([]);
+  const [manualHomeworkLoaded, setManualHomeworkLoaded] = useState(false);
+  const [curriculumHomeworkLoaded, setCurriculumHomeworkLoaded] = useState(false);
+  const [homeworkSubmissionsLoaded, setHomeworkSubmissionsLoaded] = useState(false);
   const [storedScores, setStoredScores] = useState<StoredExamScore[]>([]);
   // Bài giảng + video chữa bài + tài liệu lấy từ lộ trình của lớp
   const [curriculumLectures, setCurriculumLectures] = useState<LectureCard[]>([]);
@@ -257,9 +260,12 @@ export default function StudentClassDetailPage() {
   const [matQuery, setMatQuery]   = useState("");
 
   useEffect(() => {
+    setManualHomeworkLoaded(false);
     getClassScheduleOverride(classId).then(ov => setScheduleOverride(ov as ClassInfo["schedule"] | null));
     getTeacherHomework<HomeworkItem>([classId])
-      .then(all => setTeacherHomework(all.filter(h => h.class_id === classId && isAssignedToStudent(h.assigned_to, studentId))));
+      .then(all => setTeacherHomework(all.filter(h => h.class_id === classId && isAssignedToStudent(h.assigned_to, studentId))))
+      .catch(() => setTeacherHomework([]))
+      .finally(() => setManualHomeworkLoaded(true));
     getExamScoresByStudent(studentId).then(setStoredScores);
   }, [classId, studentId]);
 
@@ -274,7 +280,11 @@ export default function StudentClassDetailPage() {
 
   useEffect(() => {
     // Load submissions for homework status
-    getSubmissionsByStudent(studentId).then(setSubmissions);
+    setHomeworkSubmissionsLoaded(false);
+    getSubmissionsByStudent(studentId)
+      .then(setSubmissions)
+      .catch(() => setSubmissions([]))
+      .finally(() => setHomeworkSubmissionsLoaded(true));
     // Load my package for this class
     getStudentPackages(classId).then(pkgs => {
       setMyPackage(pkgs[studentId] ?? null);
@@ -286,6 +296,7 @@ export default function StudentClassDetailPage() {
     // Load attendance records
     loadSavedAttendance(classId, studentId).then(setSavedAttendance);
     // Load curriculum → build date map + đẩy bài tập / bài giảng / video chữa bài / tài liệu về các tab
+    setCurriculumHomeworkLoaded(false);
     getStudentCurriculum(classId).then(async chapters => {
       const today = new Date().toISOString().slice(0, 10);
       const byDate: Record<string, CurriculumSession> = {};
@@ -366,10 +377,15 @@ export default function StudentClassDetailPage() {
           return fresh.length > 0 ? [...prev, ...fresh] : prev;
         });
       }
-    });
+    }).catch(() => undefined).finally(() => setCurriculumHomeworkLoaded(true));
     // Load session notes written by teacher
     kvGet<Record<string, string>>(`tutorhub_session_notes_${classId}`, {}).then(setSessionNotes);
   }, [classId, studentId, tutorId]);
+
+  const homeworkLoading =
+    !manualHomeworkLoaded
+    || !curriculumHomeworkLoaded
+    || !homeworkSubmissionsLoaded;
 
   // ── Loading (class resolution + student context) ──────────────────────────
   if (!ready || cls === undefined) {
@@ -1404,7 +1420,21 @@ export default function StudentClassDetailPage() {
           {/* ── Homework ── */}
           {activeTab === "homework" && (
             <div className="space-y-4">
-              {sortedClassHomework.length === 0 ? (
+              {homeworkLoading ? (
+                <Card>
+                  <CardContent
+                    role="status"
+                    aria-live="polite"
+                    className="flex flex-col items-center justify-center py-16 text-center"
+                  >
+                    <Loader2 className="mb-3 h-8 w-8 animate-spin text-primary" />
+                    <p className="text-sm font-semibold text-foreground">Đang tải bài tập…</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Đang cập nhật đề bài và trạng thái bài nộp mới nhất.
+                    </p>
+                  </CardContent>
+                </Card>
+              ) : sortedClassHomework.length === 0 ? (
                 <Card><CardContent className="py-16 text-center text-muted-foreground">
                   <NotebookPen className="h-12 w-12 mx-auto opacity-20 mb-3" />
                   <p className="text-sm font-medium">Lớp này chưa có bài tập nào</p>

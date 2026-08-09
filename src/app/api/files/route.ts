@@ -9,6 +9,10 @@ const BUCKETS = new Set([
   "payment-receipts",
 ]);
 
+const PRIVATE_FILE_TTL_SECONDS = 60;
+const PROFILE_ASSET_TTL_SECONDS = 600;
+const PROFILE_ASSET_BROWSER_TTL_SECONDS = 300;
+
 function containsFilePath(value: unknown, expectedUrl: string): boolean {
   if (typeof value === "string") return value === expectedUrl;
   if (Array.isArray(value)) {
@@ -248,13 +252,21 @@ export async function GET(req: NextRequest) {
   }
   if (!allowed) return NextResponse.json({ error: "forbidden" }, { status: 403 });
 
+  const isVersionedProfileAsset = bucket === "avatars";
+  const signedUrlTtl = isVersionedProfileAsset
+    ? PROFILE_ASSET_TTL_SECONDS
+    : PRIVATE_FILE_TTL_SECONDS;
   const { data, error } = await admin.storage
     .from(bucket)
-    .createSignedUrl(path, 60);
+    .createSignedUrl(path, signedUrlTtl);
   if (error || !data?.signedUrl) {
     return NextResponse.json({ error: "file_not_found" }, { status: 404 });
   }
   return NextResponse.redirect(data.signedUrl, {
-    headers: { "Cache-Control": "private, no-store" },
+    headers: {
+      "Cache-Control": isVersionedProfileAsset
+        ? `private, max-age=${PROFILE_ASSET_BROWSER_TTL_SECONDS}, immutable`
+        : "private, no-store",
+    },
   });
 }

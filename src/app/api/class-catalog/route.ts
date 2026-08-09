@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { unstable_cache } from "next/cache";
 import { getRequestIdentity } from "@/lib/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveRegistrationTuition } from "@/lib/registration-pricing";
@@ -53,21 +54,20 @@ function publicMaterial(row: JsonObject) {
   };
 }
 
-export async function GET(req: NextRequest) {
-  const actor = await getRequestIdentity(req);
-  if (actor?.role !== "student" || !actor.studentId) {
-    return NextResponse.json({ error: "forbidden" }, { status: 403 });
-  }
-
-  const admin = createAdminClient();
-  const [
-    classResult,
-    teacherResult,
-    requestResult,
-    curriculumResult,
-    materialResult,
-    tuitionResult,
-  ] = await Promise.all([
+/**
+ * Cache only the catalog data shared by every student. Enrollment and
+ * registration state is added per request below and never enters this cache.
+ */
+const loadPublicCatalog = unstable_cache(
+  async () => {
+    const admin = createAdminClient();
+    const [
+      classResult,
+      teacherResult,
+      curriculumResult,
+      materialResult,
+      tuitionResult,
+    ] = await Promise.all([
       admin
         .from("classes")
         .select(
@@ -75,11 +75,6 @@ export async function GET(req: NextRequest) {
         )
         .order("created_at", { ascending: false }),
       admin.from("teachers").select("id,full_name"),
-      admin
-        .from("class_registration_requests")
-        .select("id,requested_class_id,status,requested_package,created_at")
-        .eq("student_id", actor.studentId)
-        .order("created_at", { ascending: false }),
       admin.from("kv_curriculum").select("id,value"),
       admin
         .from("teacher_materials")
@@ -89,75 +84,115 @@ export async function GET(req: NextRequest) {
       admin.from("kv_tuition").select("id,value"),
     ]);
 
-  const error =
-    classResult.error
-    ?? teacherResult.error
-    ?? requestResult.error
-    ?? curriculumResult.error
-    ?? materialResult.error
-    ?? tuitionResult.error;
+    const error =
+      classResult.error
+      ?? teacherResult.error
+      ?? curriculumResult.error
+      ?? materialResult.error
+      ?? tuitionResult.error;
+    if (error) throw new Error("catalog_public_data_unavailable");
+
+    const teacherNames = new Map(
+      (teacherResult.data ?? []).map((teacher) => [
+        String(teacher.id),
+        String(teacher.full_name ?? ""),
+      ]),
+    );
+    const roadmaps = new Map(
+      (curriculumResult.data ?? []).map((row) => [
+        String(row.id),
+        publicRoadmap(row.value),
+      ]),
+    );
+    const tuitionByClass = new Map(
+      (tuitionResult.data ?? []).map((row) => [
+        String(row.id),
+        resolveRegistrationTuition(row.value),
+      ]),
+    );
+    const materials = new Map<string, ReturnType<typeof publicMaterial>[]>();
+    for (const row of materialResult.data ?? []) {
+      const item = publicMaterial(row);
+      if (!item.class_id) continue;
+      materials.set(item.class_id, [...(materials.get(item.class_id) ?? []), item]);
+    }
+
+    return (classResult.data ?? []).map((item) => {
+      const studentIds = Array.isArray(item.student_ids)
+        ? item.student_ids.map(String)
+        : [];
+      return {
+        id: String(item.id),
+        class_name: String(item.class_name),
+        subject: String(item.subject),
+        grade: item.grade,
+        learning_mode: item.learning_mode,
+        tutor_id: String(item.tutor_id ?? ""),
+        tutor_name: teacherNames.get(String(item.tutor_id ?? "")) ?? "Giáo viên",
+        classroom: item.classroom,
+        schedule: Array.isArray(item.schedule) ? item.schedule : [],
+        description: item.description,
+        max_students: item.max_students,
+        student_count: studentIds.length,
+        color: item.color,
+        tuition:
+          tuitionByClass.get(String(item.id))
+          ?? resolveRegistrationTuition(null),
+        roadmap: roadmaps.get(String(item.id)) ?? [],
+        materials: materials.get(String(item.id)) ?? [],
+      };
+    });
+  },
+  ["class-catalog-public-v1"],
+  { revalidate: 60, tags: ["class-catalog-public"] },
+);
+
+export async function GET(req: NextRequest) {
+  const actor = await getRequestIdentity(req);
+  if (actor?.role !== "student" || !actor.studentId) {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  }
+
+  const admin = createAdminClient();
+  const results = await Promise.all([
+    loadPublicCatalog(),
+    admin
+      .from("class_registration_requests")
+      .select("id,requested_class_id,status,requested_package,created_at")
+      .eq("student_id", actor.studentId)
+      .order("created_at", { ascending: false }),
+    admin
+      .from("classes")
+      .select("id")
+      .contains("student_ids", [actor.studentId]),
+  ]).catch(() => null);
+  if (!results) {
+    return NextResponse.json({ error: "catalog_unavailable" }, { status: 500 });
+  }
+  const [publicCatalog, requestResult, enrolledResult] = results;
+
+  const error = requestResult.error ?? enrolledResult.error;
   if (error) {
     return NextResponse.json({ error: "catalog_unavailable" }, { status: 500 });
   }
 
-  const teacherNames = new Map(
-    (teacherResult.data ?? []).map((teacher) => [
-      String(teacher.id),
-      String(teacher.full_name ?? ""),
-    ]),
-  );
   const latestRequests = new Map<string, JsonObject>();
   for (const request of requestResult.data ?? []) {
     const classId = String(request.requested_class_id);
     if (!latestRequests.has(classId)) latestRequests.set(classId, request);
   }
-  const roadmaps = new Map(
-    (curriculumResult.data ?? []).map((row) => [
-      String(row.id),
-      publicRoadmap(row.value),
-    ]),
+  const enrolledClassIds = new Set(
+    (enrolledResult.data ?? []).map((item) => String(item.id)),
   );
-  const tuitionByClass = new Map(
-    (tuitionResult.data ?? []).map((row) => [
-      String(row.id),
-      resolveRegistrationTuition(row.value),
-    ]),
-  );
-  const materials = new Map<string, ReturnType<typeof publicMaterial>[]>();
-  for (const row of materialResult.data ?? []) {
-    const item = publicMaterial(row);
-    if (!item.class_id) continue;
-    materials.set(item.class_id, [...(materials.get(item.class_id) ?? []), item]);
-  }
 
-  const catalog = (classResult.data ?? []).map((item) => {
-    const studentIds = Array.isArray(item.student_ids)
-      ? item.student_ids.map(String)
-      : [];
-    const request = latestRequests.get(String(item.id));
+  const catalog = publicCatalog.map((item) => {
+    const request = latestRequests.get(item.id);
     return {
-      id: String(item.id),
-      class_name: String(item.class_name),
-      subject: String(item.subject),
-      grade: item.grade,
-      learning_mode: item.learning_mode,
-      tutor_id: String(item.tutor_id ?? ""),
-      tutor_name: teacherNames.get(String(item.tutor_id ?? "")) ?? "Giáo viên",
-      classroom: item.classroom,
-      schedule: Array.isArray(item.schedule) ? item.schedule : [],
-      description: item.description,
-      max_students: item.max_students,
-      student_count: studentIds.length,
-      color: item.color,
-      enrolled: studentIds.includes(actor.studentId!),
+      ...item,
+      enrolled: enrolledClassIds.has(item.id),
       registration_status: request?.status ?? null,
       registration_id: request?.id ?? null,
       registration_package: request?.requested_package ?? null,
-      tuition:
-        tuitionByClass.get(String(item.id))
-        ?? resolveRegistrationTuition(null),
-      roadmap: roadmaps.get(String(item.id)) ?? [],
-      materials: materials.get(String(item.id)) ?? [],
     };
   });
 

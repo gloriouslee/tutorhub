@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/componen
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SectionHeader } from "@/components/shared";
+import { HomeworkLoadingState } from "@/components/shared/HomeworkLoadingState";
 import { useTeacherContext } from "@/hooks/useTeacherContext";
 import { getCurriculum, getAllExamResults, getTeacherHomework, upsertTeacherHomework, removeTeacherHomework, getTeacherExtraClasses, getHwSubmissions } from "@/lib/storage";
 import { FileText, Plus, Calendar, CheckCircle2, Clock, X, Trash2, Edit2, ArrowRight, BookOpen, NotebookPen, PenSquare, Download } from "lucide-react";
@@ -134,11 +135,17 @@ function dueStatus(dueDate: string): { label: string; color: string; dot: string
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function TeacherHomeworkPage() {
   const router = useRouter();
-  const { teacherId, teacherName, myClasses: baseClasses } = useTeacherContext();
+  const {
+    teacherId,
+    teacherName,
+    myClasses: baseClasses,
+    ready,
+  } = useTeacherContext();
 
   const [myClasses,    setMyClasses]    = useState<{ id: string; class_name: string; student_ids?: string[] }[]>([]);
   const [homeworks,    setHomeworks]    = useState<Homework[]>([]);
   const [submissions,  setSubmissions]  = useState<Submission[]>([]);
+  const [loadingHomework, setLoadingHomework] = useState(true);
   const [filterClass,  setFilterClass]  = useState("all");
   const [filterStatus, setFilterStatus] = useState<"all" | "open" | "overdue">("all");
   const [modalOpen,    setModalOpen]    = useState(false);
@@ -152,7 +159,15 @@ export default function TeacherHomeworkPage() {
   const [fErr,   setFErr]   = useState("");
 
   useEffect(() => {
-    if (!teacherId) return;
+    if (!ready) return;
+    if (!teacherId) {
+      setLoadingHomework(false);
+      return;
+    }
+
+    let cancelled = false;
+    setLoadingHomework(true);
+
     (async () => {
       // Build the class list assigned to the current teacher.
       const extra = (await loadExtraClasses()).filter(c => c.tutor_id === teacherId);
@@ -160,17 +175,30 @@ export default function TeacherHomeworkPage() {
         ...baseClasses.map(c => ({ id: c.id, class_name: c.class_name, student_ids: c.student_ids })),
         ...extra.map(c => ({ id: c.id, class_name: c.class_name, student_ids: c.student_ids })),
       ];
+      const allIds = all.map(c => c.id);
+
+      // These sources are independent. Loading them together avoids making the
+      // user wait for homework, then curriculum, then submissions in sequence.
+      const [manual, curriculum, loadedSubmissions] = await Promise.all([
+        loadHw(allIds),
+        loadCurriculumHw(all),
+        loadSubs(allIds),
+      ]);
+      if (cancelled) return;
+
+      const currIds = new Set(curriculum.map(h => h.id));
       setMyClasses(all);
       setFClass(all[0]?.id ?? "");
-
-      const allIds = all.map(c => c.id);
-      const manual = await loadHw(allIds);
-      const curriculum = await loadCurriculumHw(all);
-      const currIds = new Set(curriculum.map(h => h.id));
       setHomeworks([...manual.filter(h => !currIds.has(h.id)), ...curriculum]);
-      setSubmissions(await loadSubs(allIds));
-    })();
-  }, [teacherId, baseClasses]);
+      setSubmissions(loadedSubmissions);
+    })().finally(() => {
+      if (!cancelled) setLoadingHomework(false);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [ready, teacherId, baseClasses]);
 
   function openCreate() {
     setEditTarget(null);
@@ -241,6 +269,14 @@ export default function TeacherHomeworkPage() {
 
   const openCount    = homeworks.filter(h => !isHwOverdue(h)).length;
   const overdueCount = homeworks.filter(h =>  isHwOverdue(h)).length;
+
+  if (loadingHomework) {
+    return (
+      <PortalLayout role="teacher" userName={teacherName || "Giáo viên"} pageTitle="Quản lý Bài tập">
+        <HomeworkLoadingState />
+      </PortalLayout>
+    );
+  }
 
   return (
     <PortalLayout role="teacher" userName={teacherName || "Giáo viên"} pageTitle="Quản lý Bài tập">

@@ -616,3 +616,61 @@ test("student class and material screens avoid known sequential request waterfal
   assert.match(browseView, /getStudentPackagesForClasses/);
   assert.match(browseView, /Promise\.all\(pkgIds\.map/);
 });
+
+test("cache policy speeds shared and versioned data without caching private state", async () => {
+  const catalog = await read("src/app/api/class-catalog/route.ts");
+  const files = await read("src/app/api/files/route.ts");
+  const accountRoute = await read("src/app/api/account/context/route.ts");
+  const accountHook = await read("src/hooks/useAccountContext.ts");
+
+  // The expensive, student-independent catalog body is shared briefly, while
+  // enrollment and registration are still queried and returned as no-store.
+  assert.match(catalog, /unstable_cache/);
+  assert.match(catalog, /class-catalog-public-v1/);
+  assert.match(catalog, /revalidate: 60/);
+  assert.match(catalog, /\.contains\("student_ids", \[actor\.studentId\]\)/);
+  assert.match(catalog, /"Cache-Control": "private, no-store"/);
+
+  // Avatar and portal-logo paths contain upload timestamps, so their signed
+  // redirects can be reused. Entitlement-sensitive files must remain no-store.
+  assert.match(files, /bucket === "avatars"/);
+  assert.match(files, /PROFILE_ASSET_BROWSER_TTL_SECONDS/);
+  assert.match(files, /private, max-age=\$\{PROFILE_ASSET_BROWSER_TTL_SECONDS\}, immutable/);
+  assert.match(files, /: "private, no-store"/);
+
+  // Account context stays in memory for smooth navigation, but never enters a
+  // browser/shared HTTP cache and refreshes after its short TTL.
+  assert.match(accountHook, /CACHE_TTL_MS = 60_000/);
+  assert.match(accountHook, /fetch\("\/api\/account\/context", \{ cache: "no-store" \}\)/);
+  assert.match(accountHook, /ready: current\.context !== null/);
+  assert.match(accountRoute, /"Cache-Control": "private, no-store"/);
+});
+
+test("homework navigation and data loading always provide immediate feedback", async () => {
+  const sidebar = await read("src/components/layout/Sidebar.tsx");
+  const loadingState = await read("src/components/shared/HomeworkLoadingState.tsx");
+  const studentHomework = await read("src/app/student/homework/page.tsx");
+  const teacherHomework = await read("src/app/teacher/homework/page.tsx");
+  const studentClass = await read("src/app/student/classes/[classId]/page.tsx");
+  const teacherClass = await read("src/app/teacher/classes/[classId]/page.tsx");
+
+  assert.match(sidebar, /useLinkStatus/);
+  assert.match(sidebar, /Đang mở/);
+  assert.match(sidebar, /item\.href\.endsWith\("\/homework"\) \? null : false/);
+  assert.match(loadingState, /Đang tải bài tập/);
+  assert.match(loadingState, /role="status"/);
+
+  assert.match(studentHomework, /loadingHomework/);
+  assert.match(studentHomework, /<HomeworkLoadingState \/>/);
+  assert.match(studentHomework, /Promise\.all\(\[/);
+  assert.match(studentHomework, /examItems/);
+
+  assert.match(teacherHomework, /loadingHomework/);
+  assert.match(teacherHomework, /<HomeworkLoadingState \/>/);
+  assert.match(teacherHomework, /const \[manual, curriculum, loadedSubmissions\] = await Promise\.all/);
+
+  assert.match(studentClass, /homeworkLoading/);
+  assert.match(studentClass, /Đang tải bài tập…/);
+  assert.match(teacherClass, /HomeworkPanelFallback/);
+  assert.match(teacherClass, /persistedHomeworkLoaded/);
+});

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import Link from "next/link";
+import Link, { useLinkStatus } from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import {
@@ -9,7 +9,7 @@ import {
   LayoutDashboard, Bell, User, LogOut,
   Users, DollarSign, Settings, BarChart3, FileText,
   CheckSquare, BookMarked, MessageSquare, CircleHelp, X, Shield,
-  PanelLeftClose,
+  Loader2, PanelLeftClose,
 } from "lucide-react";
 import { UserAvatar } from "@/components/ui/avatar";
 import { UserRole } from "@/types";
@@ -76,6 +76,18 @@ const navConfig: Record<UserRole, NavItem[]> = {
     { label: "Công cụ",    href: "/admin/settings",         icon: Settings },
   ],
 };
+
+function SidebarLinkStatus() {
+  const { pending } = useLinkStatus();
+  if (!pending) return null;
+
+  return (
+    <span className="ml-auto inline-flex items-center gap-1 text-[10px] font-semibold text-primary">
+      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+      Đang mở
+    </span>
+  );
+}
 
 const roleConfig: Record<UserRole, { label: string; color: string; gradient: string }> = {
   student: { label: "Cổng Học Viên",  color: "text-indigo-600 dark:text-indigo-400", gradient: "from-indigo-500 to-purple-600" },
@@ -381,7 +393,7 @@ export default function Sidebar({
               <Link
                 key={item.href}
                 href={item.href}
-                prefetch={false}
+                prefetch={item.href.endsWith("/homework") ? null : false}
                 onMouseEnter={() => {
                   if (!isActive) router.prefetch(item.href);
                 }}
@@ -393,6 +405,7 @@ export default function Sidebar({
               >
                 <item.icon className="h-4 w-4 shrink-0" />
                 <span className="flex-1 truncate">{item.label}</span>
+                <SidebarLinkStatus />
                 {badge != null && badge > 0 && (
                   <span className={cn(
                     "ml-auto text-[10px] font-bold min-w-[18px] h-[18px] flex items-center justify-center rounded-full px-1",
