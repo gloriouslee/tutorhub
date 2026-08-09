@@ -173,6 +173,17 @@ function parseOneQuestion(index: number, rawBody: string): ParsedQuestion {
   };
 }
 
+function optionHasMeaningfulContent(value: string) {
+  const withoutAssets = value
+    .replace(/\[công thức[^\]]*\]/gi, "")
+    .replace(/\[(?:m|img):[^\]]+\]/g, "asset")
+    .replace(/<img\b[^>]*>/gi, "asset")
+    .replace(/\$[^$\n]+\$/g, "math")
+    .replace(/&nbsp;|&#160;/gi, " ")
+    .trim();
+  return /[\p{L}\p{N}]|asset|math/u.test(withoutAssets);
+}
+
 export function parseExamText(raw: string): ParseResult {
   const text = raw.replace(/\r\n/g, "\n").replace(/ /g, " ");
   const lines = text.split("\n").flatMap(splitInlineRomanSection);
@@ -212,6 +223,17 @@ export function parseExamText(raw: string): ParseResult {
   }
 
   const questions = blocks.map(b => parseOneQuestion(b.index, b.lines.join("\n")));
+  for (const question of questions) {
+    if (question.type !== "multiple_choice" || !question.options) continue;
+    const emptyOptions = question.options
+      .map((option, index) => optionHasMeaningfulContent(option) ? "" : String.fromCharCode(65 + index))
+      .filter(Boolean);
+    if (emptyOptions.length > 0) {
+      errors.push(
+        `Câu ${question.index}: phương án ${emptyOptions.join(", ")} chỉ còn dấu câu hoặc bị mất công thức/ảnh. Vui lòng nhập lại file Word hoặc sửa phương án trước khi lưu.`,
+      );
+    }
+  }
   return { questions, sections, sectionsAt, errors };
 }
 

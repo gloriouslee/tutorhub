@@ -57,16 +57,17 @@ function escapeXml(s: string): string {
  * Công thức không chuyển được thì giữ nguyên (đi theo đường placeholder WMF cũ).
  */
 export async function preprocessDocxEquations(arrayBuffer: ArrayBuffer): Promise<ArrayBuffer> {
-  const [{ default: JSZip }, { oleBinToLatex }] = await Promise.all([
+  const [{ default: JSZip }, { oleBinToLatex }, { convertOmmlInDocumentXml }] = await Promise.all([
     import("jszip"),
     import("./mtefToLatex"),
+    import("./ommlToLatex"),
   ]);
   const zip = await JSZip.loadAsync(arrayBuffer);
   const docFile = zip.file("word/document.xml");
   const relsFile = zip.file("word/_rels/document.xml.rels");
-  if (!docFile || !relsFile) return arrayBuffer;
+  if (!docFile) return arrayBuffer;
 
-  const relsXml = await relsFile.async("string");
+  const relsXml = relsFile ? await relsFile.async("string") : "";
   // r:id → target (đường dẫn file nhúng)
   const relTargets = new Map<string, string>();
   for (const m of relsXml.matchAll(/<Relationship\b[^>]*>/g)) {
@@ -77,7 +78,9 @@ export async function preprocessDocxEquations(arrayBuffer: ArrayBuffer): Promise
   }
 
   let docXml = await docFile.async("string");
-  let changed = false;
+  const nativeEquations = convertOmmlInDocumentXml(docXml);
+  docXml = nativeEquations.xml;
+  let changed = nativeEquations.changed;
 
   // Xử lý tuần tự từng khối <w:object>…</w:object>
   const blocks = [...docXml.matchAll(/<w:object\b[^>]*>[\s\S]*?<\/w:object>/g)];

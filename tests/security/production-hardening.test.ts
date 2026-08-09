@@ -15,6 +15,8 @@ import {
 import { isDiscoverableClass } from "../../src/lib/class-catalog";
 import { resolvePortalBranding } from "../../src/lib/portal-branding";
 import { curriculumReferencesStudentFile } from "../../src/lib/curriculum-file-access";
+import { parseExamText } from "../../src/lib/examTextParser";
+import { convertOmmlInDocumentXml, ommlFragmentToLatex } from "../../src/lib/ommlToLatex";
 
 const read = (path: string) => readFile(path, "utf8");
 
@@ -602,7 +604,7 @@ test("student portal keeps paid material, submissions and progress server-scoped
   );
   const progressRoute = await read("src/app/api/student/progress/route.ts");
   const classPage = await read("src/app/student/classes/[classId]/page.tsx");
-  const player = await read("src/components/student/PlayerView.tsx");
+  const player = await read("src/components/student/ClassLearningPlayer.tsx");
 
   assert.match(migration, /drop policy if exists class_materials_student_download/);
   assert.match(migration, /teacher_id = public\.my_teacher_id\(\)/);
@@ -619,8 +621,45 @@ test("student portal keeps paid material, submissions and progress server-scoped
   assert.match(classPage, /getStudentLessonProgress/);
   assert.doesNotMatch(classPage, /tutorhub_watched|getCurriculum\(/);
   assert.match(player, /saveStudentLessonProgress/);
-  assert.match(player, /youtube-nocookie\.com/);
+  assert.match(player, /youtube\.com\/embed/);
+  assert.match(player, /referrerPolicy="strict-origin-when-cross-origin"/);
+  assert.match(player, /youtubeWatchUrl/);
+  assert.match(player, /HomeworkSubmissionPanel/);
+  assert.doesNotMatch(player, /tab=homework/);
   assert.doesNotMatch(player, /Chức năng thảo luận đang được phát triển/);
+});
+
+test("Word equation import preserves native OMML and rejects lost answer options", () => {
+  const fraction = [
+    '<m:oMath xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math">',
+    "<m:f><m:num><m:r><m:t>1</m:t></m:r></m:num>",
+    "<m:den><m:sSup><m:e><m:r><m:t>x</m:t></m:r></m:e>",
+    "<m:sup><m:r><m:t>2</m:t></m:r></m:sup></m:sSup></m:den></m:f>",
+    "</m:oMath>",
+  ].join("");
+  assert.equal(ommlFragmentToLatex(fraction), "\\frac{1}{{x}^{2}}");
+
+  const converted = convertOmmlInDocumentXml(`<w:p>${fraction}</w:p>`);
+  assert.equal(converted.changed, true);
+  assert.match(converted.xml, /\$\\frac\{1\}/);
+
+  const broken = parseExamText([
+    "Câu 1. Chọn đáp án đúng",
+    "A. .",
+    "B. .",
+    "C. [img:/api/files?bucket=class-materials&path=answer.png]",
+    "*D. $x^2$",
+  ].join("\n"));
+  assert.match(broken.errors.join("\n"), /phương án A, B chỉ còn dấu câu/);
+
+  const imageOptions = parseExamText([
+    "Câu 1. Chọn đáp án đúng",
+    "A. [img:/api/files?bucket=class-materials&path=a.png]",
+    "B. [img:/api/files?bucket=class-materials&path=b.png]",
+    "C. [m:1]",
+    "*D. $x^2$",
+  ].join("\n"));
+  assert.deepEqual(imageOptions.errors, []);
 });
 
 test("student receipts and notification state are durable", async () => {

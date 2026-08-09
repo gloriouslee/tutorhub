@@ -457,6 +457,32 @@ function TextImportPanel({ text, setText, registry, setRegistry, parsed, setPars
       // WMF/EMF (công thức MathType) hoặc upload lỗi → placeholder để đánh dấu.
       const convertImage = mammoth.images.imgElement(async img => {
         const ct = (img.contentType || "").toLowerCase();
+        if (/^(?:image\/(?:x-)?wmf|application\/(?:x-)?wmf)$/.test(ct)) {
+          try {
+            const bytes = await img.readAsArrayBuffer();
+            const imported = await import("wmf");
+            const wmf = ("default" in imported ? imported.default : imported) as unknown as {
+              image_size: (data: ArrayBuffer) => [number, number];
+              draw_canvas: (data: ArrayBuffer, canvas: HTMLCanvasElement) => void;
+            };
+            const [rawWidth, rawHeight] = wmf.image_size(bytes);
+            const canvas = document.createElement("canvas");
+            canvas.width = Number.isFinite(rawWidth) && rawWidth > 0 ? Math.min(rawWidth, 4096) : 1200;
+            canvas.height = Number.isFinite(rawHeight) && rawHeight > 0 ? Math.min(rawHeight, 4096) : 600;
+            wmf.draw_canvas(bytes, canvas);
+            const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
+            if (!blob) throw new Error("Không thể chuyển ảnh WMF sang PNG.");
+            const file = new File(
+              [blob],
+              `docx_mathtype_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.png`,
+              { type: "image/png" },
+            );
+            const uploaded = await uploadClassFile(file, classId, "materials");
+            return { src: uploaded.url };
+          } catch {
+            return { src: FORMULA_PLACEHOLDER_SRC };
+          }
+        }
         if (/^image\/(png|jpe?g|gif|webp)$/.test(ct)) {
           try {
             const b64 = await img.readAsBase64String();

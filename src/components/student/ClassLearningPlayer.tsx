@@ -15,6 +15,7 @@ import { getSubmissionsByStudent, type SubmissionRecord } from "@/lib/supabase/s
 import { useStudentContext } from "@/hooks/useStudentContext";
 import { useStudentCurriculum } from "@/hooks/useStudentCurriculum";
 import StudentExamPlayer from "@/components/student/StudentExamPlayer";
+import HomeworkSubmissionPanel from "@/components/student/HomeworkSubmissionPanel";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -78,7 +79,7 @@ function safeMediaUrl(value?: string) {
   }
 }
 
-function youtubeEmbedUrl(value?: string) {
+function youtubeVideoId(value?: string) {
   const safe = safeMediaUrl(value);
   if (!safe || safe.startsWith("/")) return null;
   try {
@@ -89,12 +90,26 @@ function youtubeEmbedUrl(value?: string) {
       : host === "youtube.com" || host === "m.youtube.com"
         ? url.searchParams.get("v") || url.pathname.match(/^\/(?:embed|shorts|live)\/([^/]+)/)?.[1]
         : null;
-    if (!id) return null;
-    const origin = typeof window === "undefined" ? "" : `&origin=${encodeURIComponent(window.location.origin)}`;
-    return `https://www.youtube-nocookie.com/embed/${encodeURIComponent(id)}?rel=0&modestbranding=1&playsinline=1${origin}`;
+    return id || null;
   } catch {
     return null;
   }
+}
+
+function youtubeEmbedUrl(value?: string) {
+  const id = youtubeVideoId(value);
+  if (!id) return null;
+  try {
+    const origin = typeof window === "undefined" ? "" : `&origin=${encodeURIComponent(window.location.origin)}`;
+    return `https://www.youtube.com/embed/${encodeURIComponent(id)}?rel=0&playsinline=1${origin}`;
+  } catch {
+    return null;
+  }
+}
+
+function youtubeWatchUrl(value?: string) {
+  const id = youtubeVideoId(value);
+  return id ? `https://www.youtube.com/watch?v=${encodeURIComponent(id)}` : null;
 }
 
 function flattenLessons(chapters: CurriculumChapter[]): FlatLesson[] {
@@ -243,7 +258,7 @@ function CourseOutline({
 
 export default function ClassLearningPlayer({ classId, requestedLessonId }: Props) {
   const router = useRouter();
-  const { studentId, myClasses, assignedClassId, ready } = useStudentContext();
+  const { studentId, studentName, myClasses, assignedClassId, ready } = useStudentContext();
   const [progress, setProgress] = useState<StudentLessonProgress[]>([]);
   const [submissions, setSubmissions] = useState<SubmissionRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -257,6 +272,7 @@ export default function ClassLearningPlayer({ classId, requestedLessonId }: Prop
   const [completing, setCompleting] = useState(false);
   const visitedLessonRef = useRef("");
   const noteLessonRef = useRef("");
+  const homeworkPanelRef = useRef<HTMLDivElement>(null);
 
   const cls = ready ? myClasses.find((item) => item.id === classId) ?? null : undefined;
   const hasAccess = cls
@@ -415,7 +431,7 @@ export default function ClassLearningPlayer({ classId, requestedLessonId }: Prop
   function openLessonAction() {
     if (!activeLesson) return;
     if (activeLesson.type === "homework") {
-      router.push(`/student/classes/${classId}?tab=homework`);
+      homeworkPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
     }
   }
 
@@ -498,10 +514,14 @@ export default function ClassLearningPlayer({ classId, requestedLessonId }: Prop
 
   const videoUrl = safeMediaUrl(activeLesson.video_url);
   const youtubeUrl = youtubeEmbedUrl(activeLesson.video_url);
+  const youtubeExternalUrl = youtubeWatchUrl(activeLesson.video_url);
   const fileUrl = safeMediaUrl(activeLesson.file_url);
   const isPdf = Boolean(fileUrl && (/\.pdf(?:$|\?)/i.test(fileUrl) || activeLesson.file_url?.includes("type=application%2Fpdf")));
   const directVideo = Boolean(videoUrl && !youtubeUrl && /\.(mp4|webm|ogg)(?:$|\?)/i.test(videoUrl));
   const ActiveIcon = activeMeta?.icon ?? BookOpen;
+  const activeSubmission = submissions.find(
+    (submission) => submission.homework_id === activeLesson.id && submission.student_id === studentId,
+  );
 
   const outline = (
     <CourseOutline
@@ -578,6 +598,7 @@ export default function ClassLearningPlayer({ classId, requestedLessonId }: Prop
                   src={youtubeUrl}
                   title={activeLesson.title}
                   allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                  referrerPolicy="strict-origin-when-cross-origin"
                   allowFullScreen
                 />
               </div>
@@ -605,7 +626,7 @@ export default function ClassLearningPlayer({ classId, requestedLessonId }: Prop
                     {activeLocked
                       ? "Nội dung này chưa đến thời gian mở hoặc đã được giáo viên đóng."
                       : activeLesson.type === "homework"
-                        ? "Đọc yêu cầu bên dưới và mở trang bài tập để nộp bài."
+                        ? "Đọc yêu cầu bên dưới và tải file bài làm lên ngay tại màn hình này."
                         : activeLesson.type === "material"
                             ? "Tài liệu này chưa có bản xem trước trực tiếp."
                             : "Giáo viên chưa đính kèm video cho nội dung này."}
@@ -641,7 +662,11 @@ export default function ClassLearningPlayer({ classId, requestedLessonId }: Prop
               <div className="flex shrink-0 flex-wrap gap-2">
                 {videoUrl && (
                   <Button size="sm" variant="outline" asChild>
-                    <a href={videoUrl} target="_blank" rel="noopener noreferrer">
+                    <a
+                      href={youtubeExternalUrl ?? videoUrl}
+                      target="_blank"
+                      rel={youtubeExternalUrl ? "noopener" : "noopener noreferrer"}
+                    >
                       <ExternalLink className="mr-1.5 h-4 w-4" /> Tab mới
                     </a>
                   </Button>
@@ -657,26 +682,23 @@ export default function ClassLearningPlayer({ classId, requestedLessonId }: Prop
             </div>
 
             {activeLesson.type === "homework" && (
-              <div className={`mt-5 flex flex-col gap-3 rounded-xl border p-4 sm:flex-row sm:items-center sm:justify-between ${activeCompleted ? "border-emerald-200 bg-emerald-50/70 dark:border-emerald-900 dark:bg-emerald-950/30" : "border-border bg-muted/25"}`}>
-                <div className="flex items-start gap-3">
-                  <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${activeCompleted ? "bg-emerald-100 text-emerald-600 dark:bg-emerald-900" : activeMeta?.bg}`}>
-                    {activeCompleted ? <CheckCircle2 className="h-5 w-5" /> : <NotebookPen className="h-5 w-5 text-amber-600" />}
-                  </div>
-                  <div>
-                    <p className="text-sm font-semibold text-foreground">{activeCompleted ? "Đã hoàn thành" : activeLocked ? "Chưa thể bắt đầu" : "Sẵn sàng thực hiện"}</p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">
-                      {activeCompleted
-                        ? "Kết quả đã được ghi nhận vào tiến độ của bạn."
-                        : "Tiến độ chỉ được cập nhật sau khi bạn nộp bài tập."}
-                    </p>
-                  </div>
-                </div>
-                {!activeCompleted && (
-                  <Button size="sm" disabled={activeLocked} onClick={openLessonAction}>
-                    <NotebookPen className="mr-1.5 h-4 w-4" />
-                    Mở trang bài tập
-                  </Button>
-                )}
+              <div ref={homeworkPanelRef}>
+                <HomeworkSubmissionPanel
+                  key={`${activeLesson.id}:${activeSubmission?.id ?? "new"}:${activeSubmission?.status ?? "pending"}`}
+                  classId={classId}
+                  homeworkId={activeLesson.id}
+                  studentId={studentId}
+                  studentName={studentName}
+                  dueDate={activeLesson.due_date ?? activeLesson.sessionDate}
+                  submission={activeSubmission}
+                  disabled={activeLocked}
+                  onSubmitted={(saved) => {
+                    setSubmissions((current) => [
+                      saved,
+                      ...current.filter((item) => !(item.homework_id === saved.homework_id && item.student_id === saved.student_id)),
+                    ]);
+                  }}
+                />
               </div>
             )}
           </div>
