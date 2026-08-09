@@ -695,6 +695,18 @@ test("teacher class curriculum uses a compact full-width workspace", async () =>
   assert.match(curriculum, /w-full space-y-3/);
   assert.match(curriculum, /Cấu trúc lộ trình/);
   assert.doesNotMatch(curriculum, /max-w-3xl/);
+
+  // Trạng thái gấp/mở phải được nhớ theo lớp: bung sẵn mọi buổi mỗi lần vào lại
+  // là lý do người dùng phải cuộn rất nhiều.
+  assert.match(curriculum, /tutorhub_curriculum_open_/);
+  assert.match(curriculum, /writeExpanded\(classId, next\)/);
+  // Lọc phải tự bung nhánh còn kết quả, nếu không tìm xong vẫn không thấy gì.
+  assert.match(curriculum, /const isOpen = \(id: string\) => filtering \|\| expanded\.has\(id\)/);
+  // Biểu tượng "tay kéo" trước đây không kéo được gì — phải là sắp xếp thật.
+  assert.doesNotMatch(curriculum, /GripVertical/);
+  assert.match(curriculum, /function moveChapter/);
+  assert.match(curriculum, /function moveSession/);
+  assert.match(curriculum, /function setSessionPublished/);
 });
 
 test("guardian links are many-to-many, consent-based, and RLS scoped", async () => {

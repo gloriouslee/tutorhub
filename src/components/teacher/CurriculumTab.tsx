@@ -16,7 +16,7 @@ import ExamGradingView from "@/components/teacher/ExamGradingView";
 import {
   Plus, ChevronDown, ChevronRight, Trash2, Edit2, X, Check,
   PlayCircle, FileText, Video, Eye, EyeOff,
-  GripVertical, BookOpen, CalendarDays,
+  BookOpen, CalendarDays, ChevronUp, Search,
   Upload, Loader2, AlertCircle, PenSquare, Lock, Unlock,
   Clock, Users, User, NotebookPen,
 } from "lucide-react";
@@ -73,6 +73,47 @@ const LESSON_META: Record<LessonType, { label: string; icon: React.ElementType; 
 const CREATE_TYPES: LessonType[] = ["lecture", "material", "homework", "solution"];
 
 function uid() { return `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`; }
+
+type SessionState = "done" | "today" | "upcoming" | "unscheduled";
+
+const SESSION_STATE_META: Record<SessionState, { label: string; className: string }> = {
+  done:        { label: "Đã dạy",        className: "bg-muted text-muted-foreground" },
+  today:       { label: "Hôm nay",       className: "bg-primary text-primary-foreground" },
+  upcoming:    { label: "Sắp tới",       className: "bg-primary/10 text-primary" },
+  unscheduled: { label: "Chưa gắn ngày", className: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400" },
+};
+
+function sessionState(date?: string): SessionState {
+  if (!date) return "unscheduled";
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const target = new Date(`${date}T00:00:00`);
+  if (Number.isNaN(target.getTime())) return "unscheduled";
+  if (target.getTime() === today.getTime()) return "today";
+  return target < today ? "done" : "upcoming";
+}
+
+// Trạng thái gấp/mở được nhớ theo từng lớp: lộ trình dài hàng chục buổi, mở lại
+// trang mà bung hết ra thì lần nào cũng phải cuộn tìm đúng chỗ đang làm dở.
+const EXPAND_KEY = (classId: string) => `tutorhub_curriculum_open_${classId}`;
+
+function readExpanded(classId: string): string[] | null {
+  try {
+    const raw = localStorage.getItem(EXPAND_KEY(classId));
+    const parsed = raw ? JSON.parse(raw) : null;
+    return Array.isArray(parsed) ? parsed.map(String) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeExpanded(classId: string, ids: Set<string>) {
+  try {
+    localStorage.setItem(EXPAND_KEY(classId), JSON.stringify([...ids]));
+  } catch {
+    /* hết quota hoặc bị chặn — không nhớ được thì cũng không nên chặn thao tác */
+  }
+}
 
 // ── Lesson form modal ─────────────────────────────────────────────────────────
 function LessonModal({
@@ -472,6 +513,9 @@ export default function CurriculumTab({ classId, schedule, students = [], gradeL
   const slots = generateSlots(schedule);
   const [chapters,     setChapters]     = useState<CurriculumChapter[]>([]);
   const [expanded,     setExpanded]     = useState<Set<string>>(new Set());
+  const [query,        setQuery]        = useState("");
+  const [typeFilter,   setTypeFilter]   = useState<"all" | LessonType>("all");
+  const [onlyHidden,   setOnlyHidden]   = useState(false);
   const [lessonModal,  setLessonModal]  = useState<{
     chapterId: string;
     sessionId: string;
@@ -513,10 +557,14 @@ export default function CurriculumTab({ classId, schedule, students = [], gradeL
     (async () => {
       const data = await getCurriculum(classId);
       setChapters(data);
-      // Expand all chapters and sessions by default
-      const ids = new Set<string>();
-      data.forEach(ch => { ids.add(ch.id); ch.sessions.forEach(s => ids.add(s.id)); });
-      setExpanded(ids);
+      // Khôi phục đúng những nhánh lần trước đang mở. Lần đầu vào lớp thì chỉ mở
+      // các chương — bung sẵn mọi buổi khiến trang dài hàng màn hình ngay từ đầu.
+      const saved = readExpanded(classId);
+      if (saved) {
+        setExpanded(new Set(saved));
+      } else {
+        setExpanded(new Set(data.map(ch => ch.id)));
+      }
       // Khôi phục trình soạn bài thi từ URL (sau reload / mở link trực tiếp)
       const sp = new URLSearchParams(window.location.search);
       const editExam = sp.get("editExam");
@@ -592,13 +640,69 @@ export default function CurriculumTab({ classId, schedule, students = [], gradeL
     return mutateCurriculum(classId, mutate);
   }
 
+  function commitExpanded(next: Set<string>) {
+    setExpanded(next);
+    writeExpanded(classId, next);
+  }
+
   function toggle(id: string) {
     setExpanded(prev => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
+      writeExpanded(classId, next);
       return next;
     });
+  }
+
+  function expandAll() {
+    const ids = new Set<string>();
+    chapters.forEach(ch => {
+      ids.add(ch.id);
+      ch.sessions.forEach(s => ids.add(s.id));
+    });
+    commitExpanded(ids);
+  }
+
+  function collapseAll() {
+    commitExpanded(new Set());
+  }
+
+  // ── Sắp xếp lại ──
+  // Trước đây chỉ có biểu tượng "tay kéo" mà không kéo được gì — nút lên/xuống
+  // đổi thứ tự thật, và dùng được cả trên điện thoại.
+  function moveChapter(id: string, direction: -1 | 1) {
+    persist(chs => {
+      const from = chs.findIndex(ch => ch.id === id);
+      const to = from + direction;
+      if (from < 0 || to < 0 || to >= chs.length) return chs;
+      const next = [...chs];
+      [next[from], next[to]] = [next[to], next[from]];
+      return next.map((ch, index) => ({ ...ch, order: index }));
+    });
+  }
+
+  function moveSession(chapterId: string, sessionId: string, direction: -1 | 1) {
+    persist(chs => chs.map(ch => {
+      if (ch.id !== chapterId) return ch;
+      const from = ch.sessions.findIndex(s => s.id === sessionId);
+      const to = from + direction;
+      if (from < 0 || to < 0 || to >= ch.sessions.length) return ch;
+      const sessions = [...ch.sessions];
+      [sessions[from], sessions[to]] = [sessions[to], sessions[from]];
+      return { ...ch, sessions: sessions.map((s, index) => ({ ...s, order: index })) };
+    }));
+  }
+
+  /** Bật/tắt hiển thị cho toàn bộ nội dung của một buổi — trước đây phải bấm từng cái. */
+  function setSessionPublished(chapterId: string, sessionId: string, published: boolean) {
+    persist(chs => chs.map(ch => ch.id !== chapterId ? ch : {
+      ...ch,
+      sessions: ch.sessions.map(s => s.id !== sessionId ? s : {
+        ...s,
+        lessons: s.lessons.map(l => ({ ...l, is_published: published })),
+      }),
+    }));
   }
 
   function updateExamField(chapterId: string, sessionId: string, lessonId: string, patch: Partial<CurriculumLesson>) {
@@ -723,6 +827,38 @@ export default function CurriculumTab({ classId, schedule, students = [], gradeL
   // ── Total counts for header ──
   const totalSessions = chapters.reduce((acc, ch) => acc + ch.sessions.length, 0);
   const totalLessons  = chapters.reduce((acc, ch) => acc + ch.sessions.reduce((a, s) => a + s.lessons.length, 0), 0);
+  const taughtSessions = chapters.reduce(
+    (acc, ch) => acc + ch.sessions.filter(s => sessionState(s.date) === "done").length,
+    0,
+  );
+  const progressPct = totalSessions > 0 ? Math.round((taughtSessions / totalSessions) * 100) : 0;
+
+  // ── Lọc ──
+  const normalizedQuery = query.trim().toLowerCase();
+  const filtering = normalizedQuery !== "" || typeFilter !== "all" || onlyHidden;
+
+  function lessonMatches(lesson: CurriculumLesson): boolean {
+    // "Bài tập về nhà" gộp cả hai dạng nộp file và làm câu hỏi, đúng như nhãn.
+    if (typeFilter !== "all") {
+      const matchesType = typeFilter === "homework"
+        ? lesson.type === "homework" || lesson.type === "exam"
+        : lesson.type === typeFilter;
+      if (!matchesType) return false;
+    }
+    if (onlyHidden && lesson.is_published) return false;
+    if (normalizedQuery) {
+      const haystack = `${lesson.title} ${lesson.description ?? ""}`.toLowerCase();
+      if (!haystack.includes(normalizedQuery)) return false;
+    }
+    return true;
+  }
+
+  const visibleLessonsOf = (session: CurriculumSession) =>
+    filtering ? session.lessons.filter(lessonMatches) : session.lessons;
+
+  // Khi đang lọc thì bung sẵn các nhánh còn kết quả, nếu không người dùng phải
+  // tự mở từng chương mới thấy thứ vừa tìm.
+  const isOpen = (id: string) => filtering || expanded.has(id);
 
   // Tra cứu tiêu đề bài học theo id (dùng hiển thị liên kết "chữa cho" trên video chữa bài)
   const lessonTitleById: Record<string, string> = {};
@@ -745,10 +881,89 @@ export default function CurriculumTab({ classId, schedule, students = [], gradeL
             </div>
           </div>
         </div>
-        <Button size="sm" variant="gradient" onClick={addChapter} className="shrink-0">
-          <Plus className="h-4 w-4 mr-1.5" /> Thêm chương
-        </Button>
+
+        <div className="flex items-center gap-3 sm:shrink-0">
+          {totalSessions > 0 && (
+            <div className="min-w-[120px] flex-1 sm:flex-none">
+              <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                <span>Đã dạy</span>
+                <span className="font-semibold text-foreground">{taughtSessions}/{totalSessions}</span>
+              </div>
+              <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
+                <div
+                  className="h-full rounded-full bg-primary transition-all"
+                  style={{ width: `${progressPct}%` }}
+                />
+              </div>
+            </div>
+          )}
+          <Button size="sm" variant="gradient" onClick={addChapter} className="shrink-0">
+            <Plus className="h-4 w-4 mr-1.5" /> Thêm chương
+          </Button>
+        </div>
       </div>
+
+      {/* Thanh công cụ: tìm trong lộ trình, lọc, gấp/mở nhanh */}
+      {chapters.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border/60 bg-card px-3 py-2">
+          <div className="relative min-w-[180px] flex-1">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            <input
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              placeholder="Tìm bài giảng, tài liệu, bài tập…"
+              className="h-8 w-full rounded-lg border border-input bg-background pl-8 pr-7 text-xs outline-none focus:ring-2 focus:ring-ring"
+            />
+            {query && (
+              <button
+                onClick={() => setQuery("")}
+                aria-label="Xoá tìm kiếm"
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground hover:text-foreground"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            )}
+          </div>
+
+          <select
+            value={typeFilter}
+            onChange={e => setTypeFilter(e.target.value as "all" | LessonType)}
+            className="h-8 rounded-lg border border-input bg-background px-2 text-xs font-medium outline-none focus:ring-2 focus:ring-ring"
+          >
+            <option value="all">Mọi loại</option>
+            {CREATE_TYPES.map(type => (
+              <option key={type} value={type}>{LESSON_META[type].label}</option>
+            ))}
+          </select>
+
+          <button
+            onClick={() => setOnlyHidden(v => !v)}
+            className={`flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs font-medium transition-colors ${
+              onlyHidden
+                ? "bg-primary text-primary-foreground"
+                : "bg-muted text-muted-foreground hover:bg-accent"
+            }`}
+            title="Chỉ hiện nội dung học viên chưa nhìn thấy"
+          >
+            <EyeOff className="h-3.5 w-3.5" /> Đang ẩn
+          </button>
+
+          <div className="ml-auto flex items-center gap-1">
+            <button
+              onClick={expandAll}
+              className="rounded-lg px-2 py-1.5 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
+            >
+              Mở tất cả
+            </button>
+            <button
+              onClick={collapseAll}
+              className="rounded-lg px-2 py-1.5 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
+            >
+              Thu gọn
+            </button>
+          </div>
+        </div>
+      )}
 
       {chapters.length === 0 && (
         <div className="rounded-2xl border-2 border-dashed border-border/50 py-14 text-center">
@@ -763,7 +978,12 @@ export default function CurriculumTab({ classId, schedule, students = [], gradeL
 
       {/* Chapters */}
       {chapters.map((chapter, ci) => {
-        const chExpanded = expanded.has(chapter.id);
+        const chExpanded = isOpen(chapter.id);
+        const chapterSessions = filtering
+          ? chapter.sessions.filter(s => visibleLessonsOf(s).length > 0)
+          : chapter.sessions;
+        // Đang lọc mà chương không còn kết quả nào thì ẩn hẳn, đỡ nhiễu.
+        if (filtering && chapterSessions.length === 0) return null;
         return (
           <div key={chapter.id} className="overflow-hidden rounded-xl border border-border/60 bg-card shadow-sm">
             {/* Chapter header */}
@@ -771,7 +991,24 @@ export default function CurriculumTab({ classId, schedule, students = [], gradeL
               className="flex cursor-pointer select-none items-center gap-2.5 bg-muted/30 px-3.5 py-2.5 transition-colors hover:bg-muted/50"
               onClick={() => toggle(chapter.id)}
             >
-              <GripVertical className="h-4 w-4 text-muted-foreground/40 shrink-0" />
+              <span className="flex shrink-0 flex-col" onClick={e => e.stopPropagation()}>
+                <button
+                  onClick={() => moveChapter(chapter.id, -1)}
+                  disabled={ci === 0}
+                  title="Chuyển lên"
+                  className="rounded p-0.5 text-muted-foreground/50 hover:text-foreground disabled:opacity-25"
+                >
+                  <ChevronUp className="h-3 w-3" />
+                </button>
+                <button
+                  onClick={() => moveChapter(chapter.id, 1)}
+                  disabled={ci === chapters.length - 1}
+                  title="Chuyển xuống"
+                  className="rounded p-0.5 text-muted-foreground/50 hover:text-foreground disabled:opacity-25"
+                >
+                  <ChevronDown className="h-3 w-3" />
+                </button>
+              </span>
               {chExpanded ? <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" /> : <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />}
               <div className="h-6 w-6 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
                 <span className="text-[10px] font-bold text-primary">{ci + 1}</span>
@@ -795,8 +1032,11 @@ export default function CurriculumTab({ classId, schedule, students = [], gradeL
             {/* Sessions */}
             {chExpanded && (
               <div className="divide-y divide-border/50">
-                {chapter.sessions.map((session, si) => {
-                  const sExpanded = expanded.has(session.id);
+                {chapterSessions.map((session, si) => {
+                  const sExpanded = isOpen(session.id);
+                  const sessionLessons = visibleLessonsOf(session);
+                  const publishedCount = session.lessons.filter(l => l.is_published).length;
+                  const state = SESSION_STATE_META[sessionState(session.date)];
                   return (
                     <div key={session.id} className="bg-card">
                       {/* Session header — wraps on mobile so the title isn't squeezed */}
@@ -849,15 +1089,60 @@ export default function CurriculumTab({ classId, schedule, students = [], gradeL
                           )}
                         </span>
 
-                        <span className="text-[11px] text-muted-foreground shrink-0">
-                          {session.lessons.length} nội dung
+                        <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${state.className}`}>
+                          {state.label}
                         </span>
+
+                        {/* Bao nhiêu nội dung học viên đang thấy — trước đây chỉ có tổng số */}
+                        <span
+                          className="shrink-0 text-[11px] text-muted-foreground"
+                          title={`${publishedCount}/${session.lessons.length} nội dung đang hiển thị với học viên`}
+                        >
+                          {publishedCount}/{session.lessons.length} hiện
+                        </span>
+
+                        {session.lessons.length > 0 && (
+                          <button
+                            onClick={e => {
+                              e.stopPropagation();
+                              setSessionPublished(chapter.id, session.id, publishedCount < session.lessons.length);
+                            }}
+                            title={publishedCount < session.lessons.length
+                              ? "Hiển thị toàn bộ nội dung buổi này"
+                              : "Ẩn toàn bộ nội dung buổi này"}
+                            className="shrink-0 rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                          >
+                            {publishedCount < session.lessons.length
+                              ? <Eye className="h-3.5 w-3.5" />
+                              : <EyeOff className="h-3.5 w-3.5" />}
+                          </button>
+                        )}
+
+                        <span className="flex shrink-0 flex-col" onClick={e => e.stopPropagation()}>
+                          <button
+                            onClick={() => moveSession(chapter.id, session.id, -1)}
+                            disabled={si === 0}
+                            title="Chuyển lên"
+                            className="rounded p-0.5 text-muted-foreground/50 hover:text-foreground disabled:opacity-25"
+                          >
+                            <ChevronUp className="h-3 w-3" />
+                          </button>
+                          <button
+                            onClick={() => moveSession(chapter.id, session.id, 1)}
+                            disabled={si === chapterSessions.length - 1}
+                            title="Chuyển xuống"
+                            className="rounded p-0.5 text-muted-foreground/50 hover:text-foreground disabled:opacity-25"
+                          >
+                            <ChevronDown className="h-3 w-3" />
+                          </button>
+                        </span>
+
                         <button
                           onClick={e => { e.stopPropagation(); setLessonModal({ chapterId: chapter.id, sessionId: session.id }); }}
-                          className="p-1 rounded-lg text-primary hover:bg-primary/10 transition-colors shrink-0"
+                          className="p-1.5 rounded-lg text-primary hover:bg-primary/10 transition-colors shrink-0"
                           title="Thêm nội dung"
                         >
-                          <Plus className="h-3.5 w-3.5" />
+                          <Plus className="h-4 w-4" />
                         </button>
                         <button
                           onClick={e => { e.stopPropagation(); deleteSession(chapter.id, session.id); }}
@@ -871,10 +1156,12 @@ export default function CurriculumTab({ classId, schedule, students = [], gradeL
                       {/* Lessons */}
                       {sExpanded && (
                         <div className="space-y-1.5 px-4 pb-2.5">
-                          {session.lessons.length === 0 && (
-                            <p className="text-xs text-muted-foreground py-2 italic">Chưa có nội dung. Nhấn + để thêm.</p>
+                          {sessionLessons.length === 0 && (
+                            <p className="text-xs text-muted-foreground py-2 italic">
+                              {filtering ? "Không có nội dung khớp bộ lọc." : "Chưa có nội dung. Nhấn + để thêm."}
+                            </p>
                           )}
-                          {session.lessons.map(lesson => {
+                          {sessionLessons.map(lesson => {
                             const meta = LESSON_META[lesson.type];
                             const isExam = lesson.type === "exam";
                             const examStatus = lesson.exam_status ?? "draft";
@@ -943,7 +1230,9 @@ export default function CurriculumTab({ classId, schedule, students = [], gradeL
                                     {meta.label}
                                   </span>
                                   {!lesson.is_published && (
-                                    <span className="text-[10px] text-muted-foreground shrink-0">Ẩn</span>
+                                    <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">
+                                      Đang ẩn
+                                    </span>
                                   )}
                                   {/* Exam open/close toggle */}
                                   {isExam && (
