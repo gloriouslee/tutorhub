@@ -1223,7 +1223,7 @@ export default function CurriculumTab({ classId, schedule, students = [], gradeL
                                 className="space-y-0"
                               >
                                 <div
-                                  className={`flex min-h-[68px] items-center gap-3 rounded-xl border px-3 py-2.5 transition-colors ${lesson.is_published ? "border-border/60 bg-background hover:border-border" : "border-dashed border-border/50 bg-muted/20"} ${canSort ? itemClass(`lessons:${chapter.id}:${session.id}`, li) : ""}`}
+                                  className={`flex min-h-[68px] items-start gap-3 rounded-xl border px-3 py-2.5 transition-colors ${lesson.is_published ? "border-border/60 bg-background hover:border-border" : "border-dashed border-border/50 bg-muted/20"} ${canSort ? itemClass(`lessons:${chapter.id}:${session.id}`, li) : ""}`}
                                 >
                                   <DragHandle
                                     enabled={canSort}
@@ -1235,73 +1235,71 @@ export default function CurriculumTab({ classId, schedule, students = [], gradeL
                                     <meta.icon className="h-5 w-5" />
                                   </div>
 
-                                  <div className="min-w-0 flex-1">
+                                  <div className="min-w-0 flex-1 py-0.5">
                                     <p className={`truncate text-sm font-semibold ${lesson.is_published ? "text-foreground" : "text-muted-foreground"}`}>
                                       {lesson.title}
                                     </p>
-                                    {/* Luôn chiếm một dòng, kể cả khi rỗng — nhờ vậy các hàng cao bằng nhau. */}
-                                    <p className="truncate text-xs text-muted-foreground" title={metaParts.join(" · ")}>
-                                      {metaParts.length > 0 ? metaParts.join(" · ") : " "}
-                                    </p>
-                                  </div>
+                                    {metaParts.length > 0 && (
+                                      <p className="mt-0.5 truncate text-xs text-muted-foreground" title={metaParts.join(" · ")}>
+                                        {metaParts.join(" · ")}
+                                      </p>
+                                    )}
 
-                                  {/* Nhãn trạng thái — gọn trong một cụm, không đẩy chiều cao hàng */}
-                                  <div className="hidden shrink-0 items-center gap-1.5 md:flex">
-                                    {/* Cách nộp bài: badge có icon + màu riêng cho từng kiểu, thay vì
-                                        chữ thường lẫn trong dòng mô tả. */}
-                                    {lesson.type === "homework" && (
-                                      <span className="flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
-                                        <Upload className="h-3 w-3" /> Nộp file
-                                      </span>
-                                    )}
-                                    {isExam && (
-                                      <span className="flex items-center gap-1 rounded-full bg-rose-100 px-2 py-0.5 text-[11px] font-medium text-rose-700 dark:bg-rose-900/30 dark:text-rose-400">
-                                        <PenSquare className="h-3 w-3" /> Trên hệ thống
-                                      </span>
-                                    )}
-                                    {lesson.is_published && lesson.assigned_to && lesson.assigned_to.length > 0 && (
-                                      <span
-                                        className="flex items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 text-[11px] font-medium text-violet-700 dark:bg-violet-900/30 dark:text-violet-400"
-                                        title={`Chỉ ${lesson.assigned_to.length} học viên thấy nội dung này`}
-                                      >
-                                        <User className="h-3 w-3" />{lesson.assigned_to.length}
-                                      </span>
-                                    )}
-                                    {isExam && (
-                                      <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-                                        examStatus === "open"   ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
-                                        : examStatus === "closed" ? "bg-muted text-muted-foreground"
-                                        : "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
-                                      }`}>
-                                        {examStatus === "open" ? "Đang mở" : examStatus === "closed" ? "Đã đóng" : "Nháp"}
-                                      </span>
-                                    )}
-                                    <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${meta.color}`}>
-                                      {meta.label}
-                                    </span>
-                                    {!lesson.is_published && (
-                                      <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">
-                                        Đang ẩn
-                                      </span>
-                                    )}
-                                  </div>
-
-                                  <div className="flex shrink-0 items-center gap-0.5">
-                                    {/* Xem kết quả: trước đây là link chữ 10px và chỉ hiện khi đã có
-                                        bài nộp, nên gần như không ai tìm thấy. Luôn hiện cho bài thi. */}
-                                    {isExam && (
-                                      <button
-                                        onClick={() => openGrading(lesson.id, lesson.title)}
-                                        title={`Xem kết quả bài làm (${examResults.length} bài nộp)`}
-                                        className="flex items-center gap-1 rounded-lg px-2 py-2 text-xs font-semibold text-primary transition-colors hover:bg-primary/10"
-                                      >
-                                        <Users className="h-4 w-4" />
-                                        <span className="hidden lg:inline">Kết quả</span>
-                                        <span className="rounded-full bg-primary/15 px-1.5 text-[11px] leading-4">
-                                          {examResults.length}
+                                    {/* Nhan trang thai + Ket qua - dat ngay duoi tieu de thay vi o cot
+                                        rieng ben phai (tung bi an tren di dong). Thu tu doc tu nhien:
+                                        cach nop bai -> trang thai -> loai noi dung -> xem ket qua -> co hien thi. */}
+                                    <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                                      {lesson.type === "homework" && (
+                                        <span className="flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
+                                          <Upload className="h-3 w-3" /> Nộp file
                                         </span>
-                                      </button>
-                                    )}
+                                      )}
+                                      {isExam && (
+                                        <span className="flex items-center gap-1 rounded-full bg-rose-100 px-2 py-0.5 text-[11px] font-medium text-rose-700 dark:bg-rose-900/30 dark:text-rose-400">
+                                          <PenSquare className="h-3 w-3" /> Trên hệ thống
+                                        </span>
+                                      )}
+                                      {isExam && (
+                                        <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                                          examStatus === "open"   ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
+                                          : examStatus === "closed" ? "bg-muted text-muted-foreground"
+                                          : "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
+                                        }`}>
+                                          {examStatus === "open" ? "Đang mở" : examStatus === "closed" ? "Đã đóng" : "Nháp"}
+                                        </span>
+                                      )}
+                                      <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${meta.color}`}>
+                                        {meta.label}
+                                      </span>
+                                      {isExam && (
+                                        <button
+                                          onClick={() => openGrading(lesson.id, lesson.title)}
+                                          title={`Xem kết quả bài làm (${examResults.length} bài nộp)`}
+                                          className="flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary transition-colors hover:bg-primary/20"
+                                        >
+                                          <Users className="h-3 w-3" /> Kết quả
+                                          <span className="rounded-full bg-primary/20 px-1.5 leading-4">
+                                            {examResults.length}
+                                          </span>
+                                        </button>
+                                      )}
+                                      {!lesson.is_published && (
+                                        <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">
+                                          Đang ẩn
+                                        </span>
+                                      )}
+                                      {lesson.is_published && lesson.assigned_to && lesson.assigned_to.length > 0 && (
+                                        <span
+                                          className="flex items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 text-[11px] font-medium text-violet-700 dark:bg-violet-900/30 dark:text-violet-400"
+                                          title={`Chỉ ${lesson.assigned_to.length} học viên thấy nội dung này`}
+                                        >
+                                          <User className="h-3 w-3" />{lesson.assigned_to.length}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  <div className="flex shrink-0 items-center gap-0.5 self-center">
                                     {isExam && (
                                       <button
                                         title={examStatus === "open" ? "Đóng bài thi" : "Mở bài thi cho học sinh"}
