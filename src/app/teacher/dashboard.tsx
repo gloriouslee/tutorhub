@@ -13,6 +13,7 @@ import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianG
 import { getTeacherHomework, getAllTeacherAttendance, getStudents, type TeacherAttendanceRecord } from "@/lib/storage";
 import { useTeacherContext } from "@/hooks/useTeacherContext";
 import type { Class, Student } from "@/types";
+import { weekdayLabelVi } from "@/lib/weekday";
 
 // Days that have class today (computed from schedule)
 function getTodaySessions(classes: Class[]) {
@@ -173,7 +174,7 @@ export default function TeacherDashboard() {
                       <div className="flex flex-wrap items-center gap-3 mt-2">
                         {(cls.schedule ?? []).map((s: any, i: number) => (
                           <span key={i} className="text-xs text-muted-foreground flex items-center gap-1">
-                            <Clock className="h-3 w-3" /> {s.day} {s.start_time}
+                            <Clock className="h-3 w-3" /> {weekdayLabelVi(s.day)} {s.start_time}
                           </span>
                         ))}
                         <span className="text-xs text-muted-foreground">

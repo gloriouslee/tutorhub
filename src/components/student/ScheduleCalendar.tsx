@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { Class } from "@/types";
+import { weekdayIndex } from "@/lib/weekday";
 
 type View = "month" | "week" | "day";
 
@@ -26,10 +27,6 @@ interface CalEvent {
   end: string;
 }
 
-const DAY_EN_TO_DOW: Record<string, number> = {
-  Sunday: 0, Monday: 1, Tuesday: 2, Wednesday: 3,
-  Thursday: 4, Friday: 5, Saturday: 6,
-};
 // Tuần bắt đầu từ Thứ Hai, theo thói quen ở Việt Nam.
 const WEEK_DAYS = [1, 2, 3, 4, 5, 6, 0];
 const DAY_SHORT = ["CN", "T2", "T3", "T4", "T5", "T6", "T7"];
@@ -72,7 +69,7 @@ function buildEvents(classes: Class[], from: Date, days: number): CalEvent[] {
   const byDow = new Map<number, { cls: Class; start: string; end: string }[]>();
   classes.forEach((cls) => {
     (cls.schedule ?? []).forEach((slot) => {
-      const dow = DAY_EN_TO_DOW[slot.day];
+      const dow = weekdayIndex(slot.day);
       if (dow === undefined) return;
       const list = byDow.get(dow) ?? [];
       list.push({ cls, start: slot.start_time, end: slot.end_time });

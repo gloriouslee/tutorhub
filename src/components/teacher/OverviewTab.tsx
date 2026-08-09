@@ -10,6 +10,7 @@ import type {
 } from "@/components/teacher/classDetail.types";
 import type { CurriculumSession } from "@/lib/storage";
 import { toLocalDateKey } from "@/lib/utils";
+import { weekdayLabelVi } from "@/lib/weekday";
 import type { ClassSchedule } from "@/types";
 import {
   AlertTriangle,
@@ -415,7 +416,7 @@ export default function OverviewTab({
               <div className="space-y-2">
                 {scheduleForDisplay.slice(0, 2).map((schedule, index) => (
                   <div key={`${schedule.day}-${index}`} className="flex items-center justify-between gap-3 rounded-lg bg-muted/35 px-3 py-2 text-xs">
-                    <span className="flex items-center gap-1.5 font-semibold text-foreground"><Clock className="h-3.5 w-3.5 text-primary" />{schedule.day}</span>
+                    <span className="flex items-center gap-1.5 font-semibold text-foreground"><Clock className="h-3.5 w-3.5 text-primary" />{weekdayLabelVi(schedule.day)}</span>
                     <span className="text-muted-foreground">{schedule.start_time} – {schedule.end_time}</span>
                   </div>
                 ))}

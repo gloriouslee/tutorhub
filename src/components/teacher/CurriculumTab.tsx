@@ -22,15 +22,11 @@ import {
   Users, User, NotebookPen,
 } from "lucide-react";
 import { ClassSchedule } from "@/types";
+import { weekdayIndex } from "@/lib/weekday";
 
 interface StudentLite { id: string; full_name: string }
 
 // ── Session generation (same logic as sessions tab) ───────────────────────────
-const DAY_TO_NUM: Record<string, number> = {
-  Monday: 1, Tuesday: 2, Wednesday: 3, Thursday: 4, Friday: 5, Saturday: 6, Sunday: 0,
-  "Thứ 2": 1, "Thứ 3": 2, "Thứ 4": 3, "Thứ 5": 4, "Thứ 6": 5, "Thứ 7": 6, "Chủ nhật": 0,
-};
-
 interface ScheduledSlot { date: string; label: string; start_time: string; end_time: string }
 
 function generateSlots(schedule: ClassSchedule[]): ScheduledSlot[] {
@@ -40,7 +36,7 @@ function generateSlots(schedule: ClassSchedule[]): ScheduledSlot[] {
   const slots: ScheduledSlot[] = [];
 
   for (const sched of schedule) {
-    const targetDay = DAY_TO_NUM[sched.day];
+    const targetDay = weekdayIndex(sched.day);
     if (targetDay === undefined) continue;
     const cursor = new Date(start);
     const diff = (targetDay - cursor.getDay() + 7) % 7;

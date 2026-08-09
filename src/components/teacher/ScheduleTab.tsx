@@ -11,7 +11,7 @@ import { ClassSchedule } from "@/types";
 import {
   Clock, Video, Calendar, Plus, Trash2, Save, AlertCircle, CheckCircle2, Loader2,
 } from "lucide-react";
-import { DAYS_VI } from "./classDetail.types";
+import { WEEKDAYS_VI, weekdayLabelVi } from "@/lib/weekday";
 
 // ── Schedule Editor ──────────────────────────────────────────────────────────
 
@@ -21,7 +21,12 @@ function ScheduleEditor({ classId, className, initialSchedule, onSaved }: {
   initialSchedule: ClassSchedule[];
   onSaved?: (schedule: ClassSchedule[]) => void;
 }) {
-  const [rows, setRows] = useState<ClassSchedule[]>(initialSchedule);
+  // Chuẩn hoá ngay khi nạp: lớp cũ có thể lưu "Monday" hoặc "Thứ 2" tuỳ lần sửa
+  // gần nhất. <select> chỉ có option dạng tiếng Việt đầy đủ, nên nếu không quy
+  // đổi trước, giá trị cũ sẽ không khớp option nào và ô chọn hiện sai/trống.
+  const [rows, setRows] = useState<ClassSchedule[]>(
+    () => initialSchedule.map(row => ({ ...row, day: weekdayLabelVi(row.day) })),
+  );
   const [saveState, setSaveState] = useState<"idle" | "saving" | "success" | "error">("idle");
   const [notifMessage, setNotifMessage] = useState("");
   const [showNotifField, setShowNotifField] = useState(false);
@@ -35,10 +40,10 @@ function ScheduleEditor({ classId, className, initialSchedule, onSaved }: {
   // Mỗi thứ trong tuần chỉ được một ca học
   const usedDays = rows.map(r => r.day);
   const hasDuplicateDays = new Set(usedDays).size !== usedDays.length;
-  const allDaysUsed = DAYS_VI.every(d => usedDays.includes(d));
+  const allDaysUsed = WEEKDAYS_VI.every(d => usedDays.includes(d));
 
   const addRow = () => {
-    const freeDay = DAYS_VI.find(d => !usedDays.includes(d));
+    const freeDay = WEEKDAYS_VI.find(d => !usedDays.includes(d));
     if (!freeDay) return;
     setRows(prev => [...prev, { day: freeDay, start_time: "08:00", end_time: "10:00" }]);
     setDirty(true);
@@ -94,7 +99,7 @@ function ScheduleEditor({ classId, className, initialSchedule, onSaved }: {
                 onChange={e => updateRow(i, "day", e.target.value)}
                 className="h-9 flex-1 min-w-0 sm:w-36 sm:flex-none rounded-lg border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-primary"
               >
-                {DAYS_VI.map(d => (
+                {WEEKDAYS_VI.map(d => (
                   <option key={d} value={d} disabled={d !== row.day && usedDays.includes(d)}>{d}</option>
                 ))}
               </select>

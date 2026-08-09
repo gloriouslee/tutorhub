@@ -12,11 +12,8 @@ import { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { getClasses, upsertClass, deleteClass, getTeachers, getStudents, setClassTeacherOverride } from "@/lib/storage";
 import { Class, Teacher, Student } from "@/types";
+import { weekdayLabelVi } from "@/lib/weekday";
 
-const DAY_VI: Record<string, string> = {
-  Monday: "Thứ Hai", Tuesday: "Thứ Ba", Wednesday: "Thứ Tư",
-  Thursday: "Thứ Năm", Friday: "Thứ Sáu", Saturday: "Thứ Bảy", Sunday: "Chủ Nhật",
-};
 
 function AdminClassesPageInner() {
   const searchParams = useSearchParams();
@@ -302,7 +299,7 @@ function AdminClassesPageInner() {
                           <div>
                             {cls.schedule.map((sch, sIdx) => (
                               <span key={sIdx} className="block text-foreground font-medium">
-                                {DAY_VI[sch.day] ?? sch.day}: {sch.start_time} - {sch.end_time}
+                                {weekdayLabelVi(sch.day)}: {sch.start_time} - {sch.end_time}
                               </span>
                             ))}
                           </div>

@@ -13,15 +13,13 @@ import {
   BookOpen, Clock, Video, MapPin, Users, Settings, Search,
   GraduationCap, X, Plus, Trash2, Check,
 } from "lucide-react";
+import { WEEKDAYS_VI, weekdayLabelVi } from "@/lib/weekday";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-const DAY_VI: Record<string, string> = {
-  Monday: "Thứ Hai", Tuesday: "Thứ Ba", Wednesday: "Thứ Tư",
-  Thursday: "Thứ Năm", Friday: "Thứ Sáu", Saturday: "Thứ Bảy", Sunday: "Chủ Nhật",
-};
-
-const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"] as const;
-type DayKey = typeof DAYS[number];
+// Lưu thẳng nhãn tiếng Việt làm giá trị — trước đây form này lưu "Monday" và chỉ
+// dịch sang tiếng Việt khi hiển thị, nên mọi lớp tạo mới qua đây đều mang lịch học
+// tiếng Anh vào dữ liệu, dù các trang khác đều hiển thị tiếng Việt.
+type DayKey = (typeof WEEKDAYS_VI)[number];
 
 const CLASS_COLORS = [
   "#6366f1", "#f59e0b", "#10b981", "#ec4899",
@@ -67,7 +65,7 @@ interface FormState {
 const EMPTY_FORM: FormState = {
   class_name: "", subject: "", grade: "", learning_mode: "offline",
   classroom: "", description: "", max_students: "15", color: CLASS_COLORS[0],
-  schedule: [{ day: "Monday", start_time: "18:00", end_time: "19:30" }],
+  schedule: [{ day: WEEKDAYS_VI[0], start_time: "18:00", end_time: "19:30" }],
 };
 
 // ── Create class modal ────────────────────────────────────────────────────────
@@ -90,7 +88,7 @@ function CreateClassModal({
   }
 
   function addRow() {
-    setForm(f => ({ ...f, schedule: [...f.schedule, { day: "Monday", start_time: "18:00", end_time: "19:30" }] }));
+    setForm(f => ({ ...f, schedule: [...f.schedule, { day: WEEKDAYS_VI[0], start_time: "18:00", end_time: "19:30" }] }));
   }
   function removeRow(i: number) {
     setForm(f => ({ ...f, schedule: f.schedule.filter((_, idx) => idx !== i) }));
@@ -273,7 +271,7 @@ function CreateClassModal({
                     onChange={e => setRow(i, { day: e.target.value as DayKey })}
                     className="flex-1 h-9 rounded-xl border border-border bg-background px-2.5 text-xs text-foreground outline-none focus:ring-2 focus:ring-primary/40"
                   >
-                    {DAYS.map(d => <option key={d} value={d}>{DAY_VI[d]}</option>)}
+                    {WEEKDAYS_VI.map(d => <option key={d} value={d}>{d}</option>)}
                   </select>
                   <input
                     type="time" value={row.start_time}
@@ -492,7 +490,7 @@ export default function TeacherClassesPage() {
                         <div key={idx} className="flex items-center gap-2 text-xs text-foreground font-medium">
                           <Clock className="h-3.5 w-3.5 text-primary shrink-0" />
                           <span>
-                            {DAY_VI[s.day] ?? s.day}
+                            {weekdayLabelVi(s.day)}
                             <span className="text-muted-foreground mx-1.5">·</span>
                             {s.start_time} – {s.end_time}
                           </span>

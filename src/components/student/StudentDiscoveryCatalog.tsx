@@ -11,6 +11,7 @@ import type {
 } from "@/lib/class-registration-types";
 import { isDiscoverableClass } from "@/lib/class-catalog";
 import { formatCurrency } from "@/lib/utils";
+import { weekdayLabelVi } from "@/lib/weekday";
 import {
   BookOpen,
   CheckCircle2,
@@ -167,7 +168,7 @@ function ClassDetailModal({
               <p className="mt-1 font-semibold">
                 {item.schedule.length
                   ? item.schedule
-                      .map((slot) => `${slot.day} ${slot.start_time}–${slot.end_time}`)
+                      .map((slot) => `${weekdayLabelVi(slot.day)} ${slot.start_time}–${slot.end_time}`)
                       .join(", ")
                   : "Giáo viên sẽ cập nhật"}
               </p>

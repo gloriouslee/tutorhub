@@ -18,11 +18,8 @@ import {
 } from "@/lib/parent-data";
 import { getInvoices, getNotifications, type TuitionInvoice, type StoredExamScore } from "@/lib/storage";
 import type { Notification } from "@/types";
+import { weekdayLabelVi } from "@/lib/weekday";
 
-const DAY_VI: Record<string, string> = {
-  Monday: "Thứ Hai", Tuesday: "Thứ Ba", Wednesday: "Thứ Tư",
-  Thursday: "Thứ Năm", Friday: "Thứ Sáu", Saturday: "Thứ Bảy", Sunday: "Chủ Nhật",
-};
 
 // Trạng thái hiển thị cho hóa đơn thật: quá hạn khi chưa thanh toán và trễ hạn.
 function invoiceBadgeStatus(inv: TuitionInvoice): "paid" | "pending" | "overdue" {
@@ -330,7 +327,7 @@ export default function ParentDashboard() {
                   <div className="flex-1 min-w-0">
                     <p className="text-xs font-medium text-foreground truncate">{cls.class_name}</p>
                     <p className="text-[11px] text-muted-foreground">
-                      {DAY_VI[cls.schedule?.[0]?.day] ?? cls.schedule?.[0]?.day ?? "Lịch đang cập nhật"}
+                      {cls.schedule?.[0]?.day ? weekdayLabelVi(cls.schedule[0].day) : "Lịch đang cập nhật"}
                       {cls.schedule?.[0] ? ` · ${cls.schedule[0].start_time}–${cls.schedule[0].end_time}` : ""}
                     </p>
                   </div>

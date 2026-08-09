@@ -1,13 +1,11 @@
 import { ClassSchedule } from "@/types";
 import { toLocalDateKey } from "@/lib/utils";
+import { weekdayIndex } from "@/lib/weekday";
 import type { HomeworkAttachment, StudentPackage } from "@/lib/storage";
 
-export const DAYS_VI = ["Thứ 2", "Thứ 3", "Thứ 4", "Thứ 5", "Thứ 6", "Thứ 7", "Chủ nhật"];
-
-export const DAY_TO_NUM: Record<string, number> = {
-  Monday: 1, Tuesday: 2, Wednesday: 3, Thursday: 4, Friday: 5, Saturday: 6, Sunday: 0,
-  "Thứ 2": 1, "Thứ 3": 2, "Thứ 4": 3, "Thứ 5": 4, "Thứ 6": 5, "Thứ 7": 6, "Chủ nhật": 0,
-};
+// Nhãn ngày trong tuần và ánh xạ sang số thứ tự: dùng src/lib/weekday.ts
+// (WEEKDAYS_VI / weekdayIndex / weekdayLabelVi) — nơi duy nhất hỗ trợ cả 3 dạng
+// giá trị đã từng được lưu (tiếng Anh, tiếng Việt viết tắt, tiếng Việt đầy đủ).
 
 export const CATEGORY_MAP: Record<string, { label: string; color: string }> = {
   formula:  { label: "Công thức", color: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" },
@@ -56,7 +54,7 @@ export function generateSessions(schedule: ClassSchedule[]): Session[] {
   endDate.setDate(endDate.getDate() + futureWeeks * 7);
 
   for (const sched of schedule) {
-    const targetDay = DAY_TO_NUM[sched.day];
+    const targetDay = weekdayIndex(sched.day);
     if (targetDay === undefined) continue;
 
     const cursor = new Date(startDate);

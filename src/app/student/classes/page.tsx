@@ -10,11 +10,8 @@ import { LearningModeBadge, SectionHeader } from "@/components/shared";
 import { BookOpen, Clock, Video, MapPin, Users, Search, ChevronRight, GraduationCap } from "lucide-react";
 import { useStudentContext } from "@/hooks/useStudentContext";
 import StudentDiscoveryCatalog from "@/components/student/StudentDiscoveryCatalog";
+import { weekdayLabelVi } from "@/lib/weekday";
 
-const DAY_VI: Record<string, string> = {
-  Monday: "Thứ Hai", Tuesday: "Thứ Ba", Wednesday: "Thứ Tư",
-  Thursday: "Thứ Năm", Friday: "Thứ Sáu", Saturday: "Thứ Bảy", Sunday: "Chủ Nhật",
-};
 
 type ModeFilter = "all" | "online" | "offline" | "hybrid";
 
@@ -131,7 +128,7 @@ export default function StudentClassesPage() {
                           <div key={idx} className="flex items-center gap-2 text-xs text-foreground font-medium">
                             <Clock className="h-3.5 w-3.5 text-primary shrink-0" />
                             <span>
-                              {DAY_VI[s.day] ?? s.day}
+                              {weekdayLabelVi(s.day)}
                               <span className="text-muted-foreground mx-1.5">·</span>
                               {s.start_time} – {s.end_time}
                             </span>
