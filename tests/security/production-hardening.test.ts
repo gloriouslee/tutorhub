@@ -738,6 +738,35 @@ test("class overviews prioritize the next action for teachers and students", asy
   assert.doesNotMatch(studentClass, /Mô tả khóa học/);
 });
 
+test("student curriculum launches a focused full-screen learning player", async () => {
+  const studentClass = await read("src/app/student/classes/[classId]/page.tsx");
+  const curriculum = await read("src/components/student/CurriculumView.tsx");
+  const learningRoute = await read(
+    "src/app/student/classes/[classId]/learn/[lessonId]/page.tsx",
+  );
+  const loadingRoute = await read(
+    "src/app/student/classes/[classId]/learn/[lessonId]/loading.tsx",
+  );
+  const player = await read("src/components/student/ClassLearningPlayer.tsx");
+
+  assert.match(curriculum, /\/student\/classes\/\$\{classId\}\/learn\/start/);
+  assert.match(curriculum, /Bắt đầu học/);
+  assert.match(curriculum, /Tiếp tục học/);
+  assert.doesNotMatch(curriculum, /lg:h-\[600px\]/);
+  assert.doesNotMatch(studentClass, /onWatch=\{/);
+  assert.match(studentClass, /\/student\/classes\/\$\{classId\}\/learn\/\$\{lessonId\}/);
+
+  assert.match(learningRoute, /<ClassLearningPlayer/);
+  assert.match(loadingRoute, /h-dvh/);
+  assert.match(player, /h-dvh/);
+  assert.match(player, /Nội dung khóa học/);
+  assert.match(player, /Ghi chú bài học/);
+  assert.match(player, /saveStudentLessonProgress/);
+  assert.match(player, /lessonTypeById\.get\(item\.lesson_id\) !== "homework"/);
+  assert.match(player, /submission\.status !== "returned"/);
+  assert.doesNotMatch(player, /onTimeUpdate/);
+});
+
 test("guardian links are many-to-many, consent-based, and RLS scoped", async () => {
   const migration = await read(
     "supabase/migrations/20260809120000_student_guardians.sql",

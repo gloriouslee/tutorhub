@@ -675,7 +675,7 @@ export default function StudentClassDetailPage() {
               onOpenSessions={() => setActiveTab("sessions")}
               onOpenLectures={() => setActiveTab("lectures")}
               onOpenNotes={() => setActiveTab("notes")}
-              onWatchLecture={handleWatchLecture}
+              onWatchLecture={(lessonId) => router.push(`/student/classes/${classId}/learn/${lessonId}`)}
             />
           )}
           {/* ── Sessions ── */}
@@ -841,13 +841,7 @@ export default function StudentClassDetailPage() {
             <CurriculumView
               classId={classId}
               watched={watched}
-              onWatch={(id) => {
-                const next = new Set(watched);
-                next.add(id);
-                setWatched(next);
-                void saveStudentLessonProgress(classId, id, { completed: true });
-              }}
-              submissions={submissions.map(s => ({ homework_id: s.homework_id }))}
+              submissions={submissions.map(s => ({ homework_id: s.homework_id, status: s.status }))}
             />
           )}
 
