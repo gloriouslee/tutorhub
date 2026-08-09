@@ -28,6 +28,8 @@ export default function PortalLayout({ children, role, userName, pageTitle }: Po
           ? context.parentName
           : context?.displayName || userName;
   const resolvedAvatarUrl = context?.role === role ? context.avatarUrl : "";
+  // Hộp thư của phụ huynh gồm sự kiện sinh từ dữ liệu của các con.
+  const inboxChildren = context?.role === "parent" ? context.children : [];
 
   useEffect(() => {
     setSidebarHidden(localStorage.getItem(SIDEBAR_HIDDEN_KEY) === "1");
@@ -58,7 +60,7 @@ export default function PortalLayout({ children, role, userName, pageTitle }: Po
           onMenuClick={() => setSidebarOpen(true)}
           sidebarHidden={sidebarHidden}
           onSidebarShow={() => setDesktopSidebarHidden(false)}
-          notificationCount={0}
+          inboxChildren={inboxChildren}
         />
         <main className="flex-1 overflow-y-auto">
           <div className="p-4 md:p-6 lg:p-8 max-w-[1400px] mx-auto">

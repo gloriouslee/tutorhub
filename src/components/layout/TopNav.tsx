@@ -1,9 +1,10 @@
 "use client";
 
-import { Bell, Menu, Moon, PanelLeftOpen, Search, Sun } from "lucide-react";
+import { Menu, Moon, PanelLeftOpen, Search, Sun } from "lucide-react";
 import { useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import { UserAvatar } from "@/components/ui/avatar";
+import NotificationBell from "@/components/layout/NotificationBell";
 import { UserRole } from "@/types";
 
 interface TopNavProps {
@@ -14,7 +15,8 @@ interface TopNavProps {
   onMenuClick?: () => void;
   sidebarHidden?: boolean;
   onSidebarShow?: () => void;
-  notificationCount?: number;
+  /** Con của phụ huynh — cần để dựng thông báo sự kiện trong hộp thư. */
+  inboxChildren?: { id: string; name: string; classes: { id: string; class_name: string }[] }[];
 }
 
 export default function TopNav({
@@ -25,7 +27,7 @@ export default function TopNav({
   onMenuClick,
   sidebarHidden = false,
   onSidebarShow,
-  notificationCount = 0,
+  inboxChildren = [],
 }: TopNavProps) {
   const [isDark, setIsDark] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -99,13 +101,8 @@ export default function TopNav({
           {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
         </button>
 
-        {/* Notifications */}
-        <button className="relative p-2 rounded-xl hover:bg-accent text-muted-foreground transition-colors">
-          <Bell className="h-4 w-4" />
-          {notificationCount > 0 && (
-            <span className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-red-500 ring-2 ring-card animate-pulse-ring" />
-          )}
-        </button>
+        {/* Hộp thư thông báo (thay cho mục "Thông báo" trong sidebar) */}
+        <NotificationBell role={role} parentChildren={inboxChildren} />
 
         {/* Avatar */}
         <div className="ml-1 flex items-center gap-2 pl-2 border-l border-border">

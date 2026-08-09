@@ -5,8 +5,9 @@ import Link, { useLinkStatus } from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import {
+  Send,
   BookOpen, Calendar, ClipboardList, GraduationCap,
-  LayoutDashboard, Bell, User, LogOut,
+  LayoutDashboard, User, LogOut,
   Users, DollarSign, Settings, BarChart3, FileText,
   CheckSquare, BookMarked, MessageSquare, CircleHelp, X, Shield,
   Loader2, PanelLeftClose, UserRoundPlus,
@@ -16,7 +17,6 @@ import { UserRole } from "@/types";
 import {
   resetAccountContextCache,
   useAccountContext,
-  type ParentChild,
 } from "@/hooks/useAccountContext";
 import { DEFAULT_PORTAL_BRANDING } from "@/lib/portal-branding";
 
@@ -36,7 +36,6 @@ const navConfig: Record<UserRole, NavItem[]> = {
     { label: "Tài liệu",   href: "/student/materials",      icon: BookMarked },
     { label: "Điểm thi",   href: "/student/scores",         icon: GraduationCap },
     { label: "Thanh toán", href: "/student/payments",       icon: DollarSign },
-    { label: "Thông báo",  href: "/student/notifications",  icon: Bell },
     { label: "Hồ sơ",      href: "/student/profile",        icon: User },
   ],
   parent: [
@@ -47,7 +46,6 @@ const navConfig: Record<UserRole, NavItem[]> = {
     { label: "Tiến độ",    href: "/parent/progress",        icon: BarChart3 },
     { label: "Chuyên cần", href: "/parent/attendance",      icon: CheckSquare },
     { label: "Thanh toán", href: "/parent/payments",        icon: DollarSign },
-    { label: "Thông báo",  href: "/parent/notifications",   icon: Bell },
   ],
   teacher: [
     { label: "Tổng quan",  href: "/teacher",                icon: LayoutDashboard },
@@ -61,7 +59,6 @@ const navConfig: Record<UserRole, NavItem[]> = {
     { label: "Xu hướng",   href: "/teacher/analytics",      icon: BarChart3 },
     { label: "Duyệt thu",  href: "/teacher/approvals",      icon: DollarSign },
     { label: "Tin tức",    href: "/teacher/announcements",  icon: MessageSquare },
-    { label: "Thông báo",  href: "/teacher/notifications",  icon: Bell },
     { label: "Cài đặt",    href: "/teacher/settings",       icon: Settings },
   ],
   admin: [
@@ -70,7 +67,7 @@ const navConfig: Record<UserRole, NavItem[]> = {
     { label: "Giáo viên",  href: "/admin/teachers",         icon: Users },
     { label: "Lớp học",    href: "/admin/classes",          icon: BookOpen },
     { label: "Báo cáo",    href: "/admin/reports",          icon: BarChart3 },
-    { label: "Thông báo",  href: "/admin/notifications",    icon: Bell },
+    { label: "Gửi thông báo", href: "/admin/notifications", icon: Send },
     { label: "Tài khoản",  href: "/admin/users",            icon: Shield },
     { label: "Hồ sơ",      href: "/admin/profile",          icon: User },
     { label: "Công cụ",    href: "/admin/settings",         icon: Settings },
@@ -97,48 +94,13 @@ const roleConfig: Record<UserRole, { label: string; color: string; gradient: str
 };
 
 // ── Badge computation ─────────────────────────────────────────────────────────
-function ls(key: string): string | null {
-  try { return localStorage.getItem(key); } catch { return null; }
-}
-function parseSet(key: string): Set<string> {
-  try { return new Set(JSON.parse(ls(key) ?? "[]")); } catch { return new Set(); }
-}
 
-// Đếm thông báo chưa đọc theo ĐÚNG logic trang thông báo của từng role:
-// nguồn getNotifications() + trừ các thông báo đã đọc/đã xóa trong cache cục bộ.
-async function unreadBroadcasts(
-  targetRole: "student" | "parent" | "teacher",
-  readKey: string,
-  deletedKey: string
-): Promise<{ unread: number; readIds: Set<string>; deletedIds: Set<string> }> {
-  const readIds    = parseSet(readKey);
-  const deletedIds = parseSet(deletedKey);
-  const { getNotifications, getNotificationStates } = await import("@/lib/storage");
-  if (targetRole === "teacher") {
-    const states = await getNotificationStates().catch(() => ({}));
-    for (const [id, state] of Object.entries(states)) {
-      readIds.add(id);
-      if (state.isDeleted) deletedIds.add(id);
-    }
-  }
-  const all = await getNotifications();
-  const unread = all.filter(n =>
-    (n.target_role === targetRole || n.target_role === "all")
-    && !deletedIds.has(n.id)
-    && !n.is_read
-    && !readIds.has(n.id)
-  ).length;
-  return { unread, readIds, deletedIds };
-}
-
-// Badge chuẩn hoá: mỗi số = đúng số liệu trang đích hiển thị
-// (student/teacher/parent: thông báo chưa đọc + bài tập chưa nộp;
-//  admin: số mục đang chờ xử lý ở từng hàng đợi).
+// Badge chuẩn hoá: mỗi số = đúng số liệu trang đích hiển thị.
+// Thông báo không còn ở đây — chuông trên thanh trên tự đếm hộp thư của nó.
 async function computeBadges(
   role: UserRole,
   sid: string,
   myClassIds: string[],
-  parentChildren: ParentChild[]
 ): Promise<Record<string, number>> {
   const result: Record<string, number> = {};
 
@@ -148,7 +110,7 @@ async function computeBadges(
       credentials: "same-origin",
     }).catch(() => null);
     const [
-      { getTeacherHomework, getHwSubmissions, getScheduleNotifications },
+      { getTeacherHomework, getHwSubmissions },
       { getSubmissionsByStudent },
     ] = await Promise.all([
       import("@/lib/storage"),
@@ -170,13 +132,6 @@ async function computeBadges(
     const pending = myHw.filter(h => !submittedIds.has(h.id)).length;
     if (pending > 0) result["/student/homework"] = pending;
 
-    // Thông báo: broadcast + thông báo lịch học (cùng cách trang thông báo đếm)
-    const { unread, readIds, deletedIds } = await unreadBroadcasts("student", "tutorhub_notif_read", "tutorhub_notif_deleted");
-    const scheduleNotifs = await getScheduleNotifications().catch(() => [] as { id: string; is_read: boolean }[]);
-    const schedUnread = scheduleNotifs.filter(n => !deletedIds.has(n.id) && !n.is_read && !readIds.has(n.id)).length;
-    const totalUnread = unread + schedUnread;
-    if (totalUnread > 0) result["/student/notifications"] = totalUnread;
-
     const questionResponse = await questionSummaryPromise;
     if (questionResponse?.ok) {
       const summary = await questionResponse.json() as { count?: number };
@@ -191,13 +146,6 @@ async function computeBadges(
       cache: "no-store",
       credentials: "same-origin",
     }).catch(() => null);
-    const { loadParentEventNotifications } = await import("@/lib/parent-data");
-    // Broadcast + sự kiện sinh từ dữ liệu thật của các con — khớp trang thông báo
-    const { unread, readIds, deletedIds } = await unreadBroadcasts("parent", "tutorhub_parent_notif_read", "tutorhub_parent_notif_deleted");
-    const events = await loadParentEventNotifications(parentChildren).catch(() => []);
-    const eventUnread = events.filter(n => !deletedIds.has(n.id) && !readIds.has(n.id)).length;
-    const total = unread + eventUnread;
-    if (total > 0) result["/parent/notifications"] = total;
     const invitationsResponse = await invitationsPromise;
     if (invitationsResponse?.ok) {
       const invitations = await invitationsResponse.json() as unknown[];
@@ -208,8 +156,6 @@ async function computeBadges(
   }
 
   if (role === "teacher") {
-    const { unread } = await unreadBroadcasts("teacher", "tutorhub_teacher_notif_read", "tutorhub_teacher_notif_deleted");
-    if (unread > 0) result["/teacher/notifications"] = unread;
     const [registrationResponse, questionResponse] = await Promise.all([
       fetch(
         "/api/class-registration-requests?status=pending",
@@ -265,7 +211,6 @@ export default function Sidebar({
   // Danh sách con (chỉ dùng khi role = parent) — nguồn sự kiện thông báo
   const studentId = accountContext?.role === "student" ? accountContext.studentId : "";
   const myClasses = accountContext?.role === "student" ? accountContext.classes : [];
-  const parentChildren = accountContext?.role === "parent" ? accountContext.children : [];
   const portalBranding =
     accountContext?.role === "student" || accountContext?.role === "teacher"
       ? accountContext.portalBranding
@@ -289,14 +234,13 @@ export default function Sidebar({
   const [badges, setBadges] = useState<Record<string, number>>({});
 
   const myClassKey  = myClasses.map(c => c.id).join(",");
-  const childrenKey = parentChildren.map(c => c.id).join(",");
 
   // Recompute on every navigation so badge clears when user visits the page
   useEffect(() => {
     if ((role === "student" || role === "parent") && !contextReady) return;
     let cancelled = false;
     const timer = window.setTimeout(async () => {
-      const next = await computeBadges(role, studentId, myClasses.map(c => c.id), parentChildren);
+      const next = await computeBadges(role, studentId, myClasses.map(c => c.id));
       if (!cancelled) setBadges(next);
     }, 100);
     return () => {
@@ -304,7 +248,7 @@ export default function Sidebar({
       window.clearTimeout(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [role, pathname, studentId, contextReady, myClassKey, childrenKey]);
+  }, [role, pathname, studentId, contextReady, myClassKey]);
 
   useEffect(() => {
     setLogoFailed(false);
