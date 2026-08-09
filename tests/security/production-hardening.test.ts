@@ -39,6 +39,40 @@ test("teacher portal branding accepts only uploaded portal logos", () => {
   );
 });
 
+test("profile avatars flow through the shared layout for every portal", async () => {
+  const identity = await read("src/lib/api-auth.ts");
+  const contextRoute = await read("src/app/api/account/context/route.ts");
+  const accountContext = await read("src/hooks/useAccountContext.ts");
+  const layout = await read("src/components/layout/PortalLayout.tsx");
+  const sidebar = await read("src/components/layout/Sidebar.tsx");
+  const topNav = await read("src/components/layout/TopNav.tsx");
+  const studentProfile = await read("src/app/student/profile/page.tsx");
+
+  assert.match(identity, /select\("id, full_name, dob, school, grade, avatar_url"\)/);
+  assert.match(identity, /select\("id, full_name, avatar_url"\)/);
+  assert.match(identity, /avatarUrl: roleEntity\?\.avatarUrl \|\| metadataAvatarUrl/);
+  assert.match(contextRoute, /avatarUrl: identity\.avatarUrl/g);
+  assert.match(accountContext, /avatarUrl: string/g);
+  assert.match(layout, /avatarUrl=\{resolvedAvatarUrl\}/g);
+  assert.match(sidebar, /<UserAvatar size="sm" name=\{userName\} src=\{avatarUrl\}/);
+  assert.match(topNav, /<UserAvatar size="sm" name=\{userName\} src=\{avatarUrl\}/);
+  assert.match(studentProfile, /setAccount[\s\S]{0,160}resetAccountContextCache\(\)/);
+});
+
+test("desktop sidebar visibility is user-controlled and persistent", async () => {
+  const layout = await read("src/components/layout/PortalLayout.tsx");
+  const sidebar = await read("src/components/layout/Sidebar.tsx");
+  const topNav = await read("src/components/layout/TopNav.tsx");
+
+  assert.match(layout, /tutorhub_sidebar_hidden/);
+  assert.match(layout, /localStorage\.setItem\(SIDEBAR_HIDDEN_KEY/);
+  assert.match(layout, /desktopHidden=\{sidebarHidden\}/);
+  assert.match(sidebar, /aria-label="Ẩn thanh bên"/);
+  assert.match(sidebar, /lg:w-0 lg:-translate-x-full lg:border-r-0/);
+  assert.match(topNav, /aria-label="Hiện thanh bên"/);
+  assert.match(topNav, /sidebarHidden &&/);
+});
+
 test("password policy rejects weak and accepts strong passwords", () => {
   assert.equal(validatePassword("demo1234"), "password_too_short");
   assert.equal(validatePassword("longbutlowercase1!"), "password_needs_uppercase");

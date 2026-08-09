@@ -20,6 +20,7 @@ export type AccountContext =
       classes: Class[];
       assignedClassId: string;
       portalBranding: PortalBranding;
+      avatarUrl: string;
     }
   | {
       role: "teacher";
@@ -28,16 +29,19 @@ export type AccountContext =
       teacherName: string;
       classes: Class[];
       portalBranding: PortalBranding;
+      avatarUrl: string;
     }
   | {
       role: "parent";
       parentId: string;
       parentName: string;
       children: ParentChild[];
+      avatarUrl: string;
     }
   | {
       role: Exclude<UserRole, "student" | "teacher" | "parent">;
       displayName: string;
+      avatarUrl: string;
     };
 
 interface AccountContextState {

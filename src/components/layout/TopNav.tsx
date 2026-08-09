@@ -1,24 +1,30 @@
 "use client";
 
-import { Bell, Menu, Moon, Search, Sun } from "lucide-react";
+import { Bell, Menu, Moon, PanelLeftOpen, Search, Sun } from "lucide-react";
 import { useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { UserAvatar } from "@/components/ui/avatar";
 import { UserRole } from "@/types";
 
 interface TopNavProps {
   role: UserRole;
   userName: string;
+  avatarUrl?: string;
   pageTitle: string;
   onMenuClick?: () => void;
+  sidebarHidden?: boolean;
+  onSidebarShow?: () => void;
   notificationCount?: number;
 }
 
 export default function TopNav({
   role,
   userName,
+  avatarUrl,
   pageTitle,
   onMenuClick,
+  sidebarHidden = false,
+  onSidebarShow,
   notificationCount = 0,
 }: TopNavProps) {
   const [isDark, setIsDark] = useState(false);
@@ -44,10 +50,23 @@ export default function TopNav({
       {/* Mobile menu toggle */}
       <button
         onClick={onMenuClick}
+        aria-label="Mở menu"
         className="lg:hidden p-2 rounded-xl hover:bg-accent text-muted-foreground transition-colors"
       >
         <Menu className="h-5 w-5" />
       </button>
+
+      {sidebarHidden && (
+        <button
+          type="button"
+          onClick={onSidebarShow}
+          aria-label="Hiện thanh bên"
+          title="Hiện thanh bên"
+          className="hidden lg:inline-flex p-2 rounded-xl hover:bg-accent text-muted-foreground transition-colors"
+        >
+          <PanelLeftOpen className="h-5 w-5" />
+        </button>
+      )}
 
       {/* Page title */}
       <div className="flex-1">
@@ -90,9 +109,7 @@ export default function TopNav({
 
         {/* Avatar */}
         <div className="ml-1 flex items-center gap-2 pl-2 border-l border-border">
-          <Avatar size="sm">
-            <AvatarFallback name={userName} />
-          </Avatar>
+          <UserAvatar size="sm" name={userName} src={avatarUrl} />
           <div className="hidden sm:block">
             <p className="text-xs font-semibold text-foreground leading-none">{userName.split(" ")[0]}</p>
             <p className="text-[10px] text-muted-foreground capitalize leading-none mt-0.5">{role}</p>

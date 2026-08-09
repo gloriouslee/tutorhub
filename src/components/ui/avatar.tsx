@@ -5,6 +5,14 @@ interface AvatarProps extends React.HTMLAttributes<HTMLDivElement> {
   size?: "sm" | "md" | "lg" | "xl";
 }
 
+interface UserAvatarProps extends AvatarProps {
+  name: string;
+  src?: string | null;
+  imageAlt?: string;
+  imageClassName?: string;
+  fallbackClassName?: string;
+}
+
 const sizeMap = {
   sm: "h-8 w-8 text-xs",
   md: "h-10 w-10 text-sm",
@@ -31,6 +39,9 @@ const AvatarImage = React.forwardRef<
   HTMLImageElement,
   React.ImgHTMLAttributes<HTMLImageElement>
 >(({ className, alt = "", ...props }, ref) => (
+  // Avatar URLs can use the authenticated /api/files proxy. Next Image's
+  // server-side optimizer cannot forward the signed-in browser session.
+  // eslint-disable-next-line @next/next/no-img-element
   <img
     ref={ref}
     className={cn("aspect-square h-full w-full object-cover", className)}
@@ -57,4 +68,34 @@ const AvatarFallback = React.forwardRef<
 ));
 AvatarFallback.displayName = "AvatarFallback";
 
-export { Avatar, AvatarImage, AvatarFallback };
+function UserAvatar({
+  name,
+  src,
+  imageAlt,
+  imageClassName,
+  fallbackClassName,
+  ...props
+}: UserAvatarProps) {
+  const [imageFailed, setImageFailed] = React.useState(false);
+
+  React.useEffect(() => {
+    setImageFailed(false);
+  }, [src]);
+
+  return (
+    <Avatar {...props}>
+      {src && !imageFailed ? (
+        <AvatarImage
+          src={src}
+          alt={imageAlt ?? name}
+          className={imageClassName}
+          onError={() => setImageFailed(true)}
+        />
+      ) : (
+        <AvatarFallback name={name} className={fallbackClassName} />
+      )}
+    </Avatar>
+  );
+}
+
+export { Avatar, AvatarImage, AvatarFallback, UserAvatar };

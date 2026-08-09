@@ -13,6 +13,7 @@ export type RequestIdentity = {
   email: string | null;
   role: UserRole;
   displayName: string;
+  avatarUrl: string;
   studentId?: string;
   teacherId?: string;
   parentId?: string;
@@ -88,6 +89,7 @@ export async function getRequestIdentity(
   type RoleEntity = {
     id: string;
     fullName: string;
+    avatarUrl?: string;
     dob?: unknown;
     school?: unknown;
     grade?: unknown;
@@ -102,7 +104,7 @@ export async function getRequestIdentity(
     if (role === "student") {
       const { data: rows, error } = await identityStore
         .from("students")
-        .select("id, full_name, dob, school, grade")
+        .select("id, full_name, dob, school, grade, avatar_url")
         .eq("user_id", userId)
         // `id` breaks the tie: two rows sharing a created_at would otherwise come
         // back in an arbitrary order, so this lookup and the profile endpoint
@@ -128,6 +130,7 @@ export async function getRequestIdentity(
             fullName: String(
               data.full_name ?? email?.split("@")[0] ?? "User",
             ),
+            avatarUrl: typeof data.avatar_url === "string" ? data.avatar_url : "",
             dob: data.dob,
             school: data.school,
             grade: data.grade,
@@ -141,7 +144,7 @@ export async function getRequestIdentity(
         : "parents";
     const { data: rows } = await identityStore
       .from(table)
-      .select("id, full_name")
+      .select("id, full_name, avatar_url")
       .eq("user_id", userId)
       .order("created_at", { ascending: true })
       .limit(1);
@@ -150,6 +153,7 @@ export async function getRequestIdentity(
       ? {
           id: String(data.id),
           fullName: String(data.full_name ?? email?.split("@")[0] ?? "User"),
+          avatarUrl: typeof data.avatar_url === "string" ? data.avatar_url : "",
         }
       : null;
   };
@@ -210,11 +214,18 @@ export async function getRequestIdentity(
     roleCandidate === metadataRole
       ? metadataEntity
       : await loadRoleEntity(roleCandidate);
+  const userMetadata = claims.user_metadata;
+  const metadataAvatarUrl =
+    userMetadata && typeof userMetadata === "object"
+      ? [userMetadata.avatar_url, userMetadata.picture]
+          .find((value): value is string => typeof value === "string" && value.length > 0) ?? ""
+      : "";
   const identity: RequestIdentity = {
     userId,
     email,
     role: roleCandidate,
     displayName: roleEntity?.fullName ?? email?.split("@")[0] ?? "User",
+    avatarUrl: roleEntity?.avatarUrl || metadataAvatarUrl,
     mustResetPassword: profile?.must_reset_password === true,
     profileComplete:
       roleCandidate !== "student" ||

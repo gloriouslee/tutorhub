@@ -9,8 +9,9 @@ import {
   LayoutDashboard, Bell, User, LogOut,
   Users, DollarSign, Settings, BarChart3, FileText,
   CheckSquare, BookMarked, MessageSquare, CircleHelp, X, Shield,
+  PanelLeftClose,
 } from "lucide-react";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { UserAvatar } from "@/components/ui/avatar";
 import { UserRole } from "@/types";
 import {
   resetAccountContextCache,
@@ -217,11 +218,22 @@ async function computeBadges(
 interface SidebarProps {
   role: UserRole;
   userName: string;
+  avatarUrl?: string;
   isOpen?: boolean;
   onClose?: () => void;
+  desktopHidden?: boolean;
+  onDesktopHide?: () => void;
 }
 
-export default function Sidebar({ role, userName, isOpen = true, onClose }: SidebarProps) {
+export default function Sidebar({
+  role,
+  userName,
+  avatarUrl,
+  isOpen = true,
+  onClose,
+  desktopHidden = false,
+  onDesktopHide,
+}: SidebarProps) {
   const pathname = usePathname();
   const router   = useRouter();
   const config   = roleConfig[role];
@@ -298,10 +310,13 @@ export default function Sidebar({ role, userName, isOpen = true, onClose }: Side
         className={cn(
           "fixed top-0 left-0 z-50 h-full flex flex-col",
           "bg-card border-r border-border",
-          "transition-transform duration-300 ease-in-out",
-          "lg:translate-x-0 lg:static lg:z-auto",
-          "w-[260px]",
-          isOpen ? "translate-x-0" : "-translate-x-full"
+          "w-[260px] overflow-hidden",
+          "transition-[transform,width] duration-300 ease-in-out",
+          "lg:static lg:z-auto",
+          isOpen ? "translate-x-0" : "-translate-x-full",
+          desktopHidden
+            ? "lg:w-0 lg:-translate-x-full lg:border-r-0"
+            : "lg:w-[260px] lg:translate-x-0",
         )}
       >
         {/* Logo */}
@@ -335,12 +350,25 @@ export default function Sidebar({ role, userName, isOpen = true, onClose }: Side
               <p className={`text-[10px] font-medium ${config.color} leading-none mt-0.5`}>{config.label}</p>
             </div>
           </Link>
-          <button
-            onClick={onClose}
-            className="lg:hidden p-1.5 rounded-lg hover:bg-accent text-muted-foreground"
-          >
-            <X className="h-4 w-4" />
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={onDesktopHide}
+              aria-label="Ẩn thanh bên"
+              title="Ẩn thanh bên"
+              className="hidden lg:inline-flex p-1.5 rounded-lg hover:bg-accent text-muted-foreground transition-colors"
+            >
+              <PanelLeftClose className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Đóng menu"
+              className="lg:hidden p-1.5 rounded-lg hover:bg-accent text-muted-foreground"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
         </div>
 
         {/* Nav */}
@@ -386,9 +414,7 @@ export default function Sidebar({ role, userName, isOpen = true, onClose }: Side
             onClick={handleLogout}
             className="flex items-center gap-3 px-2 py-2 rounded-xl hover:bg-accent transition-colors cursor-pointer group"
           >
-            <Avatar size="sm">
-              <AvatarFallback name={userName} />
-            </Avatar>
+            <UserAvatar size="sm" name={userName} src={avatarUrl} />
             <div className="flex-1 min-w-0">
               <p className="text-sm font-semibold text-foreground truncate group-hover:text-primary transition-colors">{userName}</p>
               <p className="text-[11px] text-muted-foreground capitalize">

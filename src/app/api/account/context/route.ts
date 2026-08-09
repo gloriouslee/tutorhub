@@ -85,6 +85,7 @@ export async function GET(req: NextRequest) {
       classes: hydratedClasses,
       assignedClassId: hydratedClasses[0]?.id ?? "",
       portalBranding,
+      avatarUrl: identity.avatarUrl,
     });
   }
 
@@ -110,6 +111,7 @@ export async function GET(req: NextRequest) {
         tutor_name: identity.displayName,
       })),
       portalBranding,
+      avatarUrl: identity.avatarUrl,
     });
   }
 
@@ -142,6 +144,7 @@ export async function GET(req: NextRequest) {
       role: identity.role,
       parentId: identity.parentId,
       parentName: identity.displayName,
+      avatarUrl: identity.avatarUrl,
       children: (children ?? []).map((child) => ({
         id: String(child.id),
         name: String(child.full_name),
@@ -159,5 +162,6 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({
     role: identity.role,
     displayName: identity.displayName,
+    avatarUrl: identity.avatarUrl,
   });
 }

@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { SectionHeader } from "@/components/shared";
 import { getStudentAccounts, changeStudentPassword, type StudentAccount } from "@/lib/storage";
 import { useStudentContext } from "@/hooks/useStudentContext";
+import { resetAccountContextCache } from "@/hooks/useAccountContext";
 import { createClient } from "@/lib/supabase/client";
 import { uploadProfileAsset } from "@/lib/upload";
 import {
@@ -199,6 +200,7 @@ export default function StudentProfilePage() {
       if (!response.ok) throw new Error("Không thể lưu ảnh đại diện.");
       setAvatarUrl(uploaded.url);
       setAccount(prev => prev ? { ...prev, avatar_url: uploaded.url } : prev);
+      resetAccountContextCache();
     } catch {
       setAvatarUrl(account?.avatar_url || null);
     } finally {
@@ -236,6 +238,7 @@ export default function StudentProfilePage() {
                 >
                   <Avatar className="h-24 w-24 border-4 border-card shadow-sm">
                     {avatarUrl
+                      // eslint-disable-next-line @next/next/no-img-element
                       ? <img src={avatarUrl} alt={form.full_name} className="h-full w-full object-cover rounded-full" />
                       : <AvatarFallback className="text-2xl bg-primary/10 text-primary font-bold">{initials}</AvatarFallback>}
                   </Avatar>
