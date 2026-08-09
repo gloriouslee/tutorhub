@@ -2,14 +2,13 @@
 
 import { useState, useEffect } from "react";
 import {
-  BookOpen, Calendar, CheckSquare,
-  Clock, Bell, ArrowRight, FileText,
+  BookOpen, CheckSquare,
+  Bell, ArrowRight, FileText,
   PlayCircle, Trophy, Target, Sparkles, AlertCircle,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { LearningModeBadge } from "@/components/shared";
 import {
   getNotifications, getNotificationStates, getTeacherHomework, getExamScoresByStudent,
   getStudentCurriculum, getExamResult, getAllTeacherAttendance,
@@ -20,9 +19,9 @@ import { getSubmissionsByStudent } from "@/lib/supabase/submissions";
 import Link from "next/link";
 import { formatDate, mapWithConcurrency } from "@/lib/utils";
 import { useStudentContext } from "@/hooks/useStudentContext";
+import ScheduleCalendar from "@/components/student/ScheduleCalendar";
 import { useRouter } from "next/navigation";
 import { AreaChart, Area, Tooltip, ResponsiveContainer } from "recharts";
-import type { Class } from "@/types";
 
 interface HomeworkItem {
   id: string;
@@ -33,43 +32,6 @@ interface HomeworkItem {
   created_at?: string;
   assigned_to?: string[] | null;
   exam_done?: boolean;
-}
-
-const DOW_EN = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-const DOW_VI: Record<string, string> = {
-  Monday: "Thứ Hai", Tuesday: "Thứ Ba", Wednesday: "Thứ Tư",
-  Thursday: "Thứ Năm", Friday: "Thứ Sáu", Saturday: "Thứ Bảy", Sunday: "Chủ Nhật",
-};
-
-function buildWeekSessions(classes: Class[]) {
-  const now      = new Date();
-  const todayIdx = now.getDay();
-  const curHour  = now.getHours() + now.getMinutes() / 60;
-
-  return classes
-    .flatMap(cls => {
-      return cls.schedule.map(s => {
-        const dayIdx = DOW_EN.indexOf(s.day);
-        let status: "live" | "done" | "upcoming";
-        if (dayIdx < todayIdx)      status = "done";
-        else if (dayIdx > todayIdx) status = "upcoming";
-        else {
-          const [sh, sm] = s.start_time.split(":").map(Number);
-          const [eh, em] = s.end_time.split(":").map(Number);
-          const start = sh + sm / 60;
-          const end   = eh + em / 60;
-          status = curHour >= start && curHour < end ? "live"
-                 : curHour >= end ? "done"
-                 : "upcoming";
-        }
-        return {
-          cls, tutorName: cls.tutor_name ?? "Giáo viên",
-          day: s.day, dayVi: DOW_VI[s.day] ?? s.day,
-          start_time: s.start_time, end_time: s.end_time, status,
-        };
-      });
-    })
-    .sort((a, b) => DOW_EN.indexOf(a.day) - DOW_EN.indexOf(b.day));
 }
 
 function buildAttendanceChart(records: TeacherAttendanceRecord[]) {
@@ -258,10 +220,6 @@ export default function StudentDashboard() {
   const pendingHomework   = myHomework.filter(h => new Date(h.due_date) >= now);
   const homeworkTotal     = myHomework.length;
   const completionPct     = homeworkTotal > 0 ? Math.round((submittedCount / homeworkTotal) * 100) : 0;
-  const weekSessions      = buildWeekSessions(myClasses);
-  const todaySessions     = weekSessions.filter(s => DOW_EN[now.getDay()] === s.day);
-  const displaySessions   = todaySessions.length > 0 ? todaySessions : weekSessions;
-  const scheduleTitle     = todaySessions.length > 0 ? "Lịch học hôm nay" : "Lịch học tuần này";
 
   return (
     <div className="space-y-8 pb-10">
@@ -295,7 +253,7 @@ export default function StudentDashboard() {
                   <PlayCircle className="h-5 w-5 mr-2" /> Bắt đầu học
                 </Button>
               </Link>
-              <Link href="/student/schedule">
+              <Link href="#lich-hoc">
                 <Button size="lg" className="bg-white/10 hover:bg-white/20 text-white border border-white/20 backdrop-blur-md transition-all hover:-translate-y-0.5">
                   Xem thời khóa biểu
                 </Button>
@@ -347,98 +305,16 @@ export default function StudentDashboard() {
         ))}
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
-
-        {/* ── Schedule ─────────────────────────────────── */}
-        <div className="xl:col-span-2 space-y-6 animate-fade-in delay-200">
-          <div className="flex items-end justify-between">
-            <div>
-              <h2 className="text-2xl font-bold text-foreground">{scheduleTitle}</h2>
-              <p className="text-sm text-muted-foreground mt-1 capitalize">{todayStr}</p>
-            </div>
-            <Link href="/student/schedule">
-              <Button variant="outline" className="group hidden sm:flex border-primary/20 text-primary hover:bg-primary/5">
-                Toàn bộ lịch <ArrowRight className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-0.5" />
-              </Button>
-            </Link>
-          </div>
-
-          {displaySessions.length === 0 ? (
-            <Card className="border-dashed border-2">
-              <CardContent className="p-10 text-center text-muted-foreground">
-                <Calendar className="h-10 w-10 mx-auto mb-3 opacity-20" />
-                <p className="font-semibold">
-                  {myClasses.length === 0 ? "Bạn chưa được phân lớp học." : "Không có lớp học tuần này."}
-                </p>
-              </CardContent>
-            </Card>
-          ) : (
-            <div className="space-y-4">
-              {displaySessions.map((session, i) => (
-                <Card
-                  key={`${session.cls.id}-${session.day}-${i}`}
-                  className={`overflow-hidden border-0 shadow-md hover:shadow-xl transition-all duration-300 hover:-translate-x-1 border-l-4 ${
-                    session.status === "live"
-                      ? "border-l-red-500 ring-1 ring-red-500/20"
-                      : "border-l-transparent"
-                  }`}
-                >
-                  <CardContent className="p-0">
-                    <div className="flex flex-col sm:flex-row">
-                      <div className="p-5 sm:w-48 bg-muted/20 border-b sm:border-b-0 sm:border-r border-border/50 flex flex-row sm:flex-col items-center sm:items-start justify-between sm:justify-center gap-2">
-                        <div>
-                          <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">{session.dayVi}</p>
-                          <div className="flex items-center gap-1.5 text-foreground font-bold mt-0.5">
-                            <Clock className="h-4 w-4 text-primary" /> {session.start_time}
-                          </div>
-                          <p className="text-xs text-muted-foreground hidden sm:block mt-0.5">đến {session.end_time}</p>
-                        </div>
-                        {session.status === "live" ? (
-                          <Badge className="bg-red-500 text-white animate-pulse border-0 shadow-[0_0_10px_rgba(239,68,68,0.5)]">Đang diễn ra</Badge>
-                        ) : session.status === "done" ? (
-                          <Badge variant="outline" className="text-muted-foreground border-border">Đã kết thúc</Badge>
-                        ) : (
-                          <Badge className="bg-primary/10 text-primary hover:bg-primary/20 border-0">Sắp tới</Badge>
-                        )}
-                      </div>
-                      <div className="p-5 flex-1 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                        <div>
-                          <h3 className="text-lg font-bold text-foreground mb-1">{session.cls.class_name}</h3>
-                          <div className="flex items-center gap-3 text-sm text-muted-foreground">
-                            <span className="flex items-center gap-1.5 bg-muted/50 px-2 py-0.5 rounded-md">
-                              <BookOpen className="h-3.5 w-3.5" /> {session.cls.subject}
-                            </span>
-                            <span className="hidden sm:inline">·</span>
-                            <span>{session.tutorName}</span>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-3 w-full sm:w-auto">
-                          <LearningModeBadge mode={session.cls.learning_mode} />
-                          {session.status === "live" ? (
-                            <Link href="/student/classes">
-                              <Button className="flex-1 sm:flex-none bg-gradient-to-r from-red-500 to-rose-600 hover:from-red-600 hover:to-rose-700 text-white shadow-lg shadow-red-500/30">
-                                Vào lớp ngay
-                              </Button>
-                            </Link>
-                          ) : session.status === "upcoming" ? (
-                            <Link href="/student/materials">
-                              <Button variant="outline" className="flex-1 sm:flex-none border-primary/20 text-primary">
-                                Chuẩn bị
-                              </Button>
-                            </Link>
-                          ) : null}
-                        </div>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          )}
+      {/* ── Lịch học ─────────────────────────────────────── */}
+      <section id="lich-hoc" className="space-y-4 animate-fade-in delay-200">
+        <div>
+          <h2 className="text-2xl font-bold text-foreground">Lịch học</h2>
+          <p className="text-sm text-muted-foreground mt-1 capitalize">{todayStr}</p>
         </div>
+        <ScheduleCalendar classes={myClasses} />
+      </section>
 
-        {/* ── Right column ──────────────────────────────── */}
-        <div className="space-y-8 animate-fade-in delay-300">
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-8 animate-fade-in delay-300">
 
           {/* Pending homework */}
           <div className="space-y-4">
@@ -531,7 +407,6 @@ export default function StudentDashboard() {
               </CardContent>
             </Card>
           </div>
-        </div>
       </div>
     </div>
   );

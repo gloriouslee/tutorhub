@@ -256,7 +256,7 @@ export default function StudentNotificationsPage() {
                           <Button
                             size="sm" variant="outline"
                             className="h-8 text-xs px-4 border-indigo-200 text-indigo-600 hover:bg-indigo-50 dark:border-indigo-800 dark:text-indigo-400"
-                            onClick={e => { e.stopPropagation(); router.push("/student/schedule"); }}
+                            onClick={e => { e.stopPropagation(); router.push("/student#lich-hoc"); }}
                           >
                             <Calendar className="h-3.5 w-3.5 mr-1.5" /> Xem lịch học
                           </Button>
