@@ -702,11 +702,20 @@ test("teacher class curriculum uses a compact full-width workspace", async () =>
   assert.match(curriculum, /writeExpanded\(classId, next\)/);
   // Lọc phải tự bung nhánh còn kết quả, nếu không tìm xong vẫn không thấy gì.
   assert.match(curriculum, /const isOpen = \(id: string\) => filtering \|\| expanded\.has\(id\)/);
-  // Biểu tượng "tay kéo" trước đây không kéo được gì — phải là sắp xếp thật.
-  assert.doesNotMatch(curriculum, /GripVertical/);
-  assert.match(curriculum, /function moveChapter/);
-  assert.match(curriculum, /function moveSession/);
   assert.match(curriculum, /function setSessionPublished/);
+
+  // Kéo–thả sắp xếp ở cả ba cấp; tay kéo phải thật sự kéo được.
+  const sortable = await read("src/components/teacher/useSortable.ts");
+  assert.match(curriculum, /startDrag\("chapters", ci\)/);
+  assert.match(curriculum, /startDrag\(`sessions:\$\{chapter\.id\}`, si\)/);
+  assert.match(curriculum, /startDrag\(`lessons:\$\{chapter\.id\}:\$\{session\.id\}`, li\)/);
+  // Lọc làm chỉ số hiển thị lệch mảng thật, nên phải khoá sắp xếp khi đang lọc.
+  assert.match(curriculum, /const canSort = !filtering/);
+  // Pointer Events chứ không phải HTML5 drag: HTML5 không chạy trên cảm ứng.
+  assert.match(sortable, /pointermove/);
+  assert.doesNotMatch(sortable, /dragstart/);
+  // touch-none: thiếu nó thì trình duyệt di động hiểu thao tác kéo là cuộn trang.
+  assert.match(curriculum, /touch-none/);
 });
 
 test("guardian links are many-to-many, consent-based, and RLS scoped", async () => {

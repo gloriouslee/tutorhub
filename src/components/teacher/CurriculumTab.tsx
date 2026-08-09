@@ -2,7 +2,7 @@
 
 import { toLocalDateKey } from "@/lib/utils";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -13,10 +13,11 @@ import {
 import { uploadClassFile } from "@/lib/upload";
 import ExamEditorModal from "@/components/teacher/ExamEditorModal";
 import ExamGradingView from "@/components/teacher/ExamGradingView";
+import { arrayMove, useSortable } from "@/components/teacher/useSortable";
 import {
   Plus, ChevronDown, ChevronRight, Trash2, Edit2, X, Check,
   PlayCircle, FileText, Video, Eye, EyeOff,
-  BookOpen, CalendarDays, ChevronUp, Search,
+  BookOpen, CalendarDays, GripVertical, Search,
   Upload, Loader2, AlertCircle, PenSquare, Lock, Unlock,
   Clock, Users, User, NotebookPen,
 } from "lucide-react";
@@ -478,6 +479,37 @@ function LessonModal({
 }
 
 // ── Inline text editor ────────────────────────────────────────────────────────
+/**
+ * Tay kéo đặt ở đầu mỗi mục. `touch-none` là bắt buộc: không có nó, trình duyệt
+ * di động sẽ hiểu thao tác kéo là cuộn trang và không bao giờ sắp xếp được.
+ */
+function DragHandle({
+  enabled,
+  onPointerDown,
+  label,
+}: {
+  enabled: boolean;
+  onPointerDown: (event: React.PointerEvent) => void;
+  label: string;
+}) {
+  if (!enabled) {
+    // Đang lọc thì thứ tự trên màn hình không khớp thứ tự thật — cho kéo sẽ sai chỗ.
+    return <span className="w-5 shrink-0" aria-hidden />;
+  }
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      onPointerDown={onPointerDown}
+      onClick={event => event.stopPropagation()}
+      className="-ml-1 shrink-0 cursor-grab touch-none rounded p-1 text-muted-foreground/40 transition-colors hover:bg-accent hover:text-foreground active:cursor-grabbing"
+    >
+      <GripVertical className="h-4 w-4" />
+    </button>
+  );
+}
+
 function InlineEdit({ value, onSave, placeholder }: { value: string; onSave: (v: string) => void; placeholder?: string }) {
   const [editing, setEditing] = useState(false);
   const [draft,   setDraft]   = useState(value);
@@ -645,7 +677,13 @@ export default function CurriculumTab({ classId, schedule, students = [], gradeL
     writeExpanded(classId, next);
   }
 
+  // Thả chuột trên một hàng khác sẽ sinh ra `click` trên hàng đó và đóng/mở nhầm.
+  // Bỏ qua click ngay sau khi vừa kéo xong.
+  const wasDragging = useRef(false);
+  const dragEndedAt = useRef(0);
+
   function toggle(id: string) {
+    if (Date.now() - dragEndedAt.current < 250) return;
     setExpanded(prev => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -668,31 +706,48 @@ export default function CurriculumTab({ classId, schedule, students = [], gradeL
     commitExpanded(new Set());
   }
 
-  // ── Sắp xếp lại ──
-  // Trước đây chỉ có biểu tượng "tay kéo" mà không kéo được gì — nút lên/xuống
-  // đổi thứ tự thật, và dùng được cả trên điện thoại.
-  function moveChapter(id: string, direction: -1 | 1) {
-    persist(chs => {
-      const from = chs.findIndex(ch => ch.id === id);
-      const to = from + direction;
-      if (from < 0 || to < 0 || to >= chs.length) return chs;
-      const next = [...chs];
-      [next[from], next[to]] = [next[to], next[from]];
-      return next.map((ch, index) => ({ ...ch, order: index }));
-    });
-  }
+  // ── Sắp xếp bằng kéo–thả ──
+  // Một handler duy nhất cho cả ba cấp; "group" cho biết đang kéo trong danh sách nào.
+  const handleReorder = useCallback((group: string, from: number, to: number) => {
+    const [level, chapterId, sessionId] = group.split(":");
 
-  function moveSession(chapterId: string, sessionId: string, direction: -1 | 1) {
-    persist(chs => chs.map(ch => {
-      if (ch.id !== chapterId) return ch;
-      const from = ch.sessions.findIndex(s => s.id === sessionId);
-      const to = from + direction;
-      if (from < 0 || to < 0 || to >= ch.sessions.length) return ch;
-      const sessions = [...ch.sessions];
-      [sessions[from], sessions[to]] = [sessions[to], sessions[from]];
-      return { ...ch, sessions: sessions.map((s, index) => ({ ...s, order: index })) };
-    }));
-  }
+    if (level === "chapters") {
+      persist(chs => arrayMove(chs, from, to).map((ch, i) => ({ ...ch, order: i })));
+      return;
+    }
+
+    if (level === "sessions") {
+      persist(chs => chs.map(ch => ch.id !== chapterId ? ch : {
+        ...ch,
+        sessions: arrayMove(ch.sessions, from, to).map((s, i) => ({ ...s, order: i })),
+      }));
+      return;
+    }
+
+    if (level === "lessons") {
+      persist(chs => chs.map(ch => ch.id !== chapterId ? ch : {
+        ...ch,
+        sessions: ch.sessions.map(s => s.id !== sessionId ? s : {
+          ...s,
+          lessons: arrayMove(s.lessons, from, to),
+        }),
+      }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [classId]);
+
+  const { drag, start: startDrag, itemProps, itemClass } = useSortable(handleReorder);
+
+  useEffect(() => {
+    if (drag) {
+      wasDragging.current = true;
+      return;
+    }
+    if (wasDragging.current) {
+      wasDragging.current = false;
+      dragEndedAt.current = Date.now();
+    }
+  }, [drag]);
 
   /** Bật/tắt hiển thị cho toàn bộ nội dung của một buổi — trước đây phải bấm từng cái. */
   function setSessionPublished(chapterId: string, sessionId: string, published: boolean) {
@@ -859,6 +914,9 @@ export default function CurriculumTab({ classId, schedule, students = [], gradeL
   // Khi đang lọc thì bung sẵn các nhánh còn kết quả, nếu không người dùng phải
   // tự mở từng chương mới thấy thứ vừa tìm.
   const isOpen = (id: string) => filtering || expanded.has(id);
+  // Khi lọc, danh sách hiển thị chỉ là tập con nên chỉ số kéo–thả không còn ứng
+  // với mảng thật; tắt sắp xếp thay vì để người dùng thả nhầm vị trí.
+  const canSort = !filtering;
 
   // Tra cứu tiêu đề bài học theo id (dùng hiển thị liên kết "chữa cho" trên video chữa bài)
   const lessonTitleById: Record<string, string> = {};
@@ -985,30 +1043,21 @@ export default function CurriculumTab({ classId, schedule, students = [], gradeL
         // Đang lọc mà chương không còn kết quả nào thì ẩn hẳn, đỡ nhiễu.
         if (filtering && chapterSessions.length === 0) return null;
         return (
-          <div key={chapter.id} className="overflow-hidden rounded-xl border border-border/60 bg-card shadow-sm">
+          <div
+            key={chapter.id}
+            {...(canSort ? itemProps("chapters", ci) : {})}
+            className={`overflow-hidden rounded-xl border border-border/60 bg-card shadow-sm ${canSort ? itemClass("chapters", ci) : ""}`}
+          >
             {/* Chapter header */}
             <div
               className="flex cursor-pointer select-none items-center gap-2.5 bg-muted/30 px-3.5 py-2.5 transition-colors hover:bg-muted/50"
               onClick={() => toggle(chapter.id)}
             >
-              <span className="flex shrink-0 flex-col" onClick={e => e.stopPropagation()}>
-                <button
-                  onClick={() => moveChapter(chapter.id, -1)}
-                  disabled={ci === 0}
-                  title="Chuyển lên"
-                  className="rounded p-0.5 text-muted-foreground/50 hover:text-foreground disabled:opacity-25"
-                >
-                  <ChevronUp className="h-3 w-3" />
-                </button>
-                <button
-                  onClick={() => moveChapter(chapter.id, 1)}
-                  disabled={ci === chapters.length - 1}
-                  title="Chuyển xuống"
-                  className="rounded p-0.5 text-muted-foreground/50 hover:text-foreground disabled:opacity-25"
-                >
-                  <ChevronDown className="h-3 w-3" />
-                </button>
-              </span>
+              <DragHandle
+                enabled={canSort}
+                onPointerDown={startDrag("chapters", ci)}
+                label="Kéo để đổi thứ tự chương"
+              />
               {chExpanded ? <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" /> : <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />}
               <div className="h-6 w-6 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
                 <span className="text-[10px] font-bold text-primary">{ci + 1}</span>
@@ -1038,7 +1087,11 @@ export default function CurriculumTab({ classId, schedule, students = [], gradeL
                   const publishedCount = session.lessons.filter(l => l.is_published).length;
                   const state = SESSION_STATE_META[sessionState(session.date)];
                   return (
-                    <div key={session.id} className="bg-card">
+                    <div
+                      key={session.id}
+                      {...(canSort ? itemProps(`sessions:${chapter.id}`, si) : {})}
+                      className={`bg-card ${canSort ? itemClass(`sessions:${chapter.id}`, si) : ""}`}
+                    >
                       {/* Session header — wraps on mobile so the title isn't squeezed */}
                       <div
                         className="flex cursor-pointer select-none flex-wrap items-center gap-x-2 gap-y-1.5 px-4 py-2 transition-colors hover:bg-muted/30"
@@ -1046,6 +1099,11 @@ export default function CurriculumTab({ classId, schedule, students = [], gradeL
                       >
                         {/* Left: chevron + số buổi + tên (chiếm cả hàng trên mobile) */}
                         <div className="flex items-center gap-2 min-w-0 basis-full sm:basis-0 sm:flex-1">
+                        <DragHandle
+                          enabled={canSort}
+                          onPointerDown={startDrag(`sessions:${chapter.id}`, si)}
+                          label="Kéo để đổi thứ tự buổi"
+                        />
                         {sExpanded ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" /> : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
                         <span className="text-xs text-muted-foreground shrink-0 w-12 sm:w-14">Buổi {si + 1}</span>
                         <span className="flex-1 min-w-0 text-sm font-medium text-foreground" onClick={e => e.stopPropagation()}>
@@ -1118,32 +1176,6 @@ export default function CurriculumTab({ classId, schedule, students = [], gradeL
                           </button>
                         )}
 
-                        <span className="flex shrink-0 flex-col" onClick={e => e.stopPropagation()}>
-                          <button
-                            onClick={() => moveSession(chapter.id, session.id, -1)}
-                            disabled={si === 0}
-                            title="Chuyển lên"
-                            className="rounded p-0.5 text-muted-foreground/50 hover:text-foreground disabled:opacity-25"
-                          >
-                            <ChevronUp className="h-3 w-3" />
-                          </button>
-                          <button
-                            onClick={() => moveSession(chapter.id, session.id, 1)}
-                            disabled={si === chapterSessions.length - 1}
-                            title="Chuyển xuống"
-                            className="rounded p-0.5 text-muted-foreground/50 hover:text-foreground disabled:opacity-25"
-                          >
-                            <ChevronDown className="h-3 w-3" />
-                          </button>
-                        </span>
-
-                        <button
-                          onClick={e => { e.stopPropagation(); setLessonModal({ chapterId: chapter.id, sessionId: session.id }); }}
-                          className="p-1.5 rounded-lg text-primary hover:bg-primary/10 transition-colors shrink-0"
-                          title="Thêm nội dung"
-                        >
-                          <Plus className="h-4 w-4" />
-                        </button>
                         <button
                           onClick={e => { e.stopPropagation(); deleteSession(chapter.id, session.id); }}
                           className="p-1 rounded-lg text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/10 transition-colors shrink-0"
@@ -1158,22 +1190,31 @@ export default function CurriculumTab({ classId, schedule, students = [], gradeL
                         <div className="space-y-1.5 px-4 pb-2.5">
                           {sessionLessons.length === 0 && (
                             <p className="text-xs text-muted-foreground py-2 italic">
-                              {filtering ? "Không có nội dung khớp bộ lọc." : "Chưa có nội dung. Nhấn + để thêm."}
+                              {filtering ? "Không có nội dung khớp bộ lọc." : "Chưa có nội dung nào."}
                             </p>
                           )}
-                          {sessionLessons.map(lesson => {
+                          {sessionLessons.map((lesson, li) => {
                             const meta = LESSON_META[lesson.type];
                             const isExam = lesson.type === "exam";
                             const examStatus = lesson.exam_status ?? "draft";
                             const examResults = isExam ? (examResultsMap[lesson.id] ?? []) : [];
 
                             return (
-                              <div key={lesson.id} className="space-y-0">
+                              <div
+                                key={lesson.id}
+                                {...(canSort ? itemProps(`lessons:${chapter.id}:${session.id}`, li) : {})}
+                                className="space-y-0"
+                              >
                                 <div
-                                  className={`flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border p-2.5 transition-colors ${lesson.is_published ? "border-border/50 bg-background hover:border-border" : "border-dashed border-border/40 bg-muted/20 opacity-70"}`}
+                                  className={`flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border p-2.5 transition-colors ${lesson.is_published ? "border-border/50 bg-background hover:border-border" : "border-dashed border-border/40 bg-muted/20 opacity-70"} ${canSort ? itemClass(`lessons:${chapter.id}:${session.id}`, li) : ""}`}
                                 >
                                   {/* Left: icon + nội dung (chiếm cả hàng trên mobile) */}
                                   <div className="flex items-center gap-3 min-w-0 basis-full sm:basis-0 sm:flex-1">
+                                  <DragHandle
+                                    enabled={canSort}
+                                    onPointerDown={startDrag(`lessons:${chapter.id}:${session.id}`, li)}
+                                    label="Kéo để đổi thứ tự nội dung"
+                                  />
                                   <div className={`h-7 w-7 rounded-lg flex items-center justify-center shrink-0 ${meta.color}`}>
                                     <meta.icon className="h-3.5 w-3.5" />
                                   </div>
@@ -1278,12 +1319,14 @@ export default function CurriculumTab({ classId, schedule, students = [], gradeL
                             );
                           })}
 
-                          <button
+                          <Button
+                            variant="outline"
+                            size="sm"
                             onClick={() => setLessonModal({ chapterId: chapter.id, sessionId: session.id })}
-                            className="flex items-center gap-1.5 text-xs text-primary hover:underline mt-1 pl-1"
+                            className="mt-1 w-full border-dashed text-xs text-primary hover:border-primary/50 hover:bg-primary/5"
                           >
-                            <Plus className="h-3.5 w-3.5" /> Thêm nội dung
-                          </button>
+                            <Plus className="mr-1.5 h-4 w-4" /> Thêm nội dung
+                          </Button>
                         </div>
                       )}
                     </div>
