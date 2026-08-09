@@ -19,7 +19,7 @@ import {
   PlayCircle, FileText, Video, Eye, EyeOff,
   BookOpen, CalendarDays, GripVertical, Search,
   Upload, Loader2, AlertCircle, PenSquare, Lock, Unlock,
-  Clock, Users, User, NotebookPen,
+  Users, User, NotebookPen,
 } from "lucide-react";
 import { ClassSchedule } from "@/types";
 
@@ -1199,6 +1199,23 @@ export default function CurriculumTab({ classId, schedule, students = [], gradeL
                             const examStatus = lesson.exam_status ?? "draft";
                             const examResults = isExam ? (examResultsMap[lesson.id] ?? []) : [];
 
+                            // Mọi thông tin phụ dồn về MỘT dòng, để mọi hàng cao bằng nhau
+                            // dù loại nội dung khác nhau. Không dùng emoji: nó làm bảng
+                            // nội dung trông như ghi chú cá nhân hơn là trang quản lý.
+                            const metaParts: string[] = [];
+                            if (lesson.description) metaParts.push(lesson.description);
+                            if (lesson.type === "homework") metaParts.push("Học sinh nộp file");
+                            if (isExam) metaParts.push("Làm trên hệ thống");
+                            if (lesson.type === "solution" && lesson.linked_homework_id) {
+                              metaParts.push(`Chữa cho: ${lessonTitleById[lesson.linked_homework_id] ?? "(bài tập đã xoá)"}`);
+                            }
+                            if (lesson.due_date) {
+                              metaParts.push(`Hạn ${new Date(lesson.due_date).toLocaleDateString("vi-VN")}`);
+                            }
+                            if (isExam && lesson.exam_opens_at && examStatus === "draft") {
+                              metaParts.push(`Mở lúc ${new Date(lesson.exam_opens_at).toLocaleString("vi-VN", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}`);
+                            }
+
                             return (
                               <div
                                 key={lesson.id}
@@ -1206,114 +1223,112 @@ export default function CurriculumTab({ classId, schedule, students = [], gradeL
                                 className="space-y-0"
                               >
                                 <div
-                                  className={`flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border p-2.5 transition-colors ${lesson.is_published ? "border-border/50 bg-background hover:border-border" : "border-dashed border-border/40 bg-muted/20 opacity-70"} ${canSort ? itemClass(`lessons:${chapter.id}:${session.id}`, li) : ""}`}
+                                  className={`flex min-h-[68px] items-center gap-3 rounded-xl border px-3 py-2.5 transition-colors ${lesson.is_published ? "border-border/60 bg-background hover:border-border" : "border-dashed border-border/50 bg-muted/20"} ${canSort ? itemClass(`lessons:${chapter.id}:${session.id}`, li) : ""}`}
                                 >
-                                  {/* Left: icon + nội dung (chiếm cả hàng trên mobile) */}
-                                  <div className="flex items-center gap-3 min-w-0 basis-full sm:basis-0 sm:flex-1">
                                   <DragHandle
                                     enabled={canSort}
                                     onPointerDown={startDrag(`lessons:${chapter.id}:${session.id}`, li)}
                                     label="Kéo để đổi thứ tự nội dung"
                                   />
-                                  <div className={`h-7 w-7 rounded-lg flex items-center justify-center shrink-0 ${meta.color}`}>
-                                    <meta.icon className="h-3.5 w-3.5" />
+
+                                  <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${meta.color}`}>
+                                    <meta.icon className="h-5 w-5" />
                                   </div>
-                                  <div className="flex-1 min-w-0">
-                                    <p className="text-xs font-medium text-foreground truncate">{lesson.title}</p>
-                                    {lesson.description && <p className="text-[11px] text-muted-foreground truncate">{lesson.description}</p>}
-                                    {lesson.type === "homework" && <p className="text-[11px] text-muted-foreground">📎 Học sinh nộp file</p>}
-                                    {isExam && <p className="text-[11px] text-muted-foreground">✏️ Làm trên hệ thống</p>}
-                                    {lesson.type === "solution" && lesson.linked_homework_id && (
-                                      <p className="text-[11px] text-muted-foreground truncate">
-                                        ↪ Chữa cho: {lessonTitleById[lesson.linked_homework_id] ?? "(bài tập đã xoá)"}
-                                      </p>
+
+                                  <div className="min-w-0 flex-1">
+                                    <p className={`truncate text-sm font-semibold ${lesson.is_published ? "text-foreground" : "text-muted-foreground"}`}>
+                                      {lesson.title}
+                                    </p>
+                                    {/* Luôn chiếm một dòng, kể cả khi rỗng — nhờ vậy các hàng cao bằng nhau. */}
+                                    <p className="truncate text-xs text-muted-foreground" title={metaParts.join(" · ")}>
+                                      {metaParts.length > 0 ? metaParts.join(" · ") : " "}
+                                    </p>
+                                  </div>
+
+                                  {/* Nhãn trạng thái — gọn trong một cụm, không đẩy chiều cao hàng */}
+                                  <div className="hidden shrink-0 items-center gap-1.5 md:flex">
+                                    {lesson.is_published && lesson.assigned_to && lesson.assigned_to.length > 0 && (
+                                      <span
+                                        className="flex items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 text-[11px] font-medium text-violet-700 dark:bg-violet-900/30 dark:text-violet-400"
+                                        title={`Chỉ ${lesson.assigned_to.length} học viên thấy nội dung này`}
+                                      >
+                                        <User className="h-3 w-3" />{lesson.assigned_to.length}
+                                      </span>
                                     )}
-                                    {lesson.due_date && <p className="text-[11px] text-muted-foreground">Hạn: {new Date(lesson.due_date).toLocaleDateString("vi-VN")}</p>}
-                                    {/* Exam status badge inline */}
                                     {isExam && (
-                                      <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-                                        <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${
-                                          examStatus === "open"   ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
-                                          : examStatus === "closed" ? "bg-muted text-muted-foreground"
-                                          : "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
-                                        }`}>
-                                          {examStatus === "open" ? "● Đang mở" : examStatus === "closed" ? "Đã đóng" : "Nháp"}
-                                        </span>
-                                        {lesson.exam_opens_at && examStatus === "draft" && (
-                                          <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
-                                            <Clock className="h-2.5 w-2.5" />
-                                            {new Date(lesson.exam_opens_at).toLocaleString("vi-VN", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
-                                          </span>
-                                        )}
-                                        {examResults.length > 0 && (
-                                          <button
-                                            onClick={() => openGrading(lesson.id, lesson.title)}
-                                            className="text-[10px] text-primary hover:underline flex items-center gap-0.5"
-                                          >
-                                            <Users className="h-2.5 w-2.5" />{examResults.length} bài nộp
-                                          </button>
-                                        )}
-                                      </div>
+                                      <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                                        examStatus === "open"   ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
+                                        : examStatus === "closed" ? "bg-muted text-muted-foreground"
+                                        : "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
+                                      }`}>
+                                        {examStatus === "open" ? "Đang mở" : examStatus === "closed" ? "Đã đóng" : "Nháp"}
+                                      </span>
+                                    )}
+                                    <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${meta.color}`}>
+                                      {meta.label}
+                                    </span>
+                                    {!lesson.is_published && (
+                                      <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">
+                                        Đang ẩn
+                                      </span>
                                     )}
                                   </div>
-                                  </div>{/* /left */}
-                                  {/* Right: badge + nút (xuống hàng dưới trên mobile) */}
-                                  <div className="flex items-center gap-1 shrink-0 ml-auto flex-wrap justify-end">
-                                  {lesson.is_published && lesson.assigned_to && lesson.assigned_to.length > 0 && (
-                                    <span
-                                      className="flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full shrink-0 bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400"
-                                      title={`Chỉ ${lesson.assigned_to.length} học viên thấy nội dung này`}
-                                    >
-                                      <User className="h-2.5 w-2.5" />{lesson.assigned_to.length}
-                                    </span>
-                                  )}
-                                  <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full shrink-0 ${meta.color}`}>
-                                    {meta.label}
-                                  </span>
-                                  {!lesson.is_published && (
-                                    <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">
-                                      Đang ẩn
-                                    </span>
-                                  )}
-                                  {/* Exam open/close toggle */}
-                                  {isExam && (
+
+                                  <div className="flex shrink-0 items-center gap-0.5">
+                                    {/* Xem kết quả: trước đây là link chữ 10px và chỉ hiện khi đã có
+                                        bài nộp, nên gần như không ai tìm thấy. Luôn hiện cho bài thi. */}
+                                    {isExam && (
+                                      <button
+                                        onClick={() => openGrading(lesson.id, lesson.title)}
+                                        title={`Xem kết quả bài làm (${examResults.length} bài nộp)`}
+                                        className="flex items-center gap-1 rounded-lg px-2 py-2 text-xs font-semibold text-primary transition-colors hover:bg-primary/10"
+                                      >
+                                        <Users className="h-4 w-4" />
+                                        <span className="hidden lg:inline">Kết quả</span>
+                                        <span className="rounded-full bg-primary/15 px-1.5 text-[11px] leading-4">
+                                          {examResults.length}
+                                        </span>
+                                      </button>
+                                    )}
+                                    {isExam && (
+                                      <button
+                                        title={examStatus === "open" ? "Đóng bài thi" : "Mở bài thi cho học sinh"}
+                                        onClick={() => updateExamField(chapter.id, session.id, lesson.id, {
+                                          exam_status: examStatus === "open" ? "closed" : "open",
+                                        })}
+                                        className={`rounded-lg p-2 transition-colors ${
+                                          examStatus === "open"
+                                            ? "text-emerald-600 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-900/10"
+                                            : "text-muted-foreground hover:bg-accent hover:text-emerald-600"
+                                        }`}
+                                      >
+                                        {examStatus === "open" ? <Unlock className="h-4 w-4" /> : <Lock className="h-4 w-4" />}
+                                      </button>
+                                    )}
                                     <button
-                                      title={examStatus === "open" ? "Đóng bài thi" : "Mở bài thi cho học sinh"}
-                                      onClick={() => updateExamField(chapter.id, session.id, lesson.id, {
-                                        exam_status: examStatus === "open" ? "closed" : "open",
-                                      })}
-                                      className={`p-1 rounded-lg transition-colors shrink-0 ${
-                                        examStatus === "open"
-                                          ? "text-emerald-600 hover:text-red-500"
-                                          : "text-muted-foreground hover:text-emerald-600"
-                                      }`}
+                                      onClick={() => togglePublish(chapter.id, session.id, lesson.id)}
+                                      className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                                      title={lesson.is_published ? "Ẩn khỏi học viên" : "Hiển thị với học viên"}
                                     >
-                                      {examStatus === "open" ? <Unlock className="h-3.5 w-3.5" /> : <Lock className="h-3.5 w-3.5" />}
+                                      {lesson.is_published ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
                                     </button>
-                                  )}
-                                  {/* Actions */}
-                                  <button
-                                    onClick={() => togglePublish(chapter.id, session.id, lesson.id)}
-                                    className="p-1 rounded-lg text-muted-foreground hover:text-foreground transition-colors shrink-0"
-                                    title={lesson.is_published ? "Ẩn khỏi học viên" : "Hiển thị với học viên"}
-                                  >
-                                    {lesson.is_published ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
-                                  </button>
-                                  <button
-                                    onClick={() => lesson.type === "exam"
-                                      ? openExamEditor(chapter.id, session.id, lesson)
-                                      : setLessonModal({ chapterId: chapter.id, sessionId: session.id, lesson })}
-                                    className="p-1 rounded-lg text-muted-foreground hover:text-primary transition-colors shrink-0"
-                                  >
-                                    <Edit2 className="h-3.5 w-3.5" />
-                                  </button>
-                                  <button
-                                    onClick={() => deleteLesson(chapter.id, session.id, lesson.id)}
-                                    className="p-1 rounded-lg text-muted-foreground hover:text-red-500 transition-colors shrink-0"
-                                  >
-                                    <Trash2 className="h-3.5 w-3.5" />
-                                  </button>
-                                  </div>{/* /right */}
+                                    <button
+                                      onClick={() => lesson.type === "exam"
+                                        ? openExamEditor(chapter.id, session.id, lesson)
+                                        : setLessonModal({ chapterId: chapter.id, sessionId: session.id, lesson })}
+                                      title="Chỉnh sửa"
+                                      className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-accent hover:text-primary"
+                                    >
+                                      <Edit2 className="h-4 w-4" />
+                                    </button>
+                                    <button
+                                      onClick={() => deleteLesson(chapter.id, session.id, lesson.id)}
+                                      title="Xoá"
+                                      className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-900/10"
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                    </button>
+                                  </div>
                                 </div>
                               </div>
                             );
