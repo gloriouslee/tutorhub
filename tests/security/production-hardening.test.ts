@@ -26,7 +26,10 @@ test("teacher grading views keep submitted work visible for online and file assi
   const homeworkTab = await read("src/components/teacher/HomeworkTab.tsx");
   const fileGrader = await read("src/components/teacher/FileSubmissionGradingView.tsx");
 
-  assert.match(curriculum, /examResultsLoaded && targetId in examResultsMap/);
+  assert.match(curriculum, /submissionSnapshotLoaded && targetId in examResultsMap/);
+  assert.match(curriculum, /lesson\?\.type === "homework" && submissionSnapshotLoaded/);
+  assert.match(curriculum, /<FileSubmissionGradingView/);
+  assert.match(curriculum, /Bài nộp/);
   assert.match(examGrader, /setResults\(initialResults\)/);
   assert.match(examGrader, /initialResults\.some\(\(result\) => result\.student_id === selectedId\)/);
   assert.match(homeworkTab, /<FileSubmissionGradingView/);

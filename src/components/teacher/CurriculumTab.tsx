@@ -12,9 +12,11 @@ import {
 } from "@/lib/storage";
 import { getTeacherSubmissionSnapshot } from "@/lib/teacher-submissions";
 import { useWindowFocusRevision } from "@/hooks/useWindowFocusRevision";
+import type { SubmissionRecord } from "@/lib/supabase/submissions";
 import { uploadClassFile } from "@/lib/upload";
 import ExamEditorModal from "@/components/teacher/ExamEditorModal";
 import ExamGradingView from "@/components/teacher/ExamGradingView";
+import FileSubmissionGradingView from "@/components/teacher/FileSubmissionGradingView";
 import { arrayMove, useSortable } from "@/components/teacher/useSortable";
 import {
   Plus, ChevronDown, ChevronRight, Trash2, Edit2, X, Check,
@@ -561,6 +563,10 @@ export default function CurriculumTab({ classId, schedule, students = [], gradeL
     lessonId: string;
     lessonTitle: string;
   } | null>(null);
+  const [fileGradingView, setFileGradingView] = useState<{
+    lessonId: string;
+    lessonTitle: string;
+  } | null>(null);
 
   // Trình soạn bài thi đồng bộ với URL (?editExam=) để reload / back giữ nguyên
   // giao diện soạn bài thay vì rơi về danh sách curriculum.
@@ -617,12 +623,13 @@ export default function CurriculumTab({ classId, schedule, students = [], gradeL
   }, [classId]);
 
   const [examResultsMap, setExamResultsMap] = useState<Record<string, StoredExamResult[]>>({});
-  const [examResultsLoaded, setExamResultsLoaded] = useState(false);
+  const [fileSubmissions, setFileSubmissions] = useState<SubmissionRecord[]>([]);
+  const [submissionSnapshotLoaded, setSubmissionSnapshotLoaded] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      setExamResultsLoaded(false);
+      setSubmissionSnapshotLoaded(false);
       const exams = chapters.flatMap(ch => ch.sessions).flatMap(session => session.lessons).filter(lesson => lesson.type === "exam");
       try {
         const snapshot = await getTeacherSubmissionSnapshot(classId);
@@ -631,12 +638,13 @@ export default function CurriculumTab({ classId, schedule, students = [], gradeL
         ) as Record<string, StoredExamResult[]>;
         if (!cancelled) {
           setExamResultsMap(map);
-          setExamResultsLoaded(true);
+          setFileSubmissions(snapshot.fileSubmissions);
+          setSubmissionSnapshotLoaded(true);
         }
       } catch {
         // Do not mark an API failure as a successfully loaded empty result set.
         // The focus revision below will retry when the teacher returns to the tab.
-        if (!cancelled) setExamResultsLoaded(false);
+        if (!cancelled) setSubmissionSnapshotLoaded(false);
       }
     })();
     return () => { cancelled = true; };
@@ -651,6 +659,14 @@ export default function CurriculumTab({ classId, schedule, students = [], gradeL
     setGradingView(null);
     setExamParams({ grade: null });
   }
+  function openFileGrading(lessonId: string, lessonTitle: string) {
+    setFileGradingView({ lessonId, lessonTitle });
+    setExamParams({ grade: lessonId });
+  }
+  function closeFileGrading() {
+    setFileGradingView(null);
+    setExamParams({ grade: null });
+  }
 
   // Mở thẳng trình chấm cho một bài — từ nút "Xem & chấm" (prop gradeLessonId) HOẶC
   // khôi phục từ URL sau reload (?grade=). Chỉ mở khi kết quả đã nạp xong để
@@ -663,14 +679,18 @@ export default function CurriculumTab({ classId, schedule, students = [], gradeL
   useEffect(() => {
     const targetId = gradeLessonId ?? urlGradeId;
     if (!targetId || gradingOpenedRef.current) return;
-    const lesson = chapters.flatMap(ch => ch.sessions.flatMap(s => s.lessons)).find(l => l.id === targetId && l.type === "exam");
-    if (lesson && examResultsLoaded && targetId in examResultsMap) {
+    const lesson = chapters.flatMap(ch => ch.sessions.flatMap(s => s.lessons)).find(l => l.id === targetId);
+    if (lesson?.type === "exam" && submissionSnapshotLoaded && targetId in examResultsMap) {
       gradingOpenedRef.current = true;
       openGrading(lesson.id, lesson.title);
       onGradingOpened?.();
+    } else if (lesson?.type === "homework" && submissionSnapshotLoaded) {
+      gradingOpenedRef.current = true;
+      openFileGrading(lesson.id, lesson.title);
+      onGradingOpened?.();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gradeLessonId, urlGradeId, chapters, examResultsLoaded, examResultsMap]);
+  }, [gradeLessonId, urlGradeId, chapters, submissionSnapshotLoaded, examResultsMap]);
 
   // Merge-safe persist: apply the SAME pure mutation to local state AND to the
   // fresh document read right before writing (mutateCurriculum → kvUpdate),
@@ -1208,6 +1228,9 @@ export default function CurriculumTab({ classId, schedule, students = [], gradeL
                             const isExam = lesson.type === "exam";
                             const examStatus = lesson.exam_status ?? "draft";
                             const examResults = isExam ? (examResultsMap[lesson.id] ?? []) : [];
+                            const homeworkSubmissions = lesson.type === "homework"
+                              ? fileSubmissions.filter(submission => submission.homework_id === lesson.id)
+                              : [];
 
                             // Mọi thông tin phụ dồn về MỘT dòng, để mọi hàng cao bằng nhau
                             // dù loại nội dung khác nhau. Không dùng emoji: nó làm bảng
@@ -1290,6 +1313,18 @@ export default function CurriculumTab({ classId, schedule, students = [], gradeL
                                           <Users className="h-3 w-3" /> Kết quả
                                           <span className="rounded-full bg-primary/20 px-1.5 leading-4">
                                             {examResults.length}
+                                          </span>
+                                        </button>
+                                      )}
+                                      {lesson.type === "homework" && (
+                                        <button
+                                          onClick={() => openFileGrading(lesson.id, lesson.title)}
+                                          title={`Xem và chấm bài nộp (${homeworkSubmissions.length} bài nộp)`}
+                                          className="flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary transition-colors hover:bg-primary/20"
+                                        >
+                                          <Users className="h-3 w-3" /> Bài nộp
+                                          <span className="rounded-full bg-primary/20 px-1.5 leading-4">
+                                            {homeworkSubmissions.length}
                                           </span>
                                         </button>
                                       )}
@@ -1425,6 +1460,29 @@ export default function CurriculumTab({ classId, schedule, students = [], gradeL
             initialResults={examResultsMap[gradingView.lessonId] ?? []}
             onClose={closeGrading}
             onResultsChange={results => setExamResultsMap(prev => ({ ...prev, [gradingView.lessonId]: results }))}
+          />
+        );
+      })()}
+
+      {/* File-homework grading — same full-screen workflow as online exams */}
+      {fileGradingView && (() => {
+        const homeworkLesson = chapters
+          .flatMap(ch => ch.sessions.flatMap(s => s.lessons))
+          .find(lesson => lesson.id === fileGradingView.lessonId && lesson.type === "homework");
+        const assignedStudents = homeworkLesson?.assigned_to?.length
+          ? students.filter(student => homeworkLesson.assigned_to?.includes(student.id))
+          : students;
+        return (
+          <FileSubmissionGradingView
+            classId={classId}
+            homeworkTitle={fileGradingView.lessonTitle}
+            submissions={fileSubmissions.filter(submission => submission.homework_id === fileGradingView.lessonId)}
+            assignedStudents={assignedStudents}
+            loading={!submissionSnapshotLoaded}
+            onClose={closeFileGrading}
+            onGraded={(submissionId, patch) => setFileSubmissions(current => current.map(submission => (
+              submission.id === submissionId ? { ...submission, ...patch } : submission
+            )))}
           />
         );
       })()}
