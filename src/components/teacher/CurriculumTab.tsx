@@ -1204,8 +1204,8 @@ export default function CurriculumTab({ classId, schedule, students = [], gradeL
                             // nội dung trông như ghi chú cá nhân hơn là trang quản lý.
                             const metaParts: string[] = [];
                             if (lesson.description) metaParts.push(lesson.description);
-                            if (lesson.type === "homework") metaParts.push("Học sinh nộp file");
-                            if (isExam) metaParts.push("Làm trên hệ thống");
+                            // "Nộp file" / "Trên hệ thống" tách thành badge có icon+màu bên dưới,
+                            // không còn nằm trong dòng chữ phụ.
                             if (lesson.type === "solution" && lesson.linked_homework_id) {
                               metaParts.push(`Chữa cho: ${lessonTitleById[lesson.linked_homework_id] ?? "(bài tập đã xoá)"}`);
                             }
@@ -1247,6 +1247,18 @@ export default function CurriculumTab({ classId, schedule, students = [], gradeL
 
                                   {/* Nhãn trạng thái — gọn trong một cụm, không đẩy chiều cao hàng */}
                                   <div className="hidden shrink-0 items-center gap-1.5 md:flex">
+                                    {/* Cách nộp bài: badge có icon + màu riêng cho từng kiểu, thay vì
+                                        chữ thường lẫn trong dòng mô tả. */}
+                                    {lesson.type === "homework" && (
+                                      <span className="flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
+                                        <Upload className="h-3 w-3" /> Nộp file
+                                      </span>
+                                    )}
+                                    {isExam && (
+                                      <span className="flex items-center gap-1 rounded-full bg-rose-100 px-2 py-0.5 text-[11px] font-medium text-rose-700 dark:bg-rose-900/30 dark:text-rose-400">
+                                        <PenSquare className="h-3 w-3" /> Trên hệ thống
+                                      </span>
+                                    )}
                                     {lesson.is_published && lesson.assigned_to && lesson.assigned_to.length > 0 && (
                                       <span
                                         className="flex items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 text-[11px] font-medium text-violet-700 dark:bg-violet-900/30 dark:text-violet-400"
