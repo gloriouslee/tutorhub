@@ -17,8 +17,30 @@ import { resolvePortalBranding } from "../../src/lib/portal-branding";
 import { curriculumReferencesStudentFile } from "../../src/lib/curriculum-file-access";
 import { parseExamText } from "../../src/lib/examTextParser";
 import { convertOmmlInDocumentXml, ommlFragmentToLatex } from "../../src/lib/ommlToLatex";
+import { googleDrivePreviewUrl } from "../../src/lib/google-drive";
 
 const read = (path: string) => readFile(path, "utf8");
+
+test("Google Drive document and video links open in the in-app learning player", async () => {
+  assert.equal(
+    googleDrivePreviewUrl("https://drive.google.com/file/d/1qb0q4qTNvpu7lHNziwO3gh_-Ed3I9J_2/view?usp=sharing"),
+    "https://drive.google.com/file/d/1qb0q4qTNvpu7lHNziwO3gh_-Ed3I9J_2/preview",
+  );
+  assert.equal(
+    googleDrivePreviewUrl("https://drive.google.com/open?id=abc_123&resourcekey=secret-key"),
+    "https://drive.google.com/file/d/abc_123/preview?resourcekey=secret-key",
+  );
+  assert.equal(googleDrivePreviewUrl("https://drive.google.com/drive/folders/abc_123"), null);
+  assert.equal(googleDrivePreviewUrl("https://example.com/file/d/abc_123/view"), null);
+
+  const player = await read("src/components/student/ClassLearningPlayer.tsx");
+  const proxy = await read("src/proxy.ts");
+  assert.match(player, /const drivePreviewUrl = googleDrivePreviewUrl\(activeLesson\.file_url\)/);
+  assert.match(player, /const driveVideoPreviewUrl = googleDrivePreviewUrl\(activeLesson\.video_url\)/);
+  assert.match(player, /src=\{driveVideoPreviewUrl\}/);
+  assert.match(player, /src=\{documentPreviewUrl\}/);
+  assert.match(proxy, /frame-src[^\n]+https:\/\/drive\.google\.com[^\n]+https:\/\/docs\.google\.com/);
+});
 
 test("teacher grading views keep submitted work visible for online and file assignments", async () => {
   const curriculum = await read("src/components/teacher/CurriculumTab.tsx");

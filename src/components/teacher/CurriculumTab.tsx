@@ -287,9 +287,10 @@ function LessonModal({
               <input
                 value={videoUrl}
                 onChange={e => setVideoUrl(e.target.value)}
-                placeholder="https://youtube.com/watch?v=..."
+                placeholder="YouTube hoặc link file Google Drive"
                 className="w-full h-9 rounded-xl border border-border bg-background px-3 text-sm font-mono outline-none focus:ring-2 focus:ring-primary/40"
               />
+              <p className="mt-1 text-[11px] text-muted-foreground">Google Drive: đặt quyền “Bất kỳ ai có đường liên kết – Người xem” để phát ngay trong trình học.</p>
             </div>
           )}
 
@@ -334,7 +335,7 @@ function LessonModal({
                 <input
                   value={fileUrl}
                   onChange={e => setFileUrl(e.target.value)}
-                  placeholder="https://... hoặc /uploads/file.pdf"
+                  placeholder="Link Google Drive, URL PDF hoặc /uploads/file.pdf"
                   className="w-full h-9 rounded-xl border border-border bg-background px-3 text-sm font-mono outline-none focus:ring-2 focus:ring-primary/40"
                 />
               ) : (

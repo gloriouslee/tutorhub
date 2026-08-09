@@ -14,6 +14,7 @@ import {
 import { getSubmissionsByStudent, type SubmissionRecord } from "@/lib/supabase/submissions";
 import { useStudentContext } from "@/hooks/useStudentContext";
 import { useStudentCurriculum } from "@/hooks/useStudentCurriculum";
+import { googleDrivePreviewUrl } from "@/lib/google-drive";
 import StudentExamPlayer from "@/components/student/StudentExamPlayer";
 import HomeworkSubmissionPanel from "@/components/student/HomeworkSubmissionPanel";
 import {
@@ -518,8 +519,15 @@ export default function ClassLearningPlayer({ classId, requestedLessonId }: Prop
   const videoUrl = safeMediaUrl(activeLesson.video_url);
   const youtubeUrl = youtubeEmbedUrl(activeLesson.video_url);
   const youtubeExternalUrl = youtubeWatchUrl(activeLesson.video_url);
+  const driveVideoPreviewUrl = googleDrivePreviewUrl(activeLesson.video_url);
   const fileUrl = safeMediaUrl(activeLesson.file_url);
-  const isPdf = Boolean(fileUrl && (/\.pdf(?:$|\?)/i.test(fileUrl) || activeLesson.file_url?.includes("type=application%2Fpdf")));
+  const drivePreviewUrl = googleDrivePreviewUrl(activeLesson.file_url);
+  const documentPreviewUrl = drivePreviewUrl ?? fileUrl;
+  const isPdf = Boolean(documentPreviewUrl && (
+    drivePreviewUrl
+    || /\.pdf(?:$|\?)/i.test(documentPreviewUrl)
+    || activeLesson.file_url?.includes("type=application%2Fpdf")
+  ));
   const directVideo = Boolean(videoUrl && !youtubeUrl && /\.(mp4|webm|ogg)(?:$|\?)/i.test(videoUrl));
   const ActiveIcon = activeMeta?.icon ?? BookOpen;
   const activeSubmission = submissions.find(
@@ -605,6 +613,17 @@ export default function ClassLearningPlayer({ classId, requestedLessonId }: Prop
                   allowFullScreen
                 />
               </div>
+            ) : driveVideoPreviewUrl ? (
+              <div className="relative mx-auto aspect-video w-full max-w-[1280px]">
+                <iframe
+                  className="absolute inset-0 h-full w-full"
+                  src={driveVideoPreviewUrl}
+                  title={activeLesson.title}
+                  allow="autoplay; fullscreen"
+                  referrerPolicy="strict-origin-when-cross-origin"
+                  allowFullScreen
+                />
+              </div>
             ) : directVideo && videoUrl ? (
               <video
                 className="mx-auto aspect-video max-h-[calc(100dvh-190px)] w-full max-w-[1280px] bg-black"
@@ -612,11 +631,13 @@ export default function ClassLearningPlayer({ classId, requestedLessonId }: Prop
                 preload="metadata"
                 src={videoUrl}
               />
-            ) : activeLesson.type === "material" && isPdf && fileUrl ? (
+            ) : activeLesson.type === "material" && isPdf && documentPreviewUrl ? (
               <iframe
                 className="h-[calc(100dvh-230px)] min-h-[420px] w-full bg-white"
-                src={fileUrl}
+                src={documentPreviewUrl}
                 title={activeLesson.title}
+                allow="autoplay"
+                referrerPolicy="strict-origin-when-cross-origin"
               />
             ) : (
               <div className="flex min-h-[clamp(280px,55vh,620px)] items-center justify-center bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 px-6 text-center">
