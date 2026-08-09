@@ -11,11 +11,16 @@ import { LearningModeBadge } from "@/components/shared";
 import { getSubmissionsByStudent, type SubmissionRecord } from "@/lib/supabase/submissions";
 import { kvGet, getTeacherHomework, getAllTeacherAttendance, getClassScheduleOverride, getStudentPackages, getStudentLessonProgress, saveStudentLessonProgress, getClassMaterials, getExamResult, getExamScoresByStudent, incrementMaterialDownload, isAssignedToStudent, type StudentPackage, type CurriculumSession, type StoredClassMaterial, type StoredExamScore } from "@/lib/storage";
 import CurriculumView from "@/components/student/CurriculumView";
-import StudentHomeworkTab from "@/components/student/StudentHomeworkTab";
 import StudentOverviewTab from "@/components/student/StudentOverviewTab";
+import StudentHomeworkTab from "@/components/student/StudentHomeworkTab";
 import { useStudentCurriculum } from "@/hooks/useStudentCurriculum";
 import type { Class } from "@/types";
+import { weekdayIndex, weekdayLabelVi } from "@/lib/weekday";
 import { resolveStudentClassWorkspace, type CurriculumContentFilter } from "@/lib/class-workspace-tabs";
+
+function weekdayLabelViOrEmpty(day: string | undefined): string {
+  return day ? weekdayLabelVi(day) : "";
+}
 import {
   BookOpen, Clock, Video, ArrowLeft, FileText, Download,
   PlayCircle, StickyNote, Pin, Eye, ChevronRight, GraduationCap,
@@ -43,13 +48,6 @@ const ATTENDANCE_META: Record<AttendanceStatus, { label: string; icon: React.Ele
   absent:  { label: "Vắng",   icon: UserX,      color: "text-red-700 dark:text-red-400",         bg: "bg-red-100 dark:bg-red-900/30" },
 };
 
-const DAY_INDEX: Record<string, number> = {
-  Sunday: 0, Monday: 1, Tuesday: 2, Wednesday: 3,
-  Thursday: 4, Friday: 5, Saturday: 6,
-  // Vietnamese day names (used by teacher schedule overrides)
-  "Thứ 2": 1, "Thứ 3": 2, "Thứ 4": 3, "Thứ 5": 4,
-  "Thứ 6": 5, "Thứ 7": 6, "Chủ nhật": 0,
-};
 
 function generateSessionDates(
   schedules: { day: string; start_time: string; end_time: string }[],
@@ -64,7 +62,7 @@ function generateSessionDates(
   while (cur <= end) {
     const dow = cur.getDay();
     for (const s of schedules) {
-      if (DAY_INDEX[s.day] === dow) {
+      if (weekdayIndex(s.day) === dow) {
         results.push({ date: toLocalDateKey(cur), start_time: s.start_time, end_time: s.end_time });
       }
     }
@@ -82,13 +80,6 @@ function loadSavedAttendance(classId: string, studentId: string): Promise<SavedA
 
 type TabKey = "overview" | "curriculum" | "sessions" | "attendance" | "homework" | "materials" | "lectures" | "notes";
 
-const DAY_VI: Record<string, string> = {
-  Monday: "Thứ Hai", Tuesday: "Thứ Ba", Wednesday: "Thứ Tư",
-  Thursday: "Thứ Năm", Friday: "Thứ Sáu", Saturday: "Thứ Bảy", Sunday: "Chủ Nhật",
-  // Vietnamese day names (teacher overrides) — display as-is
-  "Thứ 2": "Thứ 2", "Thứ 3": "Thứ 3", "Thứ 4": "Thứ 4", "Thứ 5": "Thứ 5",
-  "Thứ 6": "Thứ 6", "Thứ 7": "Thứ 7", "Chủ nhật": "Chủ nhật",
-};
 
 const CATEGORY_MAP: Record<string, { label: string; color: string }> = {
   formula:  { label: "Công thức", color: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" },
@@ -754,7 +745,7 @@ export default function StudentClassDetailPage() {
                     const upCurrSession = curriculumByDate[s.date];
                     const upNote = sessionNotes[s.date];
                     const dateObj = new Date(s.date + "T12:00:00");
-                    const dayName = DAY_VI[schedule.find(sc => DAY_INDEX[sc.day] === dateObj.getDay())?.day ?? ""] ?? "";
+                    const dayName = weekdayLabelViOrEmpty(schedule.find(sc => weekdayIndex(sc.day) === dateObj.getDay())?.day);
                     return (
                       <div key={s.date} className="rounded-xl border border-primary/30 bg-primary/5 overflow-hidden">
                         <div className="flex items-center gap-4 p-4">
@@ -805,7 +796,7 @@ export default function StudentClassDetailPage() {
                       ? classHomework.filter(hw => hw.session_id === currSession.id)
                       : [];
                     const sessionDateObj = new Date(session.date + "T12:00:00");
-                    const dayName = DAY_VI[schedule.find(sc => DAY_INDEX[sc.day] === sessionDateObj.getDay())?.day ?? ""] ?? "";
+                    const dayName = weekdayLabelViOrEmpty(schedule.find(sc => weekdayIndex(sc.day) === sessionDateObj.getDay())?.day);
                     return (
                       <Card key={session.date} className="overflow-hidden">
                         <CardContent className="p-0">
@@ -1250,7 +1241,7 @@ export default function StudentClassDetailPage() {
                                   </div>
                                   <div>
                                     <p className="font-semibold text-foreground text-sm">
-                                      {DAY_VI[schedule.find(sc => DAY_INDEX[sc.day] === dateObj.getDay())?.day ?? ""] || ""} {dateObj.toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit", year: "numeric" })}
+                                      {weekdayLabelViOrEmpty(schedule.find(sc => weekdayIndex(sc.day) === dateObj.getDay())?.day)} {dateObj.toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit", year: "numeric" })}
                                     </p>
                                     <p className="text-xs text-muted-foreground mt-0.5">{cls.subject}</p>
                                   </div>

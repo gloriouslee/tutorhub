@@ -1200,15 +1200,17 @@ export async function updateInvoiceStatus(
 
 /** Giáo viên phát hành hóa đơn học phí cho một học sinh trong lớp (idempotent theo id). */
 export async function submitInvoiceReceipt(
-  invoiceId: string,
+  invoiceId: string | string[],
   childId: string | undefined,
   receiptPath: string,
 ): Promise<void> {
+  const invoiceIds = Array.isArray(invoiceId) ? [...new Set(invoiceId)] : null;
   const response = await fetch("/api/payments/invoices", {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      invoice_id: invoiceId,
+      invoice_id: invoiceIds ? undefined : invoiceId,
+      invoice_ids: invoiceIds ?? undefined,
       child_id: childId,
       action: "submit_receipt",
       receipt_path: receiptPath,

@@ -210,8 +210,17 @@ export default function Sidebar({
   // Danh sách con (chỉ dùng khi role = parent) — nguồn sự kiện thông báo
   const studentId = accountContext?.role === "student" ? accountContext.studentId : "";
   const myClasses = accountContext?.role === "student" ? accountContext.classes : [];
-  const portalBranding =
-    accountContext?.role === "student" || accountContext?.role === "teacher"
+  const activeStudentClassId = role === "student"
+    ? pathname.match(/^\/student\/classes\/([^/]+)/)?.[1]
+    : undefined;
+  const activeStudentTeacherId = activeStudentClassId
+    ? myClasses.find((item) => item.id === activeStudentClassId)?.tutor_id
+    : undefined;
+  const portalBranding = accountContext?.role === "student"
+    ? activeStudentTeacherId
+      ? accountContext.teacherBrandings?.[activeStudentTeacherId] ?? accountContext.portalBranding
+      : accountContext.portalBranding
+    : accountContext?.role === "teacher"
       ? accountContext.portalBranding
       : DEFAULT_PORTAL_BRANDING;
   const [logoFailed, setLogoFailed] = useState(false);

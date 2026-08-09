@@ -28,6 +28,22 @@ async function loadPortalBranding(
   return resolvePortalBranding(data?.value, teacherId);
 }
 
+async function loadPortalBrandings(
+  admin: ReturnType<typeof createAdminClient>,
+  teacherIds: string[],
+): Promise<Record<string, PortalBranding>> {
+  if (teacherIds.length === 0) return {};
+  const { data, error } = await admin
+    .from("kv_teacher_settings")
+    .select("id,value")
+    .in("id", teacherIds);
+  if (error) return {};
+  return Object.fromEntries((data ?? []).map((row) => {
+    const teacherId = String(row.id);
+    return [teacherId, resolvePortalBranding(row.value, teacherId)];
+  }));
+}
+
 async function attachTutorNames(
   admin: ReturnType<typeof createAdminClient>,
   classes: Record<string, unknown>[],
@@ -79,10 +95,8 @@ export async function GET(req: NextRequest) {
       admin,
       (classes ?? []) as Record<string, unknown>[],
     );
-    const primaryTeacherId = hydratedClasses[0]?.tutor_id
-      ? String(hydratedClasses[0].tutor_id)
-      : undefined;
-    const portalBranding = await loadPortalBranding(admin, primaryTeacherId);
+    const teacherIds = [...new Set(hydratedClasses.map((item) => String(item.tutor_id ?? "")).filter(Boolean))];
+    const teacherBrandings = await loadPortalBrandings(admin, teacherIds);
     return NextResponse.json(
       {
         role: identity.role,
@@ -90,7 +104,11 @@ export async function GET(req: NextRequest) {
         studentName: identity.displayName,
         classes: hydratedClasses,
         assignedClassId: hydratedClasses[0]?.id ?? "",
-        portalBranding,
+        // Global student pages can aggregate classes from many teachers, so
+        // they must not inherit the logo/name of whichever class happens to be first.
+        portalBranding: DEFAULT_PORTAL_BRANDING,
+        // Class workspaces may still show the identity of that class's teacher.
+        teacherBrandings,
         avatarUrl: identity.avatarUrl,
       },
       PRIVATE_NO_STORE,

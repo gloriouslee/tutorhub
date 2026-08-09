@@ -7,6 +7,11 @@ import { Badge } from "@/components/ui/badge";
 import { SectionHeader, ProgressBar } from "@/components/shared";
 import { GraduationCap, TrendingUp, Trophy, Target, BookOpen, ChevronDown, Pencil, Check, X } from "lucide-react";
 import { useStudentContext } from "@/hooks/useStudentContext";
+import StudentScopeBar, {
+  ALL_STUDENT_SCOPE,
+  classMatchesStudentScope,
+  useStudentWorkspaceScope,
+} from "@/components/student/StudentScopeBar";
 import { getExamScoresByStudent, getStudentCurriculum, getExamResult, type StoredExamScore } from "@/lib/storage";
 import { formatDate } from "@/lib/utils";
 import {
@@ -45,8 +50,14 @@ function letterGrade(avg: number): string {
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function StudentScoresPage() {
   const { studentId, studentName, myClasses } = useStudentContext();
-  const gpaTarget_KEY = `tutorhub_gpa_target_${studentId}`;
-  const [classFilter,  setClassFilter]  = useState<string>("all");
+  const { scope, setScope } = useStudentWorkspaceScope(myClasses);
+  const membershipKey = myClasses.map((item) => item.id).join(",");
+  const targetScopeKey = scope.classId !== ALL_STUDENT_SCOPE
+    ? `class_${scope.classId}`
+    : scope.teacherId !== ALL_STUDENT_SCOPE
+      ? `teacher_${scope.teacherId}`
+      : "all";
+  const gpaTargetKey = `tutorhub_gpa_target_${studentId}_${targetScopeKey}`;
   const [showAll,      setShowAll]      = useState(false);
   const [gpaTarget,    setGpaTarget]    = useState(DEFAULT_TARGET);
   const [editingGoal,  setEditingGoal]  = useState(false);
@@ -56,30 +67,24 @@ export default function StudentScoresPage() {
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem(gpaTarget_KEY);
-      if (saved) { const v = parseFloat(saved); if (!isNaN(v)) setGpaTarget(v); }
-    } catch {}
     getExamScoresByStudent(studentId).then(setStoredScores);
 
     // Merge results from exams the student actually took using the scoped
     // curriculum endpoint; class requests run in parallel.
     (async () => {
-      const found: StoredExamScore[] = [];
       const classResults = await Promise.all(myClasses.map(async (cls) => {
-        const chapters = await getStudentCurriculum(cls.id);
+        const chapters = await getStudentCurriculum(cls.id).catch(() => []);
         const examLessons = chapters
           .flatMap(ch => ch.sessions)
           .flatMap(sess => sess.lessons)
           .filter(l => l.type === "exam");
         const results = await Promise.all(
-          examLessons.map(l => getExamResult(cls.id, l.id, studentId))
+          examLessons.map(l => getExamResult(cls.id, l.id, studentId).catch(() => null))
         );
         const scores: StoredExamScore[] = [];
         examLessons.forEach((lesson, i) => {
           const rec = results[i];
           if (!rec) return;
-          // Điểm hiển thị = tự động + điểm chấm tay (tự luận), giống trang làm bài
           const manualSum = Object.values(rec.manual_scores ?? {}).reduce((a, b) => a + b, 0);
           scores.push({
             id:         `tutorhub_exam_result_${cls.id}_${lesson.id}_${studentId}`,
@@ -93,11 +98,24 @@ export default function StudentScoresPage() {
         });
         return scores;
       }));
-      found.push(...classResults.flat());
-      setTakenExams(found);
+      setTakenExams(classResults.flat());
     })();
+    // membershipKey captures classes added/removed while the student stays signed in.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [studentId, gpaTarget_KEY]);
+  }, [studentId, membershipKey]);
+
+  useEffect(() => {
+    let target = DEFAULT_TARGET;
+    try {
+      const saved = localStorage.getItem(gpaTargetKey);
+      if (saved) {
+        const value = parseFloat(saved);
+        if (!Number.isNaN(value)) target = value;
+      }
+    } catch {}
+    setGpaTarget(target);
+    setDraftTarget(target);
+  }, [gpaTargetKey]);
 
   function startEdit() {
     setDraftTarget(gpaTarget);
@@ -109,7 +127,7 @@ export default function StudentScoresPage() {
     const v = Math.min(10, Math.max(0, Math.round(draftTarget * 10) / 10));
     setGpaTarget(v);
     setEditingGoal(false);
-    try { localStorage.setItem(gpaTarget_KEY, String(v)); } catch {}
+    try { localStorage.setItem(gpaTargetKey, String(v)); } catch {}
   }
 
   function cancelEdit() { setEditingGoal(false); }
@@ -119,31 +137,34 @@ export default function StudentScoresPage() {
     const combined = [...storedScores, ...takenExams];
     const seen = new Set<string>();
     return combined
-      .filter(s => { if (seen.has(s.id)) return false; seen.add(s.id); return true; })
+      .filter(s => {
+        const key = `${s.class_id}:${s.id}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
       .sort((a, b) => new Date(b.exam_date).getTime() - new Date(a.exam_date).getTime());
   }, [storedScores, takenExams]);
 
-
-  // Filtered list
-  const filtered = useMemo(
-    () => classFilter === "all" ? allScores : allScores.filter(s => s.class_id === classFilter),
-    [allScores, classFilter]
-  );
+  const visibleClasses = myClasses.filter((cls) => classMatchesStudentScope(cls, scope));
+  const filtered = useMemo(() => allScores.filter((score) => (
+    classMatchesStudentScope(myClasses.find((cls) => cls.id === score.class_id), scope)
+  )), [allScores, myClasses, scope]);
   const displayed = showAll ? filtered : filtered.slice(0, 6);
 
-  // Overall stats (normalized to a 10-point scale)
-  const avgScore = allScores.length
-    ? Number((allScores.reduce((acc, s) => acc + norm(s), 0) / allScores.length).toFixed(1))
+  // Stats always follow the selected teacher/class scope.
+  const avgScore = filtered.length
+    ? Number((filtered.reduce((acc, s) => acc + norm(s), 0) / filtered.length).toFixed(1))
     : 0;
 
-  const highestScore = allScores.length ? Math.max(...allScores.map(norm)) : 0;
-  const lowestScore  = allScores.length ? Math.min(...allScores.map(norm)) : 0;
+  const highestScore = filtered.length ? Math.max(...filtered.map(norm)) : 0;
+  const lowestScore  = filtered.length ? Math.min(...filtered.map(norm)) : 0;
 
   const gapToTarget = Math.max(0, gpaTarget - avgScore);
 
   // Radar: average per class → one data point per class
-  const radarData = myClasses.map(cls => {
-    const clsScores = allScores.filter(s => s.class_id === cls.id);
+  const radarData = visibleClasses.map(cls => {
+    const clsScores = filtered.filter(s => s.class_id === cls.id);
     const clsAvg    = clsScores.length
       ? Number((clsScores.reduce((a, s) => a + norm(s), 0) / clsScores.length).toFixed(1))
       : 0;
@@ -152,8 +173,8 @@ export default function StudentScoresPage() {
   });
 
   // Per-class breakdown for sidebar
-  const classBreakdown = myClasses.map(cls => {
-    const recs   = allScores.filter(s => s.class_id === cls.id);
+  const classBreakdown = visibleClasses.map(cls => {
+    const recs   = filtered.filter(s => s.class_id === cls.id);
     const avg    = recs.length ? Number((recs.reduce((a, s) => a + norm(s), 0) / recs.length).toFixed(1)) : 0;
     const best   = recs.length ? Math.max(...recs.map(norm)) : 0;
     return { cls, recs: recs.length, avg, best, teacherName: cls.tutor_name };
@@ -166,8 +187,10 @@ export default function StudentScoresPage() {
       <div className="space-y-6 max-w-6xl mx-auto">
         <SectionHeader
           title="Bảng điểm cá nhân"
-          subtitle="Theo dõi thành tích và đánh giá năng lực qua các kỳ thi"
+          subtitle="Theo dõi kết quả riêng theo từng giáo viên, lớp học hoặc xem tổng hợp"
         />
+
+        <StudentScopeBar classes={myClasses} scope={scope} onChange={setScope} />
 
         {/* ── Summary cards ────────────────────────────── */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -193,9 +216,9 @@ export default function StudentScoresPage() {
                 <p className="text-muted-foreground font-medium text-sm">Tổng bài thi</p>
                 <div className="p-2 bg-primary/10 text-primary rounded-lg"><BookOpen className="h-4 w-4" /></div>
               </div>
-              <h2 className="text-4xl font-bold">{allScores.length}</h2>
+              <h2 className="text-4xl font-bold">{filtered.length}</h2>
               <p className="text-xs text-muted-foreground mt-2">
-                Trải dài {myClasses.length} lớp học
+                Trong {visibleClasses.length} lớp đang chọn
               </p>
             </CardContent>
           </Card>
@@ -206,7 +229,7 @@ export default function StudentScoresPage() {
               <div className="flex-1 p-5 border-r border-border">
                 <div className="flex items-center justify-between mb-2">
                   <h3 className="font-semibold flex items-center gap-2 text-sm">
-                    <Target className="h-4 w-4 text-amber-500" /> Mục tiêu GPA
+                    <Target className="h-4 w-4 text-amber-500" /> Mục tiêu điểm theo phạm vi
                   </h3>
                   {!editingGoal ? (
                     <button
@@ -268,27 +291,7 @@ export default function StudentScoresPage() {
           <div className="lg:col-span-2 space-y-4">
             <div className="flex items-center justify-between flex-wrap gap-3">
               <h3 className="font-bold text-lg">Chi tiết điểm thi</h3>
-              {/* Class filter */}
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <button
-                  onClick={() => setClassFilter("all")}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${classFilter === "all" ? "bg-primary text-primary-foreground shadow-sm" : "bg-muted text-muted-foreground hover:text-foreground"}`}
-                >
-                  Tất cả ({allScores.length})
-                </button>
-                {myClasses.map(cls => {
-                  const cnt = allScores.filter(s => s.class_id === cls.id).length;
-                  return (
-                    <button
-                      key={cls.id}
-                      onClick={() => setClassFilter(cls.id)}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${classFilter === cls.id ? "bg-primary text-primary-foreground shadow-sm" : "bg-muted text-muted-foreground hover:text-foreground"}`}
-                    >
-                      {cls.subject.split(" ").slice(0, 2).join(" ")} ({cnt})
-                    </button>
-                  );
-                })}
-              </div>
+              <span className="rounded-full bg-muted px-3 py-1.5 text-xs font-semibold text-muted-foreground">{filtered.length} kết quả</span>
             </div>
 
             <div className="bg-card rounded-xl border border-border overflow-hidden shadow-sm">
@@ -327,7 +330,7 @@ export default function StudentScoresPage() {
                           </div>
                           <div className="min-w-0">
                             <p className="font-semibold text-sm text-foreground truncate">{score.exam_name}</p>
-                            <p className="text-[11px] text-muted-foreground truncate">{cls?.class_name ?? "Lớp học"}</p>
+                            <p className="text-[11px] text-muted-foreground truncate">{cls?.class_name ?? "Lớp học"}{cls?.tutor_name ? ` · ${cls.tutor_name}` : ""}</p>
                           </div>
                         </div>
                         <div className="col-span-3 text-center text-xs text-muted-foreground">

@@ -20,6 +20,11 @@ import {
 import { formatDate, formatCurrency } from "@/lib/utils";
 import { useStudentContext } from "@/hooks/useStudentContext";
 import { loadTeacherCourses, teacherCourseToPaidPackage } from "@/components/student/materialsShared";
+import StudentScopeBar, {
+  ALL_STUDENT_SCOPE,
+  classMatchesStudentScope,
+  useStudentWorkspaceScope,
+} from "@/components/student/StudentScopeBar";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const formatVND = formatCurrency;
@@ -41,13 +46,14 @@ function isOverdue(due_date: string) {
 // ── Types ─────────────────────────────────────────────────────────────────────
 type Invoice = TuitionInvoice;
 type ModalTarget =
-  | { kind: "invoice"; invoice: Invoice }
-  | { kind: "package"; pkgId: string; title: string; amount: number }
+  | { kind: "invoice"; invoiceIds: string[]; teacherId: string; title: string; amount: number }
+  | { kind: "package"; pkgId: string; title: string; amount: number; teacherId: string; classId?: string }
   | { kind: "policy" };
 
 // ── Inner component ───────────────────────────────────────────────────────────
 function PaymentsContent() {
   const { studentId, studentName, myClasses } = useStudentContext();
+  const { scope, setScope } = useStudentWorkspaceScope(myClasses);
   const params   = useSearchParams();
   const pkgParam = params.get("pkg");
 
@@ -57,11 +63,14 @@ function PaymentsContent() {
   const [receiptFile,    setReceiptFile]     = useState<File | null>(null);
   const [submitting,     setSubmitting]      = useState(false);
   const [submitError,    setSubmitError]     = useState("");
-  // QR + thông tin ngân hàng do giáo viên của học sinh cấu hình (Cài đặt).
-  const [teacherQR,      setTeacherQR]       = useState<TeacherSettings>({});
+  const [teacherSettings, setTeacherSettings] = useState<Record<string, TeacherSettings>>({});
+  const classById = useMemo(() => new Map(myClasses.map((cls) => [cls.id, cls])), [myClasses]);
+
   useEffect(() => {
-    const tid = myClasses.find(c => c.tutor_id)?.tutor_id;
-    if (tid) getTeacherSettings(tid).then(setTeacherQR);
+    const teacherIds = [...new Set(myClasses.map((item) => item.tutor_id).filter(Boolean))];
+    Promise.all(teacherIds.map(async (teacherId) => [teacherId, await getTeacherSettings(teacherId)] as const))
+      .then((entries) => setTeacherSettings(Object.fromEntries(entries)))
+      .catch(() => setTeacherSettings({}));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [myClasses.map(c => c.id).join(",")]);
 
@@ -81,10 +90,18 @@ function PaymentsContent() {
         );
         if (!course) return;
         const pkg = teacherCourseToPaidPackage(course);
-        setModalTarget({ kind: "package", pkgId: pkg.id, title: pkg.title, amount: pkg.price });
+        const cls = course.classId ? myClasses.find((item) => item.id === course.classId) : undefined;
+        setModalTarget({
+          kind: "package",
+          pkgId: pkg.id,
+          title: pkg.title,
+          amount: pkg.price,
+          teacherId: cls?.tutor_id ?? "",
+          classId: cls?.id,
+        });
       });
     }
-  }, [pkgParam, studentId]);
+  }, [myClasses, pkgParam, studentId]);
 
   const reload = () =>
     getTransactions().then(txs => setPkgTransactions(txs.filter(t => t.student_id === studentId)));
@@ -121,8 +138,8 @@ function PaymentsContent() {
 
       if (modalTarget.kind === "invoice") {
         await submitInvoiceReceipt(
-          modalTarget.invoice.id,
-          modalTarget.invoice.id === "ALL" ? studentId : undefined,
+          modalTarget.invoiceIds,
+          undefined,
           uploaded.path,
         );
         const list = await getInvoices();
@@ -149,53 +166,92 @@ function PaymentsContent() {
   };
 
   // ── Derived ─────────────────────────────────────────────────────────────────
-  const pendingInvoices = invoices.filter(i => i.status === "pending");
+  const invoiceMatchesScope = (invoice: Invoice) => {
+    if (!invoice.class_id) return scope.teacherId === ALL_STUDENT_SCOPE && scope.classId === ALL_STUDENT_SCOPE;
+    return classMatchesStudentScope(classById.get(invoice.class_id), scope);
+  };
+  const transactionMatchesScope = (transaction: PurchaseTransaction) => {
+    if (transaction.class_id) return classMatchesStudentScope(classById.get(transaction.class_id), scope);
+    if (scope.classId !== ALL_STUDENT_SCOPE) return false;
+    return scope.teacherId === ALL_STUDENT_SCOPE || transaction.teacher_id === scope.teacherId;
+  };
+  const scopedInvoices = invoices.filter(invoiceMatchesScope);
+  const scopedTransactions = pkgTransactions.filter(transactionMatchesScope);
+  const pendingInvoices = scopedInvoices.filter(i => i.status === "pending");
   const totalPending    = pendingInvoices.reduce((s, i) => s + i.amount, 0);
-  const invoiceHistory  = invoices.filter(i => i.status !== "pending");
-  const pendingPkgTxs   = pkgTransactions.filter(t => t.status === "pending");
-  const totalPaid       = invoices
+  const invoiceHistory  = scopedInvoices.filter(i => i.status !== "pending");
+  const pendingPkgTxs   = scopedTransactions.filter(t => t.status === "pending");
+  const totalPaid       = scopedInvoices
     .filter(i => i.status === "paid")
     .reduce((s, i) => s + i.amount, 0)
-    + pkgTransactions
+    + scopedTransactions
     .filter(t => t.status === "approved")
     .reduce((s, t) => s + t.amount, 0);
 
+  const pendingGroups = useMemo(() => {
+    const groups = new Map<string, { teacherId: string; teacherName: string; invoices: Invoice[]; amount: number }>();
+    pendingInvoices.forEach((invoice) => {
+      const cls = invoice.class_id ? classById.get(invoice.class_id) : undefined;
+      const teacherId = cls?.tutor_id ?? "unassigned";
+      const current = groups.get(teacherId) ?? {
+        teacherId,
+        teacherName: cls?.tutor_name || "Chưa xác định giáo viên",
+        invoices: [],
+        amount: 0,
+      };
+      current.invoices.push(invoice);
+      current.amount += invoice.amount;
+      groups.set(teacherId, current);
+    });
+    return [...groups.values()];
+  }, [classById, pendingInvoices]);
+
   // Unified sorted history (newest first)
   const historyItems = useMemo(() => {
-    const items: { key: string; date: string; label: string; sub: string; amount: number; status: string; type: "invoice" | "pkg" }[] = [
+    const items: { key: string; date: string; label: string; sub: string; amount: number; status: string; type: "invoice" | "pkg"; classId?: string; teacherId?: string }[] = [
       ...invoiceHistory.map(inv => ({
         key: inv.id, date: inv.paid_at ?? inv.due_date,
         label: inv.title, sub: inv.id,
         amount: inv.amount,
         status: inv.status,
         type: "invoice" as const,
+        classId: inv.class_id,
+        teacherId: inv.class_id ? classById.get(inv.class_id)?.tutor_id : undefined,
       })),
-      ...pkgTransactions.map(tx => ({
+      ...scopedTransactions.map(tx => ({
         key: tx.id, date: tx.created_at,
         label: tx.pkg_title, sub: formatDateTime(tx.created_at),
         amount: tx.amount,
         status: tx.status,
         type: "pkg" as const,
+        classId: tx.class_id,
+        teacherId: tx.teacher_id,
       })),
     ];
     return items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  }, [invoiceHistory, pkgTransactions]);
+  }, [classById, invoiceHistory, scopedTransactions]);
 
   // Modal values
   const isPolicyModal = modalTarget?.kind === "policy";
-  const modalTitle    = modalTarget?.kind === "invoice" ? modalTarget.invoice.title
+  const modalTitle    = modalTarget?.kind === "invoice" ? modalTarget.title
     : modalTarget?.kind === "package" ? modalTarget.title : "";
-  const modalAmt      = modalTarget?.kind === "invoice" ? modalTarget.invoice.amount
+  const modalAmt      = modalTarget?.kind === "invoice" ? modalTarget.amount
     : modalTarget?.kind === "package" ? modalTarget.amount : 0;
-  const modalId       = modalTarget?.kind === "invoice" ? modalTarget.invoice.id
+  const modalId       = modalTarget?.kind === "invoice" ? modalTarget.invoiceIds.join("-")
     : modalTarget?.kind === "package" ? modalTarget.pkgId : "";
+  const modalTeacherId = modalTarget && modalTarget.kind !== "policy" ? modalTarget.teacherId : "";
+  const teacherQR = teacherSettings[modalTeacherId] ?? {};
+  const modalTeacher = myClasses.find((cls) => cls.tutor_id === modalTeacherId)?.tutor_name;
+  const hasPaymentDestination = Boolean(teacherQR.qr_image_url || teacherQR.account_number);
   const transferNote  = modalTarget?.kind === "package"
     ? `TUTORHUB ${modalTarget.pkgId.toUpperCase()} ${studentId}`
-    : `TT ${modalId} ${studentName.toUpperCase().replace(/ /g, "")}`;
+    : `TT ${modalTarget?.kind === "invoice" && modalTarget.invoiceIds.length > 1 ? `NHOM${modalTarget.invoiceIds.length}` : modalId} ${studentName.toUpperCase().replace(/ /g, "")}`;
 
   return (
     <div className="space-y-6 max-w-5xl mx-auto">
-      <SectionHeader title="Quản lý Học phí" subtitle="Xem hóa đơn và thanh toán trực tuyến" />
+      <SectionHeader title="Quản lý Học phí" subtitle="Hóa đơn và người nhận được tách riêng theo từng giáo viên, lớp học" />
+
+      <StudentScopeBar classes={myClasses} scope={scope} onChange={setScope} />
 
       {/* Pending package transactions banner */}
       {pendingPkgTxs.length > 0 && (
@@ -230,13 +286,21 @@ function PaymentsContent() {
                 <Button
                   size="lg"
                   className="bg-white text-indigo-600 hover:bg-indigo-50 border-0 font-bold px-8 shadow-[0_0_20px_rgba(255,255,255,0.3)] hover:-translate-y-0.5 transition-all"
-                  disabled={totalPending === 0}
-                  onClick={() => setModalTarget({
-                    kind: "invoice",
-                    invoice: { id: "ALL", child_id: studentId, title: "Thanh toán tất cả hóa đơn", amount: totalPending, due_date: "", status: "pending" },
-                  })}
+                  disabled={pendingGroups.length !== 1 || pendingGroups[0]?.teacherId === "unassigned"}
+                  onClick={() => {
+                    const group = pendingGroups[0];
+                    if (!group || group.teacherId === "unassigned") return;
+                    setModalTarget({
+                      kind: "invoice",
+                      invoiceIds: group.invoices.map((invoice) => invoice.id),
+                      teacherId: group.teacherId,
+                      title: `Thanh toán ${group.invoices.length} hóa đơn cho ${group.teacherName}`,
+                      amount: group.amount,
+                    });
+                  }}
                 >
-                  <CreditCard className="h-5 w-5 mr-2" /> Thanh toán tất cả
+                  <CreditCard className="h-5 w-5 mr-2" />
+                  {pendingGroups.length > 1 ? "Chọn từng giáo viên bên dưới" : "Thanh toán nhóm hóa đơn"}
                 </Button>
                 <Button
                   size="lg"
@@ -272,40 +336,74 @@ function PaymentsContent() {
               <AlertCircle className="h-5 w-5 text-amber-500" /> Cần thanh toán
             </h3>
             {pendingInvoices.length > 0 ? (
-              <div className="space-y-3">
-                {pendingInvoices.map(inv => {
-                  const overdue = isOverdue(inv.due_date);
-                  return (
-                    <Card key={inv.id} className={`border-l-4 hover:shadow-md transition-shadow ${overdue ? "border-l-red-500" : "border-l-amber-500"}`}>
-                      <CardContent className="p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-1 flex-wrap">
-                            <span className="text-xs font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-md">{inv.id}</span>
-                            {overdue
-                              ? <Badge variant="destructive" className="text-[10px] uppercase">Quá hạn</Badge>
-                              : <Badge variant="warning"     className="text-[10px] uppercase">Chưa thanh toán</Badge>}
+              <div className="space-y-5">
+                {pendingGroups.map((group) => (
+                  <section key={group.teacherId} className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
+                    <div className="flex flex-col gap-3 border-b border-border bg-muted/30 p-4 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Người nhận học phí</p>
+                        <h4 className="mt-0.5 font-bold text-foreground">{group.teacherName}</h4>
+                        <p className="text-xs text-muted-foreground">{group.invoices.length} hóa đơn · {formatVND(group.amount)}</p>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={group.teacherId === "unassigned"}
+                        onClick={() => setModalTarget({
+                          kind: "invoice",
+                          invoiceIds: group.invoices.map((invoice) => invoice.id),
+                          teacherId: group.teacherId,
+                          title: `Thanh toán ${group.invoices.length} hóa đơn cho ${group.teacherName}`,
+                          amount: group.amount,
+                        })}
+                      >
+                        Thanh toán nhóm này <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+
+                    <div className="divide-y divide-border/60">
+                      {group.invoices.map((inv) => {
+                        const overdue = isOverdue(inv.due_date);
+                        const cls = inv.class_id ? classById.get(inv.class_id) : undefined;
+                        return (
+                          <div key={inv.id} className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="min-w-0 flex-1">
+                              <div className="mb-1 flex flex-wrap items-center gap-2">
+                                <span className="rounded-md bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">{inv.id}</span>
+                                {overdue
+                                  ? <Badge variant="destructive" className="text-[10px] uppercase">Quá hạn</Badge>
+                                  : <Badge variant="warning" className="text-[10px] uppercase">Chưa thanh toán</Badge>}
+                              </div>
+                              <h4 className="font-semibold text-foreground">{inv.title}</h4>
+                              <p className="mt-1 text-xs text-muted-foreground">{cls?.class_name ?? "Hóa đơn chưa gắn lớp"}</p>
+                              <p className={`mt-1 flex items-center gap-1.5 text-sm ${overdue ? "text-red-600 dark:text-red-400" : "text-amber-600 dark:text-amber-400"}`}>
+                                <Clock className="h-3.5 w-3.5" />
+                                {overdue ? "Đã quá hạn: " : "Hạn chót: "}{formatDate(inv.due_date)}
+                              </p>
+                            </div>
+                            <div className="flex shrink-0 items-center justify-between gap-3 border-t border-border pt-3 sm:flex-col sm:items-end sm:border-0 sm:pt-0">
+                              <span className="text-lg font-bold">{formatVND(inv.amount)}</span>
+                              <Button
+                                size="sm"
+                                variant={overdue ? "destructive" : "gradient"}
+                                disabled={group.teacherId === "unassigned"}
+                                onClick={() => setModalTarget({
+                                  kind: "invoice",
+                                  invoiceIds: [inv.id],
+                                  teacherId: group.teacherId,
+                                  title: inv.title,
+                                  amount: inv.amount,
+                                })}
+                              >
+                                Thanh toán <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
+                              </Button>
+                            </div>
                           </div>
-                          <h4 className="font-semibold text-foreground">{inv.title}</h4>
-                          <p className={`text-sm mt-1 flex items-center gap-1.5 ${overdue ? "text-red-600 dark:text-red-400" : "text-amber-600 dark:text-amber-400"}`}>
-                            <Clock className="h-3.5 w-3.5" />
-                            {overdue ? "Đã quá hạn: " : "Hạn chót: "}{formatDate(inv.due_date)}
-                          </p>
-                        </div>
-                        <div className="flex flex-row sm:flex-col items-center sm:items-end justify-between gap-3 shrink-0 border-t border-border sm:border-0 pt-4 sm:pt-0">
-                          <span className="text-lg font-bold">{formatVND(inv.amount)}</span>
-                          <Button
-                            size="sm"
-                            variant={overdue ? "destructive" : "gradient"}
-                            className="w-full sm:w-auto"
-                            onClick={() => setModalTarget({ kind: "invoice", invoice: inv })}
-                          >
-                            Thanh toán <ArrowRight className="h-3.5 w-3.5 ml-1.5" />
-                          </Button>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  );
-                })}
+                        );
+                      })}
+                    </div>
+                  </section>
+                ))}
               </div>
             ) : (
               <Card className="bg-muted/50 border-dashed">
@@ -360,6 +458,7 @@ function PaymentsContent() {
                     const isOk      = item.status === "approved" || item.status === "paid";
                     const isRejected = item.status === "rejected";
                     const isPending  = !isOk && !isRejected;
+                    const cls = item.classId ? classById.get(item.classId) : undefined;
                     return (
                       <div key={item.key} className="p-4 flex items-center gap-3 hover:bg-muted/30 transition-colors">
                         <div className={`h-10 w-10 rounded-full flex items-center justify-center shrink-0 ${
@@ -380,6 +479,11 @@ function PaymentsContent() {
                             {item.type === "pkg" ? item.sub : (isOk ? `Thanh toán ${formatDate(item.date)}` : "Đang chờ duyệt")}
                             {isRejected && " · Bị từ chối"}
                           </p>
+                          {(cls || item.teacherId) && (
+                            <p className="mt-0.5 truncate text-[10px] text-muted-foreground">
+                              {cls?.class_name ?? "Giao dịch tài liệu"}{cls?.tutor_name ? ` · ${cls.tutor_name}` : ""}
+                            </p>
+                          )}
                         </div>
                         <div className="text-right shrink-0">
                           <span className="text-sm font-bold">{formatVND(item.amount)}</span>
@@ -440,6 +544,7 @@ function PaymentsContent() {
                     <p className="text-sm text-muted-foreground">Số tiền cần thanh toán:</p>
                     <p className="text-3xl font-black text-primary">{formatVND(modalAmt)}</p>
                     <p className="text-xs font-medium text-foreground mt-2 px-4 line-clamp-2">{modalTitle}</p>
+                    {modalTeacher && <p className="text-xs text-muted-foreground">Người nhận: {modalTeacher}</p>}
                   </div>
 
                   {/* QR + bank info */}
@@ -524,7 +629,7 @@ function PaymentsContent() {
 
                 <div className="p-4 border-t border-border/50 bg-muted/10 flex gap-3 shrink-0">
                   <Button variant="outline" className="flex-1" onClick={closeModal}>Hủy bỏ</Button>
-                  <Button className="flex-1" disabled={!receiptFile || submitting} onClick={handleConfirm}>
+                  <Button className="flex-1" disabled={!receiptFile || submitting || !hasPaymentDestination} onClick={handleConfirm}>
                     {submitting
                       ? <><span className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full inline-block mr-2" />Đang gửi...</>
                       : "Tôi đã chuyển khoản"}

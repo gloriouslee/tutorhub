@@ -73,8 +73,14 @@ export async function PATCH(req: NextRequest) {
   } catch {
     return NextResponse.json({ error: "invalid_json" }, { status: 400 });
   }
+  const requestedInvoiceIds = Array.isArray(body.invoice_ids)
+    ? [...new Set(body.invoice_ids.filter((item): item is string => isNonEmptyString(item, 160)))]
+    : [];
+  const hasInvoiceBatch = requestedInvoiceIds.length > 0
+    && requestedInvoiceIds.length === (Array.isArray(body.invoice_ids) ? body.invoice_ids.length : 0)
+    && requestedInvoiceIds.length <= 50;
   if (
-    !isNonEmptyString(body.invoice_id, 160) ||
+    (!isNonEmptyString(body.invoice_id, 160) && !hasInvoiceBatch) ||
     !isNonEmptyString(body.action, 30) ||
     (body.child_id !== undefined && !isNonEmptyString(body.child_id, 100))
   ) {
@@ -82,6 +88,9 @@ export async function PATCH(req: NextRequest) {
   }
   if (!["submit_receipt", "mark_paid"].includes(body.action)) {
     return NextResponse.json({ error: "invalid_action" }, { status: 400 });
+  }
+  if (hasInvoiceBatch && body.action !== "submit_receipt") {
+    return NextResponse.json({ error: "invalid_batch_action" }, { status: 400 });
   }
   const admin = createAdminClient();
   let data: unknown;
@@ -91,26 +100,79 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: "receipt_required" }, { status: 400 });
     }
     const invoices = await readInvoices();
-    const childId = body.invoice_id === "ALL"
-      ? (typeof body.child_id === "string" ? body.child_id : "")
-      : (invoices.find(invoice => invoice.id === body.invoice_id)?.child_id ?? "");
-    if (!childId || !body.receipt_path.startsWith(`${childId}/`)) {
-      return NextResponse.json({ error: "invalid_receipt" }, { status: 400 });
-    }
-    const result = await admin.rpc("submit_invoice_receipt_secure", {
-      p_invoice_id: body.invoice_id,
-      p_child_id: childId,
-      p_actor_id: actor.userId,
-      p_receipt_path: body.receipt_path,
-    });
-    data = result.data;
-    error = result.error;
+    let targetInvoices: Invoice[];
+    let childId: string;
 
-    if (!error) {
-      const targetInvoices = invoices.filter(invoice =>
+    if (hasInvoiceBatch) {
+      if (actor.role !== "student" || !actor.studentId) {
+        return NextResponse.json({ error: "student_authorization_required" }, { status: 403 });
+      }
+      const requested = new Set(requestedInvoiceIds);
+      targetInvoices = invoices.filter((invoice) => requested.has(invoice.id) && invoice.status === "pending");
+      if (targetInvoices.length !== requestedInvoiceIds.length) {
+        return NextResponse.json({ error: "invoice_not_found" }, { status: 404 });
+      }
+      const childIds = new Set(targetInvoices.map((invoice) => invoice.child_id));
+      if (childIds.size !== 1 || !childIds.has(actor.studentId)) {
+        return NextResponse.json({ error: "forbidden" }, { status: 403 });
+      }
+      if (targetInvoices.some((invoice) => !invoice.class_id)) {
+        return NextResponse.json({ error: "invoice_class_required" }, { status: 409 });
+      }
+      const classIds = [...new Set(targetInvoices.map((invoice) => invoice.class_id as string))];
+      const { data: classes, error: classError } = await admin
+        .from("classes")
+        .select("id,tutor_id")
+        .in("id", classIds);
+      if (classError || (classes ?? []).length !== classIds.length) {
+        return NextResponse.json({ error: "invoice_class_unavailable" }, { status: 409 });
+      }
+      const teacherIds = new Set((classes ?? []).map((item) => String(item.tutor_id ?? "")).filter(Boolean));
+      if (teacherIds.size !== 1) {
+        return NextResponse.json({ error: "mixed_payment_recipients" }, { status: 409 });
+      }
+      childId = actor.studentId;
+    } else {
+      childId = body.invoice_id === "ALL"
+        ? (typeof body.child_id === "string" ? body.child_id : "")
+        : (invoices.find(invoice => invoice.id === body.invoice_id)?.child_id ?? "");
+      targetInvoices = invoices.filter(invoice =>
         invoice.child_id === childId
         && (body.invoice_id === "ALL" ? invoice.status === "pending" : invoice.id === body.invoice_id),
       );
+    }
+    if (!childId || !body.receipt_path.startsWith(`${childId}/`)) {
+      return NextResponse.json({ error: "invalid_receipt" }, { status: 400 });
+    }
+    if (hasInvoiceBatch) {
+      const results: unknown[] = [];
+      error = null;
+      for (const invoiceId of requestedInvoiceIds) {
+        const result = await admin.rpc("submit_invoice_receipt_secure", {
+          p_invoice_id: invoiceId,
+          p_child_id: childId,
+          p_actor_id: actor.userId,
+          p_receipt_path: body.receipt_path,
+        });
+        if (result.error) {
+          error = result.error;
+          break;
+        }
+        results.push(result.data);
+      }
+      data = results;
+    } else {
+      const result = await admin.rpc("submit_invoice_receipt_secure", {
+        p_invoice_id: body.invoice_id,
+        p_child_id: childId,
+        p_actor_id: actor.userId,
+        p_receipt_path: body.receipt_path,
+      });
+      data = result.data;
+      error = result.error;
+    }
+
+    if (!error) {
       const classIds = [...new Set(targetInvoices.map(invoice => invoice.class_id).filter(Boolean))] as string[];
       if (classIds.length > 0) {
         const rows = classIds.map(classId => ({

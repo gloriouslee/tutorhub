@@ -20,6 +20,7 @@ export type AccountContext =
       classes: Class[];
       assignedClassId: string;
       portalBranding: PortalBranding;
+      teacherBrandings: Record<string, PortalBranding>;
       avatarUrl: string;
     }
   | {

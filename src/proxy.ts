@@ -14,6 +14,11 @@ const ROLE_HOME: Record<UserRole, string> = {
   teacher: "/teacher",
   admin: "/admin",
 };
+const NORMALIZABLE_STUDENT_PATHS = new Set([
+  "/student/homework",
+  "/student/scores",
+  "/student/payments",
+]);
 
 function isPublicRoute(pathname: string) {
   return PUBLIC_ROUTES.has(pathname);
@@ -83,6 +88,18 @@ export async function proxy(request: NextRequest) {
   const response = NextResponse.next({ request: { headers: requestHeaders } });
   response.headers.set("x-request-id", requestId);
   response.headers.set("Content-Security-Policy", csp);
+
+  const normalizedStudentPath = pathname.replace(/[,.;:]+$/g, "");
+  if (
+    normalizedStudentPath !== pathname
+    && NORMALIZABLE_STUDENT_PATHS.has(normalizedStudentPath)
+  ) {
+    return redirectWithCookies(
+      request,
+      `${normalizedStudentPath}${request.nextUrl.search}`,
+      response,
+    );
+  }
 
   if (pathname === "/admin/seed" || pathname.startsWith("/admin/seed/")) {
     return new NextResponse("Not Found", {

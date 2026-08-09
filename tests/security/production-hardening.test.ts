@@ -58,6 +58,44 @@ test("class portals expose curriculum-first workspaces without duplicating legac
   assert.match(studentCurriculum, /CONTENT_FILTERS/);
 });
 
+test("student aggregate pages remain scoped across multiple teachers and classes", async () => {
+  const scopeBar = await read("src/components/student/StudentScopeBar.tsx");
+  const homework = await read("src/app/student/homework/page.tsx");
+  const scores = await read("src/app/student/scores/page.tsx");
+  const payments = await read("src/app/student/payments/page.tsx");
+  const contextRoute = await read("src/app/api/account/context/route.ts");
+
+  assert.match(scopeBar, /Tất cả giáo viên/);
+  assert.match(scopeBar, /Tất cả lớp/);
+  assert.match(scopeBar, /params\.set\("teacher"/);
+  assert.match(scopeBar, /params\.set\("class"/);
+  assert.match(homework, /function assignmentKey/);
+  assert.match(homework, /merged\.set\(assignmentKey\(item\), item\)/);
+  assert.match(homework, /<StudentScopeBar/);
+  assert.match(scores, /membershipKey/);
+  assert.match(scores, /Mục tiêu điểm theo phạm vi/);
+  assert.match(scores, /<StudentScopeBar/);
+  assert.match(payments, /pendingGroups/);
+  assert.match(payments, /teacherSettings\[modalTeacherId\]/);
+  assert.match(payments, /invoiceIds: group\.invoices\.map/);
+  assert.doesNotMatch(payments, /myClasses\.find\(c => c\.tutor_id\)/);
+  assert.match(contextRoute, /portalBranding: DEFAULT_PORTAL_BRANDING/);
+});
+
+test("student invoice batches cannot mix payment recipients", async () => {
+  const invoiceRoute = await read("src/app/api/payments/invoices/route.ts");
+  const storage = await read("src/lib/storage.ts");
+  const proxy = await read("src/proxy.ts");
+
+  assert.match(invoiceRoute, /requestedInvoiceIds/);
+  assert.match(invoiceRoute, /teacherIds\.size !== 1/);
+  assert.match(invoiceRoute, /mixed_payment_recipients/);
+  assert.match(invoiceRoute, /actor\.role !== "student"/);
+  assert.match(storage, /invoiceId: string \| string\[\]/);
+  assert.match(proxy, /NORMALIZABLE_STUDENT_PATHS/);
+  assert.match(proxy, /pathname\.replace\(\/\[,\.;:\]\+\$\/g, ""\)/);
+});
+
 test("Google Drive document and video links open in the in-app learning player", async () => {
   assert.equal(
     googleDrivePreviewUrl("https://drive.google.com/file/d/1qb0q4qTNvpu7lHNziwO3gh_-Ed3I9J_2/view?usp=sharing"),

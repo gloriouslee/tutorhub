@@ -8,6 +8,10 @@ import { Button } from "@/components/ui/button";
 import { SectionHeader } from "@/components/shared";
 import { HomeworkLoadingState } from "@/components/shared/HomeworkLoadingState";
 import { useStudentContext } from "@/hooks/useStudentContext";
+import StudentScopeBar, {
+  classMatchesStudentScope,
+  useStudentWorkspaceScope,
+} from "@/components/student/StudentScopeBar";
 import {
   FileText, Clock, CheckCircle2, Upload, Calendar,
   AlertCircle, X, Check, Download, Loader2, Star, NotebookPen, PenSquare, PlayCircle,
@@ -47,6 +51,10 @@ interface HomeworkItem {
   exam_total?: number;    // điểm tối đa (kind exam)
 }
 
+function assignmentKey(homework: Pick<HomeworkItem, "class_id" | "id">) {
+  return `${homework.class_id}:${homework.id}`;
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function StudentHomeworkPage() {
   const router = useRouter();
@@ -56,6 +64,7 @@ export default function StudentHomeworkPage() {
     myClasses,
     ready,
   } = useStudentContext();
+  const { scope, setScope } = useStudentWorkspaceScope(myClasses);
   const myClassIds = myClasses.map(c => c.id);
   const [teacherHw,    setTeacherHw]    = useState<HomeworkItem[]>([]);
   const myHomework: HomeworkItem[] = teacherHw;
@@ -145,7 +154,7 @@ export default function StudentHomeworkPage() {
         );
         const merged = new Map<string, HomeworkItem>();
         for (const item of [...manual, ...curriculumByClass.flat()]) {
-          merged.set(item.id, item);
+          merged.set(assignmentKey(item), item);
         }
         setTeacherHw([...merged.values()]);
         setSubmissions(studentSubmissions);
@@ -170,7 +179,11 @@ export default function StudentHomeworkPage() {
     if (deepLinkHandledRef.current === key) return;
     const target = teacherHw.find((item) => item.id === homeworkId && (!classId || item.class_id === classId));
     if (!target) return;
-    const submission = submissions.find((item) => item.homework_id === homeworkId && item.student_id === STUDENT_ID);
+    const submission = submissions.find((item) => (
+      item.homework_id === homeworkId
+      && item.student_id === STUDENT_ID
+      && (!item.class_id || item.class_id === target.class_id)
+    ));
     const requestedAction = params.get("action");
     const shouldSubmit = requestedAction === "submit" || !submission || submission.status === "returned";
     deepLinkHandledRef.current = key;
@@ -182,20 +195,32 @@ export default function StudentHomeworkPage() {
   }, [STUDENT_ID, loadingHomework, submissions, teacherHw]);
 
   // Per-homework submission lookup
-  function getSub(hwId: string) {
-    return submissions.find(s => s.homework_id === hwId && s.student_id === STUDENT_ID);
+  function getSub(homework: HomeworkItem) {
+    const exact = submissions.find((submission) => (
+      submission.homework_id === homework.id
+      && submission.student_id === STUDENT_ID
+      && submission.class_id === homework.class_id
+    ));
+    if (exact) return exact;
+    const sameIdAssignments = myHomework.filter((item) => item.id === homework.id);
+    if (sameIdAssignments.length !== 1) return undefined;
+    return submissions.find((submission) => (
+      submission.homework_id === homework.id
+      && submission.student_id === STUDENT_ID
+      && !submission.class_id
+    ));
   }
 
   // Status logic
-  function hwStatus(hwId: string, dueDate: string) {
-    const sub = getSub(hwId);
+  function hwStatus(homework: HomeworkItem) {
+    const sub = getSub(homework);
     if (sub?.status === "returned")
       return { label: "Cần làm lại", color: "bg-rose-100 text-rose-700 dark:bg-rose-900/20 dark:text-rose-400", icon: AlertCircle, key: "pending" as FilterTab };
     if (sub?.status === "graded" && sub.score != null)
       return { label: `Đã chấm · ${sub.score}/10`, color: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400", icon: Star, key: "graded" as FilterTab };
     if (sub)
       return { label: "Đã nộp", color: "bg-blue-100 text-blue-700 dark:bg-blue-900/20 dark:text-blue-400", icon: CheckCircle2, key: "submitted" as FilterTab };
-    const d = daysLeft(dueDate);
+    const d = daysLeft(homework.due_date);
     if (d < 0)
       return { label: "Quá hạn", color: "bg-red-100 text-red-700 dark:bg-red-900/20 dark:text-red-400", icon: AlertCircle, key: "pending" as FilterTab };
     if (d === 0)
@@ -208,31 +233,41 @@ export default function StudentHomeworkPage() {
   // Trạng thái lọc (exam-aware): bài câu hỏi đã làm = "graded", chưa làm = "pending"
   function statusKey(hw: HomeworkItem): FilterTab {
     if (hw.kind === "exam") return hw.exam_done ? "graded" : "pending";
-    return hwStatus(hw.id, hw.due_date).key;
+    return hwStatus(hw).key;
   }
 
+  const scopedHomework = useMemo(() => myHomework.filter((homework) => (
+    classMatchesStudentScope(myClasses.find((cls) => cls.id === homework.class_id), scope)
+  )), [myClasses, myHomework, scope]);
+
   // Filtered list — mới nhất (giao gần đây) lên đầu
-  const displayed = useMemo(() => myHomework
+  const displayed = useMemo(() => scopedHomework
     .filter(hw => filterTab === "all" ? true : statusKey(hw) === filterTab)
     .sort((a, b) => (b.created_at ?? b.due_date ?? "").localeCompare(a.created_at ?? a.due_date ?? "")),
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  [filterTab, submissions, teacherHw]);
+  [filterTab, scopedHomework, submissions]);
 
   // Sidebar stats
-  const submittedCount = myHomework.filter(hw => hw.kind === "exam" ? hw.exam_done : !!getSub(hw.id)).length;
-  const gradedSubs     = submissions.filter(s => s.score != null && myClassIds.includes(
-    myHomework.find(h => h.id === s.homework_id)?.class_id ?? ""
-  ));
-  const avgScore = gradedSubs.length > 0
-    ? (gradedSubs.reduce((a, s) => a + (s.score ?? 0), 0) / gradedSubs.length).toFixed(1)
+  const submittedCount = scopedHomework.filter(hw => hw.kind === "exam" ? hw.exam_done : !!getSub(hw)).length;
+  const gradedScores = scopedHomework.flatMap((homework) => {
+    if (homework.kind === "exam") {
+      return homework.exam_score != null && homework.exam_total
+        ? [(homework.exam_score / homework.exam_total) * 10]
+        : [];
+    }
+    const submission = getSub(homework);
+    return submission?.score != null ? [submission.score] : [];
+  });
+  const avgScore = gradedScores.length > 0
+    ? (gradedScores.reduce((sum, score) => sum + score, 0) / gradedScores.length).toFixed(1)
     : null;
 
   // Filter tab counts
   const tabCounts: Record<FilterTab, number> = {
-    all: myHomework.length,
-    pending: myHomework.filter(hw => statusKey(hw) === "pending").length,
-    submitted: myHomework.filter(hw => statusKey(hw) === "submitted").length,
-    graded: myHomework.filter(hw => statusKey(hw) === "graded").length,
+    all: scopedHomework.length,
+    pending: scopedHomework.filter(hw => statusKey(hw) === "pending").length,
+    submitted: scopedHomework.filter(hw => statusKey(hw) === "submitted").length,
+    graded: scopedHomework.filter(hw => statusKey(hw) === "graded").length,
   };
 
   // Modal helpers
@@ -249,8 +284,15 @@ export default function StudentHomeworkPage() {
     setFile(null);
     setUploadState("idle");
     setErrorMsg("");
-    if (typeof window !== "undefined" && new URLSearchParams(window.location.search).has("homeworkId")) {
-      router.replace("/student/homework", { scroll: false });
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      if (params.has("homeworkId")) {
+        params.delete("homeworkId");
+        params.delete("classId");
+        params.delete("action");
+        const query = params.toString();
+        router.replace(query ? `/student/homework?${query}` : "/student/homework", { scroll: false });
+      }
     }
   }
 
@@ -302,7 +344,11 @@ export default function StudentHomeworkPage() {
       }
 
       setSubmissions(prev => [
-        ...prev.filter(s => !(s.homework_id === selectedHw.id && s.student_id === STUDENT_ID)),
+        ...prev.filter(s => !(
+          s.homework_id === selectedHw.id
+          && s.student_id === STUDENT_ID
+          && (!s.class_id || s.class_id === selectedHw.class_id)
+        )),
         saved,
       ]);
       setUploadState("success");
@@ -326,8 +372,10 @@ export default function StudentHomeworkPage() {
       <div className="space-y-6 max-w-5xl mx-auto pb-10">
         <SectionHeader
           title="Bài tập của tôi"
-          subtitle={`${myHomework.length} bài tập · ${submittedCount} đã nộp`}
+          subtitle={`${scopedHomework.length} bài tập trong phạm vi đang chọn · ${submittedCount} đã hoàn thành`}
         />
+
+        <StudentScopeBar classes={myClasses} scope={scope} onChange={setScope} />
 
         {/* ── Filter tabs ───────────────────────────────── */}
         <div className="flex items-center gap-2 flex-wrap">
@@ -369,7 +417,7 @@ export default function StudentHomeworkPage() {
                 if (hw.kind === "exam") {
                   return (
                     <Card
-                      key={hw.id}
+                      key={assignmentKey(hw)}
                       className="hover:border-primary/40 transition-colors animate-fade-in group"
                       style={{ animationDelay: `${(i % 6) * 70}ms` }}
                     >
@@ -397,6 +445,7 @@ export default function StudentHomeworkPage() {
                               <span className="bg-muted px-2 py-0.5 rounded-md font-semibold text-foreground">
                                 {cls?.class_name ?? hw.class_id}
                               </span>
+                              {cls?.tutor_name && <span>GV: {cls.tutor_name}</span>}
                               <span className="flex items-center gap-1 font-semibold text-rose-600 dark:text-rose-400">
                                 <PenSquare className="h-3.5 w-3.5" /> Làm trên hệ thống
                               </span>
@@ -422,13 +471,13 @@ export default function StudentHomeworkPage() {
                   );
                 }
 
-                const sub    = getSub(hw.id);
-                const status = hwStatus(hw.id, hw.due_date);
+                const sub    = getSub(hw);
+                const status = hwStatus(hw);
                 const { icon: StatusIcon } = status;
 
                 return (
                   <Card
-                    key={hw.id}
+                    key={assignmentKey(hw)}
                     className="hover:border-primary/40 transition-colors animate-fade-in group"
                     style={{ animationDelay: `${(i % 6) * 70}ms` }}
                   >
@@ -455,6 +504,7 @@ export default function StudentHomeworkPage() {
                             <span className="bg-muted px-2 py-0.5 rounded-md font-semibold text-foreground">
                               {cls?.class_name ?? hw.class_id}
                             </span>
+                            {cls?.tutor_name && <span>GV: {cls.tutor_name}</span>}
                             <span className="flex items-center gap-1">
                               <Calendar className="h-3.5 w-3.5" />
                               Hạn nộp: <span className="font-medium text-foreground">{formatDate(hw.due_date)}</span>
@@ -577,9 +627,9 @@ export default function StudentHomeworkPage() {
                 <div>
                   <h3 className="font-bold text-sm text-foreground mb-0.5">Tiến độ bài tập</h3>
                   <p className="text-xs text-muted-foreground">
-                    {submittedCount >= myHomework.length
+                    {submittedCount >= scopedHomework.length
                       ? "Bạn đã nộp tất cả bài tập!"
-                      : `Còn ${myHomework.length - submittedCount} bài chưa nộp`}
+                      : `Còn ${scopedHomework.length - submittedCount} bài chưa nộp`}
                   </p>
                 </div>
 
@@ -588,12 +638,12 @@ export default function StudentHomeworkPage() {
                   <div>
                     <div className="flex justify-between text-xs mb-1 font-medium">
                       <span>Đã nộp</span>
-                      <span className="text-primary font-bold">{submittedCount}/{myHomework.length} bài</span>
+                      <span className="text-primary font-bold">{submittedCount}/{scopedHomework.length} bài</span>
                     </div>
                     <div className="h-2 w-full bg-background rounded-full overflow-hidden border border-border/40">
                       <div
                         className="h-full bg-primary rounded-full transition-all duration-700"
-                        style={{ width: `${myHomework.length > 0 ? (submittedCount / myHomework.length) * 100 : 0}%` }}
+                        style={{ width: `${scopedHomework.length > 0 ? (submittedCount / scopedHomework.length) * 100 : 0}%` }}
                       />
                     </div>
                   </div>
@@ -635,8 +685,8 @@ export default function StudentHomeworkPage() {
 
             {/* Upcoming deadline */}
             {(() => {
-              const upcoming = myHomework
-                .filter(hw => !getSub(hw.id))
+              const upcoming = scopedHomework
+                .filter(hw => !getSub(hw))
                 .sort((a, b) => a.due_date.localeCompare(b.due_date))[0];
               if (!upcoming) return (
                 <Card>
@@ -697,7 +747,7 @@ export default function StudentHomeworkPage() {
               {/* ── Detail ── */}
               {modalType === "detail" && (() => {
                 const cls = myClasses.find(c => c.id === selectedHw.class_id);
-                const sub = getSub(selectedHw.id);
+                const sub = getSub(selectedHw);
                 return (
                   <div className="space-y-4">
                     {/* Class chip */}
@@ -708,6 +758,7 @@ export default function StudentHomeworkPage() {
                       <div>
                         <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Lớp học</p>
                         <p className="font-semibold text-sm text-foreground">{cls?.class_name ?? selectedHw.class_id}</p>
+                        {cls?.tutor_name && <p className="text-xs text-muted-foreground">Giáo viên: {cls.tutor_name}</p>}
                       </div>
                     </div>
 
