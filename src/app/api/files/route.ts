@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getRequestIdentity } from "@/lib/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getActiveChildIdsForParent, parentCanAccessStudent } from "@/lib/guardian-server";
+import { curriculumReferencesStudentFile } from "@/lib/curriculum-file-access";
 
 const BUCKETS = new Set([
   "class-materials",
@@ -140,64 +141,91 @@ export async function GET(req: NextRequest) {
             entitled = packages.includes(selected);
           }
         } else {
-          const { data: catalogRows } = await admin
-            .from("teacher_materials")
-            .select("id,class_id,data")
-            .eq("published", true);
-          const { data: purchases } = await admin
-            .from("purchase_transactions")
-            .select("pkg_id")
-            .eq("student_id", actor.studentId)
-            .eq("status", "approved");
-          const granted = new Set((purchases ?? []).map((item) => String(item.pkg_id)));
-          for (const row of catalogRows ?? []) {
-            if (!containsFilePath(row.data, expectedUrl)) continue;
-            const course = row.data as Record<string, unknown>;
-            if (course.type === "paid_package") {
-              entitled = granted.has(String(row.id))
-                || containsFilePath(
-                  Array.isArray(course.chapters)
-                    ? course.chapters.map((chapter) => {
-                        const item = chapter as Record<string, unknown>;
-                        return {
-                          ...item,
-                          lessons: Array.isArray(item.lessons)
-                            ? item.lessons.filter((lesson) =>
-                                (lesson as Record<string, unknown>).isPreview === true)
-                            : [],
-                        };
-                      })
-                    : [],
-                  expectedUrl,
-                );
-            } else if (course.type === "class" && row.class_id) {
-              const { data: enrolled } = await admin
-                .from("classes")
-                .select("id")
-                .eq("id", row.class_id)
-                .contains("student_ids", [actor.studentId])
-                .maybeSingle();
-              entitled = Boolean(enrolled);
-              const allowedPackages = Array.isArray(course.packages)
-                ? course.packages.map(String)
-                : [];
-              if (entitled && allowedPackages.length > 0) {
-                const { data: packageRow } = await admin
-                  .from("kv_student_packages")
-                  .select("value")
+          const { data: curriculumRow } = await admin
+            .from("kv_curriculum")
+            .select("value")
+            .eq("id", classId)
+            .maybeSingle();
+          entitled = curriculumReferencesStudentFile(
+            curriculumRow?.value,
+            expectedUrl,
+            actor.studentId,
+          );
+
+          if (!entitled) {
+            const { data: catalogRows } = await admin
+              .from("teacher_materials")
+              .select("id,class_id,data")
+              .eq("published", true);
+            const { data: purchases } = await admin
+              .from("purchase_transactions")
+              .select("pkg_id")
+              .eq("student_id", actor.studentId)
+              .eq("status", "approved");
+            const granted = new Set((purchases ?? []).map((item) => String(item.pkg_id)));
+            for (const row of catalogRows ?? []) {
+              if (!containsFilePath(row.data, expectedUrl)) continue;
+              const course = row.data as Record<string, unknown>;
+              if (course.type === "paid_package") {
+                entitled = granted.has(String(row.id))
+                  || containsFilePath(
+                    Array.isArray(course.chapters)
+                      ? course.chapters.map((chapter) => {
+                          const item = chapter as Record<string, unknown>;
+                          return {
+                            ...item,
+                            lessons: Array.isArray(item.lessons)
+                              ? item.lessons.filter((lesson) =>
+                                  (lesson as Record<string, unknown>).isPreview === true)
+                              : [],
+                          };
+                        })
+                      : [],
+                    expectedUrl,
+                  );
+              } else if (course.type === "class" && row.class_id) {
+                const { data: enrolled } = await admin
+                  .from("classes")
+                  .select("id")
                   .eq("id", row.class_id)
+                  .contains("student_ids", [actor.studentId])
                   .maybeSingle();
-                const selected =
-                  packageRow?.value
-                  && typeof packageRow.value === "object"
-                  && !Array.isArray(packageRow.value)
-                    ? String((packageRow.value as Record<string, unknown>)[actor.studentId] ?? "")
-                    : "";
-                entitled = allowedPackages.includes(selected);
+                entitled = Boolean(enrolled);
+                const allowedPackages = Array.isArray(course.packages)
+                  ? course.packages.map(String)
+                  : [];
+                if (entitled && allowedPackages.length > 0) {
+                  const { data: packageRow } = await admin
+                    .from("kv_student_packages")
+                    .select("value")
+                    .eq("id", row.class_id)
+                    .maybeSingle();
+                  const selected =
+                    packageRow?.value
+                    && typeof packageRow.value === "object"
+                    && !Array.isArray(packageRow.value)
+                      ? String((packageRow.value as Record<string, unknown>)[actor.studentId] ?? "")
+                      : "";
+                  entitled = allowedPackages.includes(selected);
+                }
               }
+              break;
             }
-            break;
           }
+        }
+
+        // Legacy exam essay uploads used class-materials. Keep those images
+        // readable only by the student whose saved result references the URL.
+        if (!entitled && segments[1] === "homework") {
+          const { data: resultRows } = await admin
+            .from("kv_exam_results")
+            .select("id,value")
+            .like("id", `${classId}_%_${actor.studentId}`);
+          entitled = (resultRows ?? []).some((row) =>
+            row.id.startsWith(`${classId}_`)
+            && row.id.endsWith(`_${actor.studentId}`)
+            && containsFilePath(row.value, expectedUrl),
+          );
         }
         allowed = entitled;
       }

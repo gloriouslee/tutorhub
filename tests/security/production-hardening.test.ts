@@ -14,6 +14,7 @@ import {
 } from "../../src/lib/registration-pricing";
 import { isDiscoverableClass } from "../../src/lib/class-catalog";
 import { resolvePortalBranding } from "../../src/lib/portal-branding";
+import { curriculumReferencesStudentFile } from "../../src/lib/curriculum-file-access";
 
 const read = (path: string) => readFile(path, "utf8");
 
@@ -244,12 +245,10 @@ test("production migration drops legacy policies and plaintext columns", async (
 });
 
 test("exam client has no client-side grading or direct retry deletion", async () => {
-  const examPage = await read(
-    "src/app/student/classes/[classId]/exam/[lessonId]/page.tsx",
-  );
-  assert.doesNotMatch(examPage, /saveExamResult|kvDelete|calcAutoScore/);
-  assert.match(examPage, /\/retry/);
-  assert.match(examPage, /\/submit/);
+  const examPlayer = await read("src/components/student/StudentExamPlayer.tsx");
+  assert.doesNotMatch(examPlayer, /saveExamResult|kvDelete|calcAutoScore/);
+  assert.match(examPlayer, /\/retry/);
+  assert.match(examPlayer, /\/submit/);
 });
 
 test("class registration is student-created and teacher-reviewed", async () => {
@@ -614,6 +613,7 @@ test("student portal keeps paid material, submissions and progress server-scoped
   assert.match(materialsRoute, /videoUrl: _videoUrl/);
   assert.match(curriculumRoute, /\.contains\("student_ids", \[actor\.studentId\]\)/);
   assert.match(curriculumRoute, /questions: _questions/);
+  assert.match(curriculumRoute, /publicExamContent/);
   assert.match(progressRoute, /actor\?\.role !== "student"/);
   assert.match(classPage, /useStudentCurriculum/);
   assert.match(classPage, /getStudentLessonProgress/);
@@ -657,6 +657,39 @@ test("exam HTML is sanitized before student delivery", async () => {
   assert.match(server, /options: safe\.options\?\.map/);
   assert.match(examRoute, /sanitizeQuestions\(questions, showSolution\)/);
   assert.match(submitRoute, /sanitizeQuestions\(questions, showSolution\)/);
+});
+
+test("students can load assigned exam images without exposing hidden solutions", () => {
+  const questionImage = "/api/files?bucket=class-materials&path=class-1%2Fmaterials%2Fquestion.png";
+  const optionImage = "/api/files?bucket=class-materials&path=class-1%2Fmaterials%2Foption.png";
+  const solutionImage = "/api/files?bucket=class-materials&path=class-1%2Fmaterials%2Fsolution.png";
+  const curriculum = [{
+    sessions: [{
+      lessons: [{
+        type: "exam",
+        is_published: true,
+        exam_status: "open",
+        assigned_to: ["student-1"],
+        exam_content: {
+          questions: [{
+            content_html: `<p><img src="${questionImage}" /></p>`,
+            options: [`<img src="${optionImage.replaceAll("&", "&amp;")}" />`],
+            explanation_html: `<img src="${solutionImage}" />`,
+          }],
+        },
+      }],
+    }],
+  }];
+
+  assert.equal(curriculumReferencesStudentFile(curriculum, questionImage, "student-1"), true);
+  assert.equal(curriculumReferencesStudentFile(curriculum, optionImage, "student-1"), true);
+  assert.equal(curriculumReferencesStudentFile(curriculum, solutionImage, "student-1"), false);
+  assert.equal(curriculumReferencesStudentFile(curriculum, questionImage, "student-2"), false);
+  assert.equal(curriculumReferencesStudentFile(curriculum, questionImage.slice(0, -4), "student-1"), false);
+
+  const closedCurriculum = structuredClone(curriculum);
+  closedCurriculum[0].sessions[0].lessons[0].exam_status = "closed";
+  assert.equal(curriculumReferencesStudentFile(closedCurriculum, questionImage, "student-1"), false);
 });
 
 test("student class and material screens avoid known sequential request waterfalls", async () => {
@@ -853,6 +886,8 @@ test("student curriculum launches a focused full-screen learning player", async 
   assert.match(player, /Nội dung khóa học/);
   assert.match(player, /Ghi chú bài học/);
   assert.match(player, /saveStudentLessonProgress/);
+  assert.match(player, /<StudentExamPlayer/);
+  assert.doesNotMatch(player, /router\.push\(`\/student\/classes\/\$\{classId\}\/exam/);
   assert.match(player, /lessonTypeById\.get\(item\.lesson_id\) !== "homework"/);
   assert.match(player, /submission\.status !== "returned"/);
   assert.doesNotMatch(player, /onTimeUpdate/);

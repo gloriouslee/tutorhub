@@ -14,6 +14,7 @@ import {
 import { getSubmissionsByStudent, type SubmissionRecord } from "@/lib/supabase/submissions";
 import { useStudentContext } from "@/hooks/useStudentContext";
 import { useStudentCurriculum } from "@/hooks/useStudentCurriculum";
+import StudentExamPlayer from "@/components/student/StudentExamPlayer";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -35,7 +36,6 @@ import {
   NotebookPen,
   PanelRightClose,
   PanelRightOpen,
-  PenSquare,
   PlayCircle,
   RefreshCw,
   Save,
@@ -120,6 +120,10 @@ function isExamLocked(lesson: FlatLesson, completed: boolean) {
     return new Date(lesson.exam_opens_at) > new Date();
   }
   return true;
+}
+
+function shouldRenderExamPlayer(lesson: FlatLesson): boolean {
+  return lesson.type === "exam";
 }
 
 function CourseOutline({
@@ -410,10 +414,6 @@ export default function ClassLearningPlayer({ classId, requestedLessonId }: Prop
 
   function openLessonAction() {
     if (!activeLesson) return;
-    if (activeLesson.type === "exam") {
-      router.push(`/student/classes/${classId}/exam/${activeLesson.id}`);
-      return;
-    }
     if (activeLesson.type === "homework") {
       router.push(`/student/classes/${classId}?tab=homework`);
     }
@@ -483,6 +483,16 @@ export default function ClassLearningPlayer({ classId, requestedLessonId }: Prop
           </div>
         </div>
       </main>
+    );
+  }
+
+  if (shouldRenderExamPlayer(activeLesson)) {
+    return (
+      <StudentExamPlayer
+        classId={classId}
+        lessonId={activeLesson.id}
+        onExit={() => router.push(`/student/classes/${classId}?tab=curriculum`)}
+      />
     );
   }
 
@@ -596,9 +606,7 @@ export default function ClassLearningPlayer({ classId, requestedLessonId }: Prop
                       ? "Nội dung này chưa đến thời gian mở hoặc đã được giáo viên đóng."
                       : activeLesson.type === "homework"
                         ? "Đọc yêu cầu bên dưới và mở trang bài tập để nộp bài."
-                        : activeLesson.type === "exam"
-                          ? "Bạn sẽ chuyển sang phòng làm bài an toàn khi bắt đầu."
-                          : activeLesson.type === "material"
+                        : activeLesson.type === "material"
                             ? "Tài liệu này chưa có bản xem trước trực tiếp."
                             : "Giáo viên chưa đính kèm video cho nội dung này."}
                   </p>
@@ -648,27 +656,25 @@ export default function ClassLearningPlayer({ classId, requestedLessonId }: Prop
               </div>
             </div>
 
-            {(activeLesson.type === "homework" || activeLesson.type === "exam") && (
+            {activeLesson.type === "homework" && (
               <div className={`mt-5 flex flex-col gap-3 rounded-xl border p-4 sm:flex-row sm:items-center sm:justify-between ${activeCompleted ? "border-emerald-200 bg-emerald-50/70 dark:border-emerald-900 dark:bg-emerald-950/30" : "border-border bg-muted/25"}`}>
                 <div className="flex items-start gap-3">
                   <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${activeCompleted ? "bg-emerald-100 text-emerald-600 dark:bg-emerald-900" : activeMeta?.bg}`}>
-                    {activeCompleted ? <CheckCircle2 className="h-5 w-5" /> : activeLesson.type === "exam" ? <PenSquare className="h-5 w-5 text-rose-600" /> : <NotebookPen className="h-5 w-5 text-amber-600" />}
+                    {activeCompleted ? <CheckCircle2 className="h-5 w-5" /> : <NotebookPen className="h-5 w-5 text-amber-600" />}
                   </div>
                   <div>
                     <p className="text-sm font-semibold text-foreground">{activeCompleted ? "Đã hoàn thành" : activeLocked ? "Chưa thể bắt đầu" : "Sẵn sàng thực hiện"}</p>
                     <p className="mt-0.5 text-xs text-muted-foreground">
                       {activeCompleted
                         ? "Kết quả đã được ghi nhận vào tiến độ của bạn."
-                        : activeLesson.type === "exam"
-                          ? "Tiến độ chỉ được cập nhật sau khi bạn nộp bài."
-                          : "Tiến độ chỉ được cập nhật sau khi bạn nộp bài tập."}
+                        : "Tiến độ chỉ được cập nhật sau khi bạn nộp bài tập."}
                     </p>
                   </div>
                 </div>
                 {!activeCompleted && (
                   <Button size="sm" disabled={activeLocked} onClick={openLessonAction}>
-                    {activeLesson.type === "exam" ? <PenSquare className="mr-1.5 h-4 w-4" /> : <NotebookPen className="mr-1.5 h-4 w-4" />}
-                    {activeLesson.type === "exam" ? "Bắt đầu làm bài" : "Mở trang bài tập"}
+                    <NotebookPen className="mr-1.5 h-4 w-4" />
+                    Mở trang bài tập
                   </Button>
                 )}
               </div>

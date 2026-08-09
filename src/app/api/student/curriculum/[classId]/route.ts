@@ -16,6 +16,16 @@ function assignedToStudent(value: unknown, studentId: string): boolean {
     || value.map(String).includes(studentId);
 }
 
+function publicExamContent(value: unknown): JsonObject | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const {
+    questions: _questions,
+    ...safe
+  } = value as JsonObject;
+  void _questions;
+  return safe;
+}
+
 function publicLesson(lesson: JsonObject): JsonObject | null {
   if (lesson.is_published !== true) return null;
   const {
@@ -24,6 +34,7 @@ function publicLesson(lesson: JsonObject): JsonObject | null {
     explanation_html: _explanationHtml,
     correct_option: _correctOption,
     correct_value: _correctValue,
+    exam_content: examContent,
     ...safe
   } = lesson;
   void _questions;
@@ -31,7 +42,10 @@ function publicLesson(lesson: JsonObject): JsonObject | null {
   void _explanationHtml;
   void _correctOption;
   void _correctValue;
-  return safe;
+  const safeExamContent = publicExamContent(examContent);
+  return safeExamContent
+    ? { ...safe, exam_content: safeExamContent }
+    : safe;
 }
 
 export async function GET(
