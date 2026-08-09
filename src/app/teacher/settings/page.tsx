@@ -9,11 +9,15 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { SectionHeader } from "@/components/shared";
 import { getTeacherSettings, saveTeacherSettings, type TeacherSettings } from "@/lib/storage";
 import { useTeacherContext } from "@/hooks/useTeacherContext";
+import { resetAccountContextCache } from "@/hooks/useAccountContext";
 import { uploadProfileAsset } from "@/lib/upload";
 import {
   QrCode, UploadCloud, Link2, Check, Loader2, Building2, X,
-  User, Camera, Mail, Phone, GraduationCap, FileText,
+  User, Camera, Mail, Phone, GraduationCap, FileText, Palette,
 } from "lucide-react";
+
+const PORTAL_LOGO_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
+const MAX_PORTAL_LOGO_SIZE = 2 * 1024 * 1024;
 
 export default function TeacherSettingsPage() {
   const { teacherId, teacherName } = useTeacherContext();
@@ -23,10 +27,13 @@ export default function TeacherSettingsPage() {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
   const [avatarUploading, setAvatarUploading] = useState(false);
+  const [portalLogoUploading, setPortalLogoUploading] = useState(false);
+  const [brandingError, setBrandingError] = useState("");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const avatarRef = useRef<HTMLInputElement>(null);
+  const portalLogoRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!teacherId) return;
@@ -79,10 +86,37 @@ export default function TeacherSettingsPage() {
     }
   }
 
+  async function handlePortalLogo(file: File) {
+    setBrandingError("");
+    if (!PORTAL_LOGO_TYPES.has(file.type)) {
+      setBrandingError("Logo phải là ảnh PNG, JPG hoặc WebP.");
+      if (portalLogoRef.current) portalLogoRef.current.value = "";
+      return;
+    }
+    if (file.size > MAX_PORTAL_LOGO_SIZE) {
+      setBrandingError("Dung lượng logo không được vượt quá 2 MB.");
+      if (portalLogoRef.current) portalLogoRef.current.value = "";
+      return;
+    }
+
+    setPortalLogoUploading(true);
+    try {
+      const up = await uploadProfileAsset(file, "portal-logo");
+      set("portal_logo_url", up.url);
+    } catch (error) {
+      setBrandingError(error instanceof Error ? error.message : "Lỗi tải logo lên");
+    } finally {
+      setPortalLogoUploading(false);
+      if (portalLogoRef.current) portalLogoRef.current.value = "";
+    }
+  }
+
   async function handleSave() {
     setSaving(true);
     try {
       const paymentSettings: TeacherSettings = {
+        portal_name: settings.portal_name?.trim() || undefined,
+        portal_logo_url: settings.portal_logo_url,
         qr_image_url: settings.qr_image_url,
         bank_name: settings.bank_name,
         account_holder: settings.account_holder,
@@ -102,6 +136,7 @@ export default function TeacherSettingsPage() {
       });
       if (!profileResponse.ok) throw new Error("profile_update_failed");
       await saveTeacherSettings(teacherId, paymentSettings);
+      resetAccountContextCache();
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
     } catch {
@@ -113,14 +148,124 @@ export default function TeacherSettingsPage() {
 
   const displayName = settings.full_name || teacherName || "Giáo viên";
   const initials = displayName.split(" ").map(n => n[0]).join("").slice(-2).toUpperCase();
+  const portalName = settings.portal_name?.trim() || "TutorHub";
 
   return (
     <PortalLayout role="teacher" userName={displayName} pageTitle="Cài đặt">
       <div className="max-w-2xl mx-auto space-y-6">
         <SectionHeader
           title="Cài đặt & Hồ sơ"
-          subtitle="Chỉnh sửa thông tin cá nhân và cấu hình thanh toán của bạn"
+          subtitle="Tùy chỉnh portal, thông tin cá nhân và cấu hình thanh toán của bạn"
         />
+
+        {/* ── Nhận diện portal ────────────────────────────── */}
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Palette className="h-4 w-4 text-primary" /> Nhận diện portal
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            <p className="text-sm text-muted-foreground">
+              Tên và logo này sẽ xuất hiện trên portal của bạn và của các học viên đang học lớp do bạn phụ trách.
+            </p>
+
+            <div>
+              <label className="text-xs font-medium text-muted-foreground block mb-1.5">
+                Tên portal
+              </label>
+              <Input
+                value={settings.portal_name ?? ""}
+                onChange={event => set("portal_name", event.target.value)}
+                placeholder="TutorHub"
+                maxLength={60}
+              />
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                Tối đa 60 ký tự. Để trống để dùng tên mặc định TutorHub.
+              </p>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-[1fr_220px] sm:items-end">
+              <div>
+                <label className="text-xs font-medium text-muted-foreground block mb-1.5">
+                  Logo portal
+                </label>
+                <input
+                  ref={portalLogoRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  className="hidden"
+                  onChange={event => {
+                    const file = event.target.files?.[0];
+                    if (file) void handlePortalLogo(file);
+                  }}
+                />
+                <div className="flex items-center gap-3">
+                  {settings.portal_logo_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={settings.portal_logo_url}
+                      alt={`Logo ${portalName}`}
+                      className="h-16 w-16 rounded-2xl border border-border bg-white object-contain p-1 shadow-sm"
+                    />
+                  ) : (
+                    <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-500 to-orange-600 shadow-sm">
+                      <GraduationCap className="h-7 w-7 text-white" />
+                    </div>
+                  )}
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => portalLogoRef.current?.click()}
+                      disabled={portalLogoUploading}
+                    >
+                      {portalLogoUploading
+                        ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                        : <UploadCloud className="mr-1.5 h-4 w-4" />}
+                      {settings.portal_logo_url ? "Đổi logo" : "Tải logo lên"}
+                    </Button>
+                    {settings.portal_logo_url && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => set("portal_logo_url", "")}
+                      >
+                        <X className="mr-1 h-4 w-4" /> Xóa
+                      </Button>
+                    )}
+                  </div>
+                </div>
+                <p className="mt-2 text-[11px] text-muted-foreground">PNG, JPG hoặc WebP · tối đa 2 MB.</p>
+                {brandingError && <p className="mt-1 text-xs text-red-500">{brandingError}</p>}
+              </div>
+
+              <div>
+                <p className="mb-1.5 text-[11px] font-medium text-muted-foreground">Xem trước trên thanh menu</p>
+                <div className="flex items-center gap-2.5 rounded-xl border border-border bg-card p-3 shadow-sm">
+                  {settings.portal_logo_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={settings.portal_logo_url}
+                      alt="Logo xem trước"
+                      className="h-8 w-8 rounded-xl border border-border bg-white object-contain"
+                    />
+                  ) : (
+                    <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br from-amber-500 to-orange-600">
+                      <GraduationCap className="h-4 w-4 text-white" />
+                    </div>
+                  )}
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-bold leading-none text-foreground">{portalName}</p>
+                    <p className="mt-0.5 text-[10px] font-medium leading-none text-amber-600">Cổng Giáo Viên</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
 
         {/* ── Hồ sơ giáo viên ─────────────────────────────── */}
         <Card>
@@ -328,7 +473,7 @@ export default function TeacherSettingsPage() {
               <Check className="h-4 w-4" /> Đã lưu
             </span>
           )}
-          <Button variant="gradient" onClick={handleSave} disabled={saving || !loaded}>
+          <Button variant="gradient" onClick={handleSave} disabled={saving || !loaded || portalLogoUploading}>
             {saving ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <Check className="h-4 w-4 mr-1.5" />}
             Lưu cài đặt
           </Button>

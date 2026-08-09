@@ -71,7 +71,7 @@ export async function uploadQuestionFile(
 
 export async function uploadProfileAsset(
   file: File,
-  kind: "avatar" | "payment-qr",
+  kind: "avatar" | "payment-qr" | "portal-logo",
 ): Promise<UploadedFile> {
   const supabase = createClient();
   const { data: authData, error: authError } = await supabase.auth.getUser();

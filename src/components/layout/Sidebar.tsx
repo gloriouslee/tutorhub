@@ -17,6 +17,7 @@ import {
   useAccountContext,
   type ParentChild,
 } from "@/hooks/useAccountContext";
+import { DEFAULT_PORTAL_BRANDING } from "@/lib/portal-branding";
 
 // ── Nav config (no static badges) ────────────────────────────────────────────
 interface NavItem {
@@ -230,6 +231,12 @@ export default function Sidebar({ role, userName, isOpen = true, onClose }: Side
   const studentId = accountContext?.role === "student" ? accountContext.studentId : "";
   const myClasses = accountContext?.role === "student" ? accountContext.classes : [];
   const parentChildren = accountContext?.role === "parent" ? accountContext.children : [];
+  const portalBranding =
+    accountContext?.role === "student" || accountContext?.role === "teacher"
+      ? accountContext.portalBranding
+      : DEFAULT_PORTAL_BRANDING;
+  const [logoFailed, setLogoFailed] = useState(false);
+  const portalLogoUrl = portalBranding.logoUrl;
   const isCatalogOnlyStudent =
     role === "student"
     && (
@@ -263,6 +270,10 @@ export default function Sidebar({ role, userName, isOpen = true, onClose }: Side
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [role, pathname, studentId, contextReady, myClassKey, childrenKey]);
+
+  useEffect(() => {
+    setLogoFailed(false);
+  }, [portalLogoUrl]);
 
   const handleLogout = async () => {
     try {
@@ -302,11 +313,25 @@ export default function Sidebar({ role, userName, isOpen = true, onClose }: Side
             onFocus={() => router.prefetch(homeHref)}
             className="flex items-center gap-2.5"
           >
-            <div className={`h-8 w-8 rounded-xl bg-gradient-to-br ${config.gradient} flex items-center justify-center shadow-lg`}>
-              <GraduationCap className="h-4 w-4 text-white" />
-            </div>
+            {portalLogoUrl && !logoFailed ? (
+              // A protected image proxy is used here; Next Image cannot forward
+              // the signed-in browser session when optimizing the source.
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={portalLogoUrl}
+                alt={`Logo ${portalBranding.name}`}
+                onError={() => setLogoFailed(true)}
+                className="h-8 w-8 rounded-xl border border-border bg-white object-contain shadow-lg"
+              />
+            ) : (
+              <div className={`h-8 w-8 rounded-xl bg-gradient-to-br ${config.gradient} flex items-center justify-center shadow-lg`}>
+                <GraduationCap className="h-4 w-4 text-white" />
+              </div>
+            )}
             <div>
-              <p className="text-sm font-bold text-foreground leading-none">TutorHub</p>
+              <p className="max-w-[155px] truncate text-sm font-bold text-foreground leading-none">
+                {portalBranding.name}
+              </p>
               <p className={`text-[10px] font-medium ${config.color} leading-none mt-0.5`}>{config.label}</p>
             </div>
           </Link>

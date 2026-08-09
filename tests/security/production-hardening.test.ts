@@ -13,8 +13,31 @@ import {
   tuitionForPackage,
 } from "../../src/lib/registration-pricing";
 import { isDiscoverableClass } from "../../src/lib/class-catalog";
+import { resolvePortalBranding } from "../../src/lib/portal-branding";
 
 const read = (path: string) => readFile(path, "utf8");
+
+test("teacher portal branding accepts only uploaded portal logos", () => {
+  assert.deepEqual(
+    resolvePortalBranding({
+      portal_name: "  Lớp Toán Minh Anh  ",
+      portal_logo_url: "/api/files?bucket=avatars&path=user-1%2Fportal-logo%2Flogo.webp",
+    }, "teacher-1"),
+    {
+      name: "Lớp Toán Minh Anh",
+      logoUrl: "/api/files?bucket=avatars&path=user-1%2Fportal-logo%2Flogo.webp",
+      teacherId: "teacher-1",
+    },
+  );
+  assert.deepEqual(
+    resolvePortalBranding({
+      portal_name: " ",
+      portal_logo_url: "https://example.com/tracking-logo.png",
+      bank_name: "Private bank data must not be returned",
+    }),
+    { name: "TutorHub", logoUrl: "" },
+  );
+});
 
 test("password policy rejects weak and accepts strong passwords", () => {
   assert.equal(validatePassword("demo1234"), "password_too_short");

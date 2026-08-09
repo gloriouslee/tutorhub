@@ -1,6 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getRequestIdentity } from "@/lib/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
+import {
+  DEFAULT_PORTAL_BRANDING,
+  resolvePortalBranding,
+  type PortalBranding,
+} from "@/lib/portal-branding";
+
+async function loadPortalBranding(
+  admin: ReturnType<typeof createAdminClient>,
+  teacherId: string | undefined,
+): Promise<PortalBranding> {
+  if (!teacherId) return DEFAULT_PORTAL_BRANDING;
+
+  const { data, error } = await admin
+    .from("kv_teacher_settings")
+    .select("value")
+    .eq("id", teacherId)
+    .maybeSingle();
+  if (error) return DEFAULT_PORTAL_BRANDING;
+
+  return resolvePortalBranding(data?.value, teacherId);
+}
 
 async function attachTutorNames(
   admin: ReturnType<typeof createAdminClient>,
@@ -53,20 +74,29 @@ export async function GET(req: NextRequest) {
       admin,
       (classes ?? []) as Record<string, unknown>[],
     );
+    const primaryTeacherId = hydratedClasses[0]?.tutor_id
+      ? String(hydratedClasses[0].tutor_id)
+      : undefined;
+    const portalBranding = await loadPortalBranding(admin, primaryTeacherId);
     return NextResponse.json({
       role: identity.role,
       studentId: identity.studentId,
       studentName: identity.displayName,
       classes: hydratedClasses,
       assignedClassId: hydratedClasses[0]?.id ?? "",
+      portalBranding,
     });
   }
 
   if (identity.role === "teacher" && identity.teacherId) {
-    const { data: classes, error } = await admin
-      .from("classes")
-      .select("*")
-      .eq("tutor_id", identity.teacherId);
+    const [classResult, portalBranding] = await Promise.all([
+      admin
+        .from("classes")
+        .select("*")
+        .eq("tutor_id", identity.teacherId),
+      loadPortalBranding(admin, identity.teacherId),
+    ]);
+    const { data: classes, error } = classResult;
     if (error) {
       return NextResponse.json({ error: "context_unavailable" }, { status: 500 });
     }
@@ -79,6 +109,7 @@ export async function GET(req: NextRequest) {
         ...item,
         tutor_name: identity.displayName,
       })),
+      portalBranding,
     });
   }
 

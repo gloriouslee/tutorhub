@@ -1247,6 +1247,9 @@ export async function confirmInvoicePaid(invoiceId: string): Promise<TuitionInvo
 // ── Teacher settings (QR thanh toán, thông tin ngân hàng) ────────────────────
 
 export interface TeacherSettings {
+  // Nhận diện portal riêng của giáo viên
+  portal_name?: string;
+  portal_logo_url?: string;
   // Hồ sơ giáo viên
   full_name?: string;
   specialization?: string;  // chuyên môn / môn dạy
@@ -1269,7 +1272,16 @@ export async function getTeacherSettings(teacherId: string): Promise<TeacherSett
 }
 
 export async function saveTeacherSettings(teacherId: string, settings: TeacherSettings): Promise<void> {
-  await kvSet(`${TEACHER_SETTINGS_KEY}${teacherId}`, settings);
+  const key = `${TEACHER_SETTINGS_KEY}${teacherId}`;
+  kvWriteLocal(key, settings);
+  const { error } = await supabase
+    .from("kv_teacher_settings")
+    .upsert({
+      id: teacherId,
+      value: settings,
+      updated_at: new Date().toISOString(),
+    });
+  if (error) throw error;
 }
 
 export interface StudentAccount {

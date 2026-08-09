@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { Class, UserRole } from "@/types";
+import type { PortalBranding } from "@/lib/portal-branding";
 
 export interface ParentChild {
   id: string;
@@ -18,6 +19,7 @@ export type AccountContext =
       studentName: string;
       classes: Class[];
       assignedClassId: string;
+      portalBranding: PortalBranding;
     }
   | {
       role: "teacher";
@@ -25,6 +27,7 @@ export type AccountContext =
       teacherId: string;
       teacherName: string;
       classes: Class[];
+      portalBranding: PortalBranding;
     }
   | {
       role: "parent";
