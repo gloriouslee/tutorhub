@@ -95,11 +95,11 @@ const TABS: { key: TabKey; label: string; icon: React.ElementType }[] = [
   { key: "curriculum",  label: "Lộ trình",   icon: Map },
   { key: "sessions",    label: "Buổi học",   icon: CalendarDays },
   { key: "homework",    label: "Bài tập",    icon: CheckSquare },
+  { key: "students",    label: "Học viên",   icon: Users },
   { key: "schedule",    label: "Lịch học",   icon: Calendar },
   { key: "lectures",    label: "Bài giảng",  icon: Presentation },
   { key: "materials",   label: "Tài liệu",   icon: FileText },
   { key: "notes",       label: "Ghi chú",    icon: StickyNote },
-  { key: "students",    label: "Học viên",   icon: Users },
   { key: "tuition",    label: "Học phí",    icon: Wallet },
 ];
 
@@ -449,12 +449,6 @@ export default function TeacherClassDetailPage() {
     ...uploadedMaterials,
     ...currMaterials,
   ];
-  const lectureMaterials = [...uploadedMaterials, ...currLectures].filter(m => m.kind === "lecture");
-  const overviewLectures = lectureMaterials.map((lecture, index) => ({
-    ...lecture,
-    is_published: true,
-    order: index + 1,
-  }));
   const notes = Object.entries(sessionNotes)
     .filter(([, content]) => content.trim().length > 0)
     .map(([date, content]) => ({
@@ -529,6 +523,8 @@ export default function TeacherClassDetailPage() {
   const allSessions = generateSessions(scheduleForDisplay);
   const upcomingSessions = allSessions.filter(s => !s.isPast || s.isToday);
   const pastSessions = allSessions.filter(s => s.isPast && !s.isToday);
+  const nextSession = upcomingSessions[0] ?? null;
+  const pendingGradingCount = submissions.filter(submission => submission.score == null).length;
 
   // Dedupe persisted records by date and student.
   const dedupedHistory: SavedAttendanceRecord[] = [];
@@ -575,16 +571,16 @@ export default function TeacherClassDetailPage() {
               </div>
               <div className="flex shrink-0 flex-wrap gap-2">
                 <div className="min-w-[76px] rounded-xl border border-white/20 bg-white/10 px-3 py-1.5 text-center backdrop-blur">
-                  <p className="text-xl font-bold leading-tight">{lectureMaterials.length}</p>
-                  <p className="text-[11px] text-white/60">Bài giảng</p>
-                </div>
-                <div className="min-w-[76px] rounded-xl border border-white/20 bg-white/10 px-3 py-1.5 text-center backdrop-blur">
-                  <p className="text-xl font-bold leading-tight">{materials.length}</p>
-                  <p className="text-[11px] text-white/60">Tài liệu</p>
-                </div>
-                <div className="min-w-[76px] rounded-xl border border-white/20 bg-white/10 px-3 py-1.5 text-center backdrop-blur">
                   <p className="text-xl font-bold leading-tight">{classStudents.length}</p>
                   <p className="text-[11px] text-white/60">Học viên</p>
+                </div>
+                <div className="min-w-[76px] rounded-xl border border-white/20 bg-white/10 px-3 py-1.5 text-center backdrop-blur">
+                  <p className="text-xl font-bold leading-tight">{pendingGradingCount}</p>
+                  <p className="text-[11px] text-white/60">Chờ chấm</p>
+                </div>
+                <div className="min-w-[76px] rounded-xl border border-white/20 bg-white/10 px-3 py-1.5 text-center backdrop-blur">
+                  <p className="text-base font-bold leading-tight">{nextSession ? nextSession.date.slice(5).split("-").reverse().join("/") : "—"}</p>
+                  <p className="text-[11px] text-white/60">Buổi tới</p>
                 </div>
               </div>
             </div>
@@ -609,18 +605,25 @@ export default function TeacherClassDetailPage() {
             <OverviewTab
               description={cls.description ?? ""}
               scheduleForDisplay={scheduleForDisplay}
-              lectures={overviewLectures}
-              materials={materials}
-              notes={notes}
+              homeworks={homeworks}
+              submissions={submissions}
+              attendanceRecords={savedAttendanceRecords}
               classStudentsCount={classStudents.length}
               maxStudents={cls.max_students ?? 0}
               onlineLink={onlineLink}
+              nextSession={nextSession}
+              nextSessionContent={nextSession ? curriculumByDate[nextSession.date] : undefined}
               onEditSchedule={() => setActiveTab("schedule")}
               onQuickAdd={type => {
                 setActiveTab(type === "lecture" ? "lectures" : type === "material" ? "materials" : "notes");
                 setUploadModal(type);
               }}
               onSetupOnlineLink={() => setActiveTab("schedule")}
+              onOpenCurriculum={() => setActiveTab("curriculum")}
+              onOpenHomework={() => setActiveTab("homework")}
+              onCreateHomework={() => setHomeworkModal({ open: true })}
+              onOpenSessions={() => setActiveTab("sessions")}
+              onOpenStudents={() => setActiveTab("students")}
             />
           )}
 

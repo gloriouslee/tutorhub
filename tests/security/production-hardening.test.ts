@@ -718,6 +718,26 @@ test("teacher class curriculum uses a compact full-width workspace", async () =>
   assert.match(curriculum, /touch-none/);
 });
 
+test("class overviews prioritize the next action for teachers and students", async () => {
+  const teacherClass = await read("src/app/teacher/classes/[classId]/page.tsx");
+  const teacherOverview = await read("src/components/teacher/OverviewTab.tsx");
+  const studentClass = await read("src/app/student/classes/[classId]/page.tsx");
+  const studentOverview = await read("src/components/student/StudentOverviewTab.tsx");
+
+  assert.match(teacherClass, /nextSessionContent=/);
+  assert.match(teacherOverview, /Buổi học tiếp theo/);
+  assert.match(teacherOverview, /Việc cần xử lý/);
+  assert.match(teacherOverview, /Sức khỏe lớp/);
+  assert.match(teacherOverview, /pendingGrading/);
+
+  assert.match(studentClass, /<StudentOverviewTab/);
+  assert.match(studentClass, /overviewTasks/);
+  assert.match(studentOverview, /Học tiếp theo/);
+  assert.match(studentOverview, /Sắp đến hạn/);
+  assert.match(studentOverview, /Tiến độ bài giảng/);
+  assert.doesNotMatch(studentClass, /Mô tả khóa học/);
+});
+
 test("guardian links are many-to-many, consent-based, and RLS scoped", async () => {
   const migration = await read(
     "supabase/migrations/20260809120000_student_guardians.sql",
