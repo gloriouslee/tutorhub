@@ -11,6 +11,7 @@ import { LearningModeBadge } from "@/components/shared";
 import { getSubmissionsByStudent, type SubmissionRecord } from "@/lib/supabase/submissions";
 import { kvGet, getTeacherHomework, getAllTeacherAttendance, getClassScheduleOverride, getStudentPackages, getStudentLessonProgress, saveStudentLessonProgress, getClassMaterials, getExamResult, getExamScoresByStudent, incrementMaterialDownload, isAssignedToStudent, type StudentPackage, type CurriculumSession, type StoredClassMaterial, type StoredExamScore } from "@/lib/storage";
 import CurriculumView from "@/components/student/CurriculumView";
+import StudentHomeworkTab from "@/components/student/StudentHomeworkTab";
 import StudentOverviewTab from "@/components/student/StudentOverviewTab";
 import { useStudentCurriculum } from "@/hooks/useStudentCurriculum";
 import type { Class } from "@/types";
@@ -18,8 +19,8 @@ import {
   BookOpen, Clock, Video, ArrowLeft, FileText, Download,
   PlayCircle, StickyNote, Pin, Eye, ChevronRight, GraduationCap,
   Calendar, Presentation, Tag, Lock, ShieldAlert, CheckCircle2, AlertCircle,
-  ExternalLink, Check, Map, CalendarDays, UserCheck, UserX, Timer, Minus,
-  ClipboardList, ChevronDown, Send, XCircle, CheckSquare, NotebookPen, PenSquare, Search, Loader2,
+  Check, Map, CalendarDays, UserCheck, UserX, Timer, Minus,
+  ClipboardList, ChevronDown, Send, XCircle, CheckSquare, Search,
 } from "lucide-react";
 import { formatDate, mapWithConcurrency, toLocalDateKey } from "@/lib/utils";
 import { useStudentContext } from "@/hooks/useStudentContext";
@@ -266,7 +267,6 @@ export default function StudentClassDetailPage() {
   const [curriculumLectures, setCurriculumLectures] = useState<LectureCard[]>([]);
   const [curriculumMaterials, setCurriculumMaterials] = useState<StoredClassMaterial[]>([]);
   // Bộ lọc / tìm kiếm cho các tab (giảm ngợp thông tin)
-  const [hwFilter, setHwFilter]   = useState<"all" | "todo" | "done">("all");
   const [lecFilter, setLecFilter] = useState<"all" | "lecture" | "solution">("all");
   const [lecQuery, setLecQuery]   = useState("");
   const [matCat, setMatCat]       = useState<string>("all");
@@ -406,11 +406,6 @@ export default function StudentClassDetailPage() {
     return () => { cancelled = true; };
   }, [classId, curriculumChapters, curriculumLoading, studentId, tutorId]);
 
-  const homeworkLoading =
-    !manualHomeworkLoaded
-    || !curriculumHomeworkLoaded
-    || !homeworkSubmissionsLoaded;
-
   // ── Loading (class resolution + student context) ──────────────────────────
   if (!ready || cls === undefined) {
     return (
@@ -474,9 +469,6 @@ export default function StudentClassDetailPage() {
     return !!s && s.status !== "returned";
   };
   const incompleteClassHomework = classHomework.filter(hw => !isHwDone(hw));
-  const hwDoneCount = sortedClassHomework.length - incompleteClassHomework.length;
-  const hwView = sortedClassHomework.filter(hw =>
-    hwFilter === "all" ? true : hwFilter === "done" ? isHwDone(hw) : !isHwDone(hw));
 
   // Bài giảng: lọc theo loại + tìm kiếm
   const lecView = lectureItems.filter(l =>
@@ -1293,149 +1285,15 @@ export default function StudentClassDetailPage() {
 
           {/* ── Homework ── */}
           {activeTab === "homework" && (
-            <div className="space-y-4">
-              {homeworkLoading ? (
-                <Card>
-                  <CardContent
-                    role="status"
-                    aria-live="polite"
-                    className="flex flex-col items-center justify-center py-16 text-center"
-                  >
-                    <Loader2 className="mb-3 h-8 w-8 animate-spin text-primary" />
-                    <p className="text-sm font-semibold text-foreground">Đang tải bài tập…</p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      Đang cập nhật đề bài và trạng thái bài nộp mới nhất.
-                    </p>
-                  </CardContent>
-                </Card>
-              ) : sortedClassHomework.length === 0 ? (
-                <Card><CardContent className="py-16 text-center text-muted-foreground">
-                  <NotebookPen className="h-12 w-12 mx-auto opacity-20 mb-3" />
-                  <p className="text-sm font-medium">Lớp này chưa có bài tập nào</p>
-                </CardContent></Card>
-              ) : (
-                <>
-                  {/* Bộ lọc trạng thái */}
-                  <div className="flex flex-wrap items-center gap-2">
-                    {([["all", `Tất cả (${sortedClassHomework.length})`], ["todo", `Chưa làm (${incompleteClassHomework.length})`], ["done", `Đã xong (${hwDoneCount})`]] as const).map(([k, label]) => (
-                      <button
-                        key={k}
-                        onClick={() => setHwFilter(k)}
-                        className={`px-3 py-1.5 text-xs font-semibold rounded-xl transition-all ${hwFilter === k ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:bg-accent"}`}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-
-                  {hwView.length === 0 ? (
-                    <Card><CardContent className="py-10 text-center text-sm text-muted-foreground">Không có bài tập nào phù hợp bộ lọc.</CardContent></Card>
-                  ) : hwView.map((hw, i) => {
-                  // Bài làm câu hỏi trên hệ thống
-                  if (hw.kind === "exam") {
-                    return (
-                      <Card key={hw.id} className="animate-fade-in hover:shadow-md transition-all" style={{ animationDelay: `${i * 60}ms` }}>
-                        <CardContent className="p-5">
-                          <div className="flex items-start gap-4">
-                            <div className="h-11 w-11 rounded-xl flex items-center justify-center shrink-0 bg-amber-500/10 text-amber-600 dark:text-amber-400">
-                              <NotebookPen className="h-5 w-5" />
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <div className="flex flex-wrap items-start justify-between gap-2 mb-1">
-                                <h3 className="font-semibold text-foreground">{hw.title}</h3>
-                                {hw.exam_done ? (
-                                  <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400">
-                                    Đã làm{hw.exam_score != null ? ` · ${hw.exam_score}/${hw.exam_total}` : ""}
-                                  </span>
-                                ) : (
-                                  <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400">Chưa làm</span>
-                                )}
-                              </div>
-                              {hw.description && <p className="text-sm text-muted-foreground leading-relaxed mb-2">{hw.description}</p>}
-                              <p className="flex items-center gap-1 text-xs font-semibold text-rose-600 dark:text-rose-400 mb-3">
-                                <PenSquare className="h-3.5 w-3.5" /> Làm trên hệ thống
-                              </p>
-                              <Link href={`/student/classes/${classId}/exam/${hw.id}`}>
-                                <Button size="sm" variant={hw.exam_done ? "outline" : "gradient"}>
-                                  <PlayCircle className="h-3.5 w-3.5 mr-1.5" /> {hw.exam_done ? "Xem lại / Làm lại" : "Làm bài"}
-                                </Button>
-                              </Link>
-                            </div>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    );
-                  }
-
-                  // Bài nộp file
-                  const sub     = submissions.find(s => s.homework_id === hw.id && s.student_id === CURRENT_STUDENT_ID);
-                  const returned = sub?.status === "returned";
-                  const graded   = sub?.status === "graded";
-                  const days    = Math.ceil((new Date(hw.due_date).setHours(23,59,59) - Date.now()) / 86400000);
-                  const overdue = !sub && days < 0;
-
-                  return (
-                    <Card
-                      key={hw.id}
-                      className="animate-fade-in hover:shadow-md transition-all"
-                      style={{ animationDelay: `${i * 60}ms` }}
-                    >
-                      <CardContent className="p-5">
-                        <div className="flex items-start gap-4">
-                          <div className={`h-11 w-11 rounded-xl flex items-center justify-center shrink-0 ${returned || overdue ? "bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400" : graded ? "bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400" : "bg-primary/10 text-primary"}`}>
-                            {returned || overdue ? <AlertCircle className="h-5 w-5" />
-                              : graded ? <CheckCircle2 className="h-5 w-5" />
-                              : <NotebookPen className="h-5 w-5" />}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex flex-wrap items-start justify-between gap-2 mb-1">
-                              <h3 className="font-semibold text-foreground">{hw.title}</h3>
-                              <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full ${
-                                returned || overdue ? "bg-red-100 text-red-700 dark:bg-red-900/20 dark:text-red-400"
-                                : graded ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400"
-                                : sub ? "bg-blue-100 text-blue-700 dark:bg-blue-900/20 dark:text-blue-400"
-                                : "bg-amber-100 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400"
-                              }`}>
-                                {returned ? "Cần làm lại"
-                                  : graded ? "Đã chấm"
-                                  : sub ? "Đã nộp"
-                                  : overdue ? "Quá hạn"
-                                  : days === 0 ? "Hôm nay"
-                                  : `Còn ${days} ngày`}
-                              </span>
-                            </div>
-                            {hw.description && <p className="text-sm text-muted-foreground leading-relaxed mb-3">{hw.description}</p>}
-                            <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                              <span className="flex items-center gap-1">
-                                <Calendar className="h-3.5 w-3.5" />
-                                Hạn nộp: <strong className="text-foreground ml-1">{formatDate(hw.due_date)}</strong>
-                              </span>
-                            </div>
-
-                            {/* Feedback if graded */}
-                            {sub?.feedback && (
-                              <div className="mt-3 p-3 bg-emerald-50/60 dark:bg-emerald-950/20 rounded-xl border border-emerald-100 dark:border-emerald-900/40 text-sm">
-                                <p className="font-semibold text-emerald-700 dark:text-emerald-400 text-xs mb-1">Nhận xét:</p>
-                                  <p className="italic text-foreground/80">&quot;{sub.feedback}&quot;</p>
-                              </div>
-                            )}
-
-                            <div className="mt-3">
-                              <Link href="/student/homework">
-                                <Button size="sm" variant={!sub || returned ? "gradient" : "outline"}>
-                                  <ExternalLink className="h-3.5 w-3.5 mr-1.5" /> {!sub || returned ? "Đến trang nộp bài" : "Xem bài nộp"}
-                                </Button>
-                              </Link>
-                            </div>
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  );
-                })}
-                </>
-              )}
-            </div>
+            <StudentHomeworkTab
+              classId={classId}
+              homework={sortedClassHomework}
+              submissions={submissions}
+              studentId={CURRENT_STUDENT_ID}
+              assignmentsLoading={!manualHomeworkLoaded && !curriculumHomeworkLoaded}
+              assignmentsRefreshing={!manualHomeworkLoaded || !curriculumHomeworkLoaded}
+              submissionsLoading={!homeworkSubmissionsLoaded}
+            />
           )}
 
         </div>

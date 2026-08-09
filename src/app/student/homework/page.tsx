@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { Card, CardContent } from "@/components/ui/card";
@@ -68,6 +68,7 @@ export default function StudentHomeworkPage() {
   const [dragOver,     setDragOver]     = useState(false);
   const [uploadState,  setUploadState]  = useState<"idle" | "uploading" | "success">("idle");
   const [errorMsg,     setErrorMsg]     = useState("");
+  const deepLinkHandledRef = useRef("");
 
   useEffect(() => {
     const classKey = myClassIds.join(",");
@@ -159,6 +160,27 @@ export default function StudentHomeworkPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, STUDENT_ID, myClassIds.join(",")]);
 
+  useEffect(() => {
+    if (loadingHomework || typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const homeworkId = params.get("homeworkId") ?? "";
+    const classId = params.get("classId") ?? "";
+    if (!homeworkId) return;
+    const key = `${classId}:${homeworkId}:${params.get("action") ?? ""}`;
+    if (deepLinkHandledRef.current === key) return;
+    const target = teacherHw.find((item) => item.id === homeworkId && (!classId || item.class_id === classId));
+    if (!target) return;
+    const submission = submissions.find((item) => item.homework_id === homeworkId && item.student_id === STUDENT_ID);
+    const requestedAction = params.get("action");
+    const shouldSubmit = requestedAction === "submit" || !submission || submission.status === "returned";
+    deepLinkHandledRef.current = key;
+    setSelectedHw(target);
+    setModalType(shouldSubmit ? "submit" : "detail");
+    setFile(null);
+    setUploadState("idle");
+    setErrorMsg("");
+  }, [STUDENT_ID, loadingHomework, submissions, teacherHw]);
+
   // Per-homework submission lookup
   function getSub(hwId: string) {
     return submissions.find(s => s.homework_id === hwId && s.student_id === STUDENT_ID);
@@ -167,6 +189,8 @@ export default function StudentHomeworkPage() {
   // Status logic
   function hwStatus(hwId: string, dueDate: string) {
     const sub = getSub(hwId);
+    if (sub?.status === "returned")
+      return { label: "Cần làm lại", color: "bg-rose-100 text-rose-700 dark:bg-rose-900/20 dark:text-rose-400", icon: AlertCircle, key: "pending" as FilterTab };
     if (sub?.status === "graded" && sub.score != null)
       return { label: `Đã chấm · ${sub.score}/10`, color: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400", icon: Star, key: "graded" as FilterTab };
     if (sub)
@@ -225,6 +249,9 @@ export default function StudentHomeworkPage() {
     setFile(null);
     setUploadState("idle");
     setErrorMsg("");
+    if (typeof window !== "undefined" && new URLSearchParams(window.location.search).has("homeworkId")) {
+      router.replace("/student/homework", { scroll: false });
+    }
   }
 
   function handleFileChange(f: File | null) {

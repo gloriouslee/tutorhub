@@ -661,7 +661,7 @@ export default function TeacherClassDetailPage() {
 
           {/* ── Homework ── */}
           {activeTab === "homework" && (
-            !curriculumHomeworkLoaded || !persistedHomeworkLoaded ? (
+            homeworks.length === 0 && (!curriculumHomeworkLoaded || !persistedHomeworkLoaded) ? (
               <HomeworkPanelFallback />
             ) : (
               <HomeworkTab
@@ -673,6 +673,13 @@ export default function TeacherClassDetailPage() {
                 onEditHomework={hw => setHomeworkModal({ open: true, editing: hw })}
                 onDeleteHomework={handleDeleteHomework}
                 onGradeExam={gradeExamInCurriculum}
+                assignmentsRefreshing={!curriculumHomeworkLoaded || !persistedHomeworkLoaded}
+                submissionsLoading={!persistedHomeworkLoaded}
+                onSubmissionGraded={(submissionId, patch) => {
+                  setSubmissions(current => current.map(submission => (
+                    submission.id === submissionId ? { ...submission, ...patch } : submission
+                  )));
+                }}
               />
             )
           )}

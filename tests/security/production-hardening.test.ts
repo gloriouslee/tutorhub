@@ -736,6 +736,7 @@ test("homework navigation and data loading always provide immediate feedback", a
   const studentClass = await read("src/app/student/classes/[classId]/page.tsx");
   const studentClassHomework = await read("src/components/student/StudentHomeworkTab.tsx");
   const teacherClass = await read("src/app/teacher/classes/[classId]/page.tsx");
+  const teacherClassHomework = await read("src/components/teacher/HomeworkTab.tsx");
 
   assert.match(sidebar, /useLinkStatus/);
   assert.match(sidebar, /Đang mở/);
@@ -766,6 +767,14 @@ test("homework navigation and data loading always provide immediate feedback", a
   assert.match(studentHomework, /setModalType\(shouldSubmit \? "submit" : "detail"\)/);
   assert.match(teacherClass, /HomeworkPanelFallback/);
   assert.match(teacherClass, /persistedHomeworkLoaded/);
+  assert.match(teacherClass, /assignmentsRefreshing=\{!curriculumHomeworkLoaded \|\| !persistedHomeworkLoaded\}/);
+  assert.match(teacherClass, /onSubmissionGraded=/);
+  assert.match(teacherClassHomework, /Trung tâm chấm bài/);
+  assert.match(teacherClassHomework, /Cần chấm/);
+  assert.match(teacherClassHomework, /Chờ học sinh/);
+  assert.match(teacherClassHomework, /Ưu tiên chấm tiếp theo/);
+  assert.match(teacherClassHomework, /<SubmissionGrader/);
+  assert.match(teacherClassHomework, /học sinh chưa nộp/);
 });
 
 test("teacher class curriculum uses a compact full-width workspace", async () => {

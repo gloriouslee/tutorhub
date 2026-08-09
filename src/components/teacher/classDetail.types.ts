@@ -2,6 +2,7 @@ import { ClassSchedule } from "@/types";
 import { toLocalDateKey } from "@/lib/utils";
 import { weekdayIndex } from "@/lib/weekday";
 import type { HomeworkAttachment, StudentPackage } from "@/lib/storage";
+import type { SubmissionRecord } from "@/lib/supabase/submissions";
 
 // Nhãn ngày trong tuần và ánh xạ sang số thứ tự: dùng src/lib/weekday.ts
 // (WEEKDAYS_VI / weekdayIndex / weekdayLabelVi) — nơi duy nhất hỗ trợ cả 3 dạng
@@ -119,12 +120,7 @@ export function formatDuration(sec?: number): string {
   return m > 0 ? `${m} phút ${s}s` : `${s}s`;
 }
 
-export interface Submission {
-  id: string;
-  homework_id: string;
-  student_id: string;
-  score?: number;
-}
+export type Submission = SubmissionRecord;
 
 export function dueStatus(dueDate: string): { label: string; color: string } {
   const now = new Date();
