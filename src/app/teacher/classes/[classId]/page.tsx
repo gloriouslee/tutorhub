@@ -33,7 +33,7 @@ import {
 import {
   BookOpen, Users, ArrowLeft, FileText, Plus,
   Calendar, Presentation, StickyNote,
-  CalendarDays, CheckSquare, Map, Wallet,
+  CalendarDays, CheckSquare, Map, Wallet, Trophy,
 } from "lucide-react";
 import OverviewTab from "@/components/teacher/OverviewTab";
 import {
@@ -89,12 +89,15 @@ const NotesTab = dynamic(() => import("@/components/teacher/NotesTab"), {
 const StudentsTab = dynamic(() => import("@/components/teacher/StudentsTab"), {
   loading: DeferredPanelFallback,
 });
+const LeaderboardTab = dynamic(() => import("@/components/teacher/LeaderboardTab"), {
+  loading: DeferredPanelFallback,
+});
 const HomeworkModal = dynamic(() => import("@/components/teacher/HomeworkModal"));
 const SessionNotesPanel = dynamic(() => import("@/components/teacher/SessionNotesPanel"));
 const UploadModal = dynamic(() => import("@/components/teacher/UploadModal"));
 const FeedbackModal = dynamic(() => import("@/components/teacher/FeedbackModal"));
 
-type TabKey = "overview" | "curriculum" | "sessions" | "homework" | "resources" | "schedule" | "lectures" | "materials" | "notes" | "students" | "tuition";
+type TabKey = "overview" | "curriculum" | "sessions" | "homework" | "resources" | "schedule" | "lectures" | "materials" | "notes" | "students" | "leaderboard" | "tuition";
 
 const TABS: { key: TabKey; label: string; icon: React.ElementType }[] = [
   { key: "overview",    label: "Tổng quan",  icon: BookOpen },
@@ -103,6 +106,7 @@ const TABS: { key: TabKey; label: string; icon: React.ElementType }[] = [
   { key: "sessions",    label: "Vận hành buổi học", icon: CalendarDays },
   { key: "resources",   label: "Tài nguyên", icon: FileText },
   { key: "students",    label: "Học viên",   icon: Users },
+  { key: "leaderboard", label: "Bảng xếp hạng", icon: Trophy },
   { key: "tuition",    label: "Học phí",    icon: Wallet },
 ];
 
@@ -805,6 +809,10 @@ export default function TeacherClassDetailPage() {
               onOpenComment={setCommentModalStudent}
               onRemoveStudent={handleRemoveStudent}
             />
+          )}
+
+          {activeTab === "leaderboard" && (
+            <LeaderboardTab classId={classId} />
           )}
 
           {activeTab === "tuition" && (

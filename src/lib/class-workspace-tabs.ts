@@ -1,7 +1,7 @@
 export type CurriculumContentFilter = "all" | "lecture" | "material" | "homework" | "exam" | "solution";
 
 export type StudentClassTab = "overview" | "curriculum" | "homework" | "sessions" | "materials" | "leaderboard" | "notes";
-export type TeacherClassTab = "overview" | "curriculum" | "sessions" | "homework" | "resources" | "students" | "tuition";
+export type TeacherClassTab = "overview" | "curriculum" | "sessions" | "homework" | "resources" | "students" | "leaderboard" | "tuition";
 export type TeacherResourceView = "lectures" | "materials" | "notes";
 
 function cleanTab(raw: string | null) {
@@ -40,7 +40,7 @@ export function resolveTeacherClassWorkspace(tab: string | null, content: string
   if (cleaned === "lectures") return { tab: "resources", content: "all", resource: "lectures", operations: "sessions" };
   if (cleaned === "materials") return { tab: "resources", content: "all", resource: "materials", operations: "sessions" };
   if (cleaned === "notes") return { tab: "resources", content: "all", resource: "notes", operations: "sessions" };
-  if ((["overview", "curriculum", "sessions", "homework", "resources", "students", "tuition"] as TeacherClassTab[]).includes(cleaned as TeacherClassTab)) {
+  if ((["overview", "curriculum", "sessions", "homework", "resources", "students", "leaderboard", "tuition"] as TeacherClassTab[]).includes(cleaned as TeacherClassTab)) {
     const requestedResource = cleanTab(content);
     const resource = cleaned === "resources" && (["lectures", "materials", "notes"] as TeacherResourceView[]).includes(requestedResource as TeacherResourceView)
       ? requestedResource as TeacherResourceView

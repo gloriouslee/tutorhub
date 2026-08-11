@@ -24,8 +24,9 @@ interface LeaderboardPayload extends ClassLeaderboardSummary {
   generatedAt: string;
 }
 
-interface StudentLeaderboardTabProps {
+interface ClassLeaderboardTabProps {
   classId: string;
+  audience?: "student" | "teacher";
 }
 
 const PODIUM_STYLES = [
@@ -70,7 +71,10 @@ function LeaderboardSkeleton() {
   );
 }
 
-export default function StudentLeaderboardTab({ classId }: StudentLeaderboardTabProps) {
+export default function ClassLeaderboardTab({
+  classId,
+  audience = "student",
+}: ClassLeaderboardTabProps) {
   const [data, setData] = useState<LeaderboardPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -82,7 +86,7 @@ export default function StudentLeaderboardTab({ classId }: StudentLeaderboardTab
     const controller = new AbortController();
     setLoading(true);
     setError(false);
-    fetch(`/api/student/classes/${encodeURIComponent(classId)}/leaderboard`, {
+    fetch(`/api/${audience}/classes/${encodeURIComponent(classId)}/leaderboard`, {
       cache: "no-store",
       credentials: "same-origin",
       signal: controller.signal,
@@ -100,7 +104,7 @@ export default function StudentLeaderboardTab({ classId }: StudentLeaderboardTab
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [classId, revision]);
+  }, [audience, classId, revision]);
 
   const currentStudent = useMemo(
     () => data?.entries.find((entry) => entry.isCurrentStudent) ?? null,
@@ -144,28 +148,22 @@ export default function StudentLeaderboardTab({ classId }: StudentLeaderboardTab
               <Trophy className="h-8 w-8 text-amber-300" /> Bảng xếp hạng
             </h2>
             <p className="mt-2 max-w-xl text-sm leading-relaxed text-white/75">
-              Điểm được quy đổi về thang 100 từ các bài kiểm tra đã có kết quả trong lớp này.
+              {audience === "teacher"
+                ? "Theo dõi kết quả của học viên từ các bài kiểm tra đã có điểm trong lớp này."
+                : "Điểm được quy đổi về thang 100 từ các bài kiểm tra đã có kết quả trong lớp này."}
             </p>
           </div>
 
           <div className="grid grid-cols-3 gap-2 md:min-w-[360px]">
-            {[
-              {
-                label: "Hạng của bạn",
-                value: currentStudent?.rank ? `#${currentStudent.rank}` : "—",
-                icon: Trophy,
-              },
-              {
-                label: "Điểm của bạn",
-                value: formatScore(currentStudent?.averageScore ?? null),
-                icon: Target,
-              },
-              {
-                label: "Đã có điểm",
-                value: `${data.scoredStudents}/${data.totalStudents}`,
-                icon: Users,
-              },
-            ].map((stat) => (
+            {(audience === "teacher" ? [
+              { label: "Điểm TB lớp", value: formatScore(data.classAverage), icon: Target },
+              { label: "Đã có điểm", value: `${data.scoredStudents}/${data.totalStudents}`, icon: Trophy },
+              { label: "Tổng học viên", value: data.totalStudents, icon: Users },
+            ] : [
+              { label: "Hạng của bạn", value: currentStudent?.rank ? `#${currentStudent.rank}` : "—", icon: Trophy },
+              { label: "Điểm của bạn", value: formatScore(currentStudent?.averageScore ?? null), icon: Target },
+              { label: "Đã có điểm", value: `${data.scoredStudents}/${data.totalStudents}`, icon: Users },
+            ]).map((stat) => (
               <div key={stat.label} className="rounded-xl border border-white/20 bg-white/10 px-2 py-3 text-center backdrop-blur-sm">
                 <stat.icon className="mx-auto mb-1 h-4 w-4 text-white/70" />
                 <p className="text-xl font-black leading-none">{stat.value}</p>

@@ -37,6 +37,9 @@ test("class workspace URLs normalize legacy and punctuated tab values", () => {
   assert.deepEqual(resolveTeacherClassWorkspace("resources", "lectures"), {
     tab: "resources", content: "all", resource: "lectures", operations: "sessions",
   });
+  assert.deepEqual(resolveTeacherClassWorkspace("leaderboard"), {
+    tab: "leaderboard", content: "all", resource: "materials", operations: "sessions",
+  });
 });
 
 test("class leaderboard normalizes scores and keeps ties deterministic", () => {
@@ -68,16 +71,21 @@ test("class leaderboard normalizes scores and keeps ties deterministic", () => {
   assert.equal(result.scoredStudents, 2);
 });
 
-test("student leaderboard is class-scoped and exposes only roster display fields", async () => {
-  const route = await read("src/app/api/student/classes/[classId]/leaderboard/route.ts");
+test("class leaderboard is role-scoped and exposes only roster display fields", async () => {
+  const studentRoute = await read("src/app/api/student/classes/[classId]/leaderboard/route.ts");
+  const teacherRoute = await read("src/app/api/teacher/classes/[classId]/leaderboard/route.ts");
+  const server = await read("src/lib/class-leaderboard-server.ts");
   const component = await read("src/components/student/StudentLeaderboardTab.tsx");
 
-  assert.match(route, /identity\?\.role !== "student"/);
-  assert.match(route, /studentIds\.includes\(identity\.studentId\)/);
-  assert.match(route, /\.eq\("class_id", classId\)/);
-  assert.match(route, /select\("id,full_name,avatar_url"\)/);
-  assert.doesNotMatch(route, /select\("[^"]*email/);
+  assert.match(studentRoute, /identity\?\.role !== "student"/);
+  assert.match(studentRoute, /leaderboardStudentIds\(classScope\)\.includes\(identity\.studentId\)/);
+  assert.match(teacherRoute, /identity\.role !== "teacher" && identity\.role !== "admin"/);
+  assert.match(teacherRoute, /classScope\.tutor_id !== identity\.teacherId/);
+  assert.match(server, /\.eq\("class_id", classId\)/);
+  assert.match(server, /select\("id,full_name,avatar_url"\)/);
+  assert.doesNotMatch(server, /select\("[^"]*email/);
   assert.match(component, /Bảng xếp hạng/);
+  assert.match(component, /audience === "teacher"/);
   assert.match(component, /credentials: "same-origin"/);
 });
 
@@ -95,6 +103,8 @@ test("class portals expose curriculum-first workspaces without duplicating legac
   assert.match(teacherPage, /label: "Lộ trình & nội dung"/);
   assert.match(teacherPage, /label: "Bài tập & chấm"/);
   assert.match(teacherPage, /label: "Vận hành buổi học"/);
+  assert.match(teacherPage, /label: "Bảng xếp hạng"/);
+  assert.match(teacherPage, /activeTab === "leaderboard"/);
   assert.match(teacherPage, /activeTab === "resources"/);
   assert.match(studentHomework, /Theo lộ trình/);
   assert.match(studentHomework, /\/learn\/\$\{homework\.id\}/);

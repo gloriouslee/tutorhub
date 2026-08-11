@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getRequestIdentity } from "@/lib/api-auth";
 import {
-  leaderboardStudentIds,
   loadClassLeaderboard,
   loadLeaderboardClassScope,
 } from "@/lib/class-leaderboard-server";
@@ -15,9 +14,9 @@ export async function GET(
   { params }: { params: Promise<{ classId: string }> },
 ) {
   const identity = await getRequestIdentity(req);
-  if (identity?.role !== "student" || !identity.studentId) {
+  if (!identity || (identity.role !== "teacher" && identity.role !== "admin")) {
     return NextResponse.json(
-      { error: "student_authorization_required" },
+      { error: "teacher_authorization_required" },
       { status: 403, ...PRIVATE_NO_STORE },
     );
   }
@@ -38,7 +37,7 @@ export async function GET(
         { status: 404, ...PRIVATE_NO_STORE },
       );
     }
-    if (!leaderboardStudentIds(classScope).includes(identity.studentId)) {
+    if (identity.role === "teacher" && classScope.tutor_id !== identity.teacherId) {
       return NextResponse.json(
         { error: "forbidden" },
         { status: 403, ...PRIVATE_NO_STORE },
@@ -46,10 +45,7 @@ export async function GET(
     }
 
     return NextResponse.json(
-      await loadClassLeaderboard(classScope, {
-        studentId: identity.studentId,
-        displayName: identity.displayName,
-      }),
+      await loadClassLeaderboard(classScope),
       PRIVATE_NO_STORE,
     );
   } catch {
