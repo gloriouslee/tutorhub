@@ -19,6 +19,7 @@ import { parseExamText } from "../../src/lib/examTextParser";
 import { convertOmmlInDocumentXml, ommlFragmentToLatex } from "../../src/lib/ommlToLatex";
 import { googleDrivePreviewUrl } from "../../src/lib/google-drive";
 import { resolveStudentClassWorkspace, resolveTeacherClassWorkspace } from "../../src/lib/class-workspace-tabs";
+import { buildClassLeaderboard } from "../../src/lib/class-leaderboard";
 
 const read = (path: string) => readFile(path, "utf8");
 
@@ -26,6 +27,7 @@ test("class workspace URLs normalize legacy and punctuated tab values", () => {
   assert.deepEqual(resolveStudentClassWorkspace("homework,"), { tab: "homework", content: "all" });
   assert.deepEqual(resolveStudentClassWorkspace("lectures"), { tab: "curriculum", content: "lecture" });
   assert.deepEqual(resolveStudentClassWorkspace("attendance"), { tab: "sessions", content: "all" });
+  assert.deepEqual(resolveStudentClassWorkspace("leaderboard"), { tab: "leaderboard", content: "all" });
   assert.deepEqual(resolveTeacherClassWorkspace("schedule"), {
     tab: "sessions", content: "all", resource: "materials", operations: "schedule",
   });
@@ -35,6 +37,48 @@ test("class workspace URLs normalize legacy and punctuated tab values", () => {
   assert.deepEqual(resolveTeacherClassWorkspace("resources", "lectures"), {
     tab: "resources", content: "all", resource: "lectures", operations: "sessions",
   });
+});
+
+test("class leaderboard normalizes scores and keeps ties deterministic", () => {
+  const result = buildClassLeaderboard(
+    [
+      { id: "s1", fullName: "An", avatarUrl: "" },
+      { id: "s2", fullName: "Bình", avatarUrl: "" },
+      { id: "s3", fullName: "Chi", avatarUrl: "" },
+    ],
+    [
+      { studentId: "s1", score: 9, maxScore: 10 },
+      { studentId: "s1", score: 18, maxScore: 20 },
+      { studentId: "s2", score: 45, maxScore: 50 },
+    ],
+    "s2",
+  );
+
+  assert.deepEqual(
+    result.entries.map(({ studentId, rank, averageScore, assessments, isCurrentStudent }) => ({
+      studentId, rank, averageScore, assessments, isCurrentStudent,
+    })),
+    [
+      { studentId: "s1", rank: 1, averageScore: 90, assessments: 2, isCurrentStudent: false },
+      { studentId: "s2", rank: 2, averageScore: 90, assessments: 1, isCurrentStudent: true },
+      { studentId: "s3", rank: null, averageScore: null, assessments: 0, isCurrentStudent: false },
+    ],
+  );
+  assert.equal(result.classAverage, 90);
+  assert.equal(result.scoredStudents, 2);
+});
+
+test("student leaderboard is class-scoped and exposes only roster display fields", async () => {
+  const route = await read("src/app/api/student/classes/[classId]/leaderboard/route.ts");
+  const component = await read("src/components/student/StudentLeaderboardTab.tsx");
+
+  assert.match(route, /identity\?\.role !== "student"/);
+  assert.match(route, /studentIds\.includes\(identity\.studentId\)/);
+  assert.match(route, /\.eq\("class_id", classId\)/);
+  assert.match(route, /select\("id,full_name,avatar_url"\)/);
+  assert.doesNotMatch(route, /select\("[^"]*email/);
+  assert.match(component, /Bảng xếp hạng/);
+  assert.match(component, /credentials: "same-origin"/);
 });
 
 test("class portals expose curriculum-first workspaces without duplicating legacy tabs", async () => {

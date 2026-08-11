@@ -13,6 +13,7 @@ import { kvGet, getTeacherHomework, getAllTeacherAttendance, getClassScheduleOve
 import CurriculumView from "@/components/student/CurriculumView";
 import StudentOverviewTab from "@/components/student/StudentOverviewTab";
 import StudentHomeworkTab from "@/components/student/StudentHomeworkTab";
+import StudentLeaderboardTab from "@/components/student/StudentLeaderboardTab";
 import { useStudentCurriculum } from "@/hooks/useStudentCurriculum";
 import type { Class } from "@/types";
 import { weekdayIndex, weekdayLabelVi } from "@/lib/weekday";
@@ -26,7 +27,7 @@ import {
   PlayCircle, StickyNote, Pin, Eye, ChevronRight, GraduationCap,
   Calendar, Presentation, Tag, Lock, ShieldAlert, CheckCircle2, AlertCircle,
   Check, Map, CalendarDays, UserCheck, UserX, Timer, Minus,
-  ClipboardList, ChevronDown, Send, XCircle, CheckSquare, Search,
+  ClipboardList, ChevronDown, Send, XCircle, CheckSquare, Search, Trophy,
 } from "lucide-react";
 import { formatDate, mapWithConcurrency, toLocalDateKey } from "@/lib/utils";
 import { useStudentContext } from "@/hooks/useStudentContext";
@@ -78,7 +79,7 @@ function loadSavedAttendance(classId: string, studentId: string): Promise<SavedA
   }) as unknown as Promise<SavedAttendanceRecord[]>;
 }
 
-type TabKey = "overview" | "curriculum" | "sessions" | "attendance" | "homework" | "materials" | "lectures" | "notes";
+type TabKey = "overview" | "curriculum" | "sessions" | "attendance" | "homework" | "materials" | "lectures" | "leaderboard" | "notes";
 
 
 const CATEGORY_MAP: Record<string, { label: string; color: string }> = {
@@ -604,6 +605,7 @@ export default function StudentClassDetailPage() {
     { key: "homework",    label: "Việc cần làm", icon: CheckCircle2, badge: incompleteClassHomework.length },
     { key: "sessions",    label: "Lịch & chuyên cần", icon: CalendarDays },
     { key: "materials",   label: "Thư viện", icon: FileText, badge: materials.length || undefined },
+    { key: "leaderboard", label: "Bảng xếp hạng", icon: Trophy },
     { key: "notes",       label: "Ghi chú",    icon: StickyNote,   badge: notes.length > 0 ? notes.length : undefined },
   ];
 
@@ -716,6 +718,10 @@ export default function StudentClassDetailPage() {
               onOpenNotes={() => setActiveTab("notes")}
               onWatchLecture={(lessonId) => router.push(`/student/classes/${classId}/learn/${lessonId}`)}
             />
+          )}
+          {/* ── Leaderboard ── */}
+          {activeTab === "leaderboard" && (
+            <StudentLeaderboardTab classId={classId} />
           )}
           {/* ── Sessions ── */}
           {activeTab === "sessions" && (

@@ -638,6 +638,8 @@ create table if not exists public.app_exam_scores (
   created_at  timestamptz not null default now()
 );
 create index if not exists idx_scores_student on public.app_exam_scores (student_ref);
+create index if not exists app_exam_scores_class_student_idx
+  on public.app_exam_scores (class_id, student_ref);
 
 
 -- ─────────────────────────── 5. KV tables ──────────────────────────────────

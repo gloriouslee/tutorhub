@@ -1,6 +1,6 @@
 export type CurriculumContentFilter = "all" | "lecture" | "material" | "homework" | "exam" | "solution";
 
-export type StudentClassTab = "overview" | "curriculum" | "homework" | "sessions" | "materials" | "notes";
+export type StudentClassTab = "overview" | "curriculum" | "homework" | "sessions" | "materials" | "leaderboard" | "notes";
 export type TeacherClassTab = "overview" | "curriculum" | "sessions" | "homework" | "resources" | "students" | "tuition";
 export type TeacherResourceView = "lectures" | "materials" | "notes";
 
@@ -23,7 +23,7 @@ export function resolveStudentClassWorkspace(tab: string | null, content: string
   if (cleaned === "lectures") return { tab: "curriculum", content: "lecture" };
   if (cleaned === "attendance") return { tab: "sessions", content: "all" };
   if (cleaned === "materials") return { tab: "materials", content: "all" };
-  if ((["overview", "curriculum", "homework", "sessions", "notes"] as StudentClassTab[]).includes(cleaned as StudentClassTab)) {
+  if ((["overview", "curriculum", "homework", "sessions", "leaderboard", "notes"] as StudentClassTab[]).includes(cleaned as StudentClassTab)) {
     return { tab: cleaned as StudentClassTab, content: cleaned === "curriculum" ? cleanContentFilter(content) : "all" };
   }
   return { tab: "overview", content: "all" };
