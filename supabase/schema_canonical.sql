@@ -33,11 +33,11 @@
 -- ============================================================================
 --
 -- ─────────────────────────── COVERAGE MANIFEST ─────────────────────────────
--- TABLES (43)
+-- TABLES (44)
 --   Core (12):    profiles, parents, teachers, students, student_guardians, classes, payments,
 --                 attendance, notifications, homework, submissions, materials
---   Domain (3):   class_registration_requests, purchase_transactions,
---                 app_exam_scores
+--   Domain (4):   class_registration_requests, purchase_transactions,
+--                 app_exam_scores, class_leaderboard_settings
 --   KV (14):      kv_curriculum, kv_schedules, kv_online_links, kv_tuition,
 --                 kv_student_packages, kv_session_notes, kv_class_extra_students,
 --                 kv_exam_results, kv_exam_submissions, kv_exam_scores,
@@ -640,6 +640,24 @@ create table if not exists public.app_exam_scores (
 create index if not exists idx_scores_student on public.app_exam_scores (student_ref);
 create index if not exists app_exam_scores_class_student_idx
   on public.app_exam_scores (class_id, student_ref);
+
+create table if not exists public.class_leaderboard_settings (
+  class_id            text primary key,
+  enabled             boolean not null default true,
+  period              text not null default 'all_time'
+                      check (period in ('all_time', 'last_7_days', 'last_30_days', 'term')),
+  term_start_date     date,
+  minimum_assessments integer not null default 1
+                      check (minimum_assessments between 1 and 20),
+  privacy_mode        text not null default 'full_name'
+                      check (privacy_mode in ('full_name', 'abbreviated', 'anonymous')),
+  updated_by          text,
+  updated_at          timestamptz not null default now(),
+  check (period <> 'term' or term_start_date is not null)
+);
+alter table public.class_leaderboard_settings enable row level security;
+revoke all on public.class_leaderboard_settings from anon, authenticated;
+grant select, insert, update, delete on public.class_leaderboard_settings to service_role;
 
 
 -- ─────────────────────────── 5. KV tables ──────────────────────────────────

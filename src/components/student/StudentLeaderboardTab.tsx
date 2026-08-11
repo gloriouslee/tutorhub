@@ -5,10 +5,14 @@ import {
   Crown,
   Medal,
   RefreshCw,
+  Save,
+  Settings2,
+  ShieldCheck,
   Sparkles,
   Target,
   Trophy,
   Users,
+  EyeOff,
 } from "lucide-react";
 import { UserAvatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -16,12 +20,14 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import type {
   ClassLeaderboardEntry,
+  ClassLeaderboardSettings,
   ClassLeaderboardSummary,
 } from "@/lib/class-leaderboard";
 
 interface LeaderboardPayload extends ClassLeaderboardSummary {
   classId: string;
   generatedAt: string;
+  settings: ClassLeaderboardSettings;
 }
 
 interface ClassLeaderboardTabProps {
@@ -53,6 +59,19 @@ const PODIUM_STYLES = [
   },
 ] as const;
 
+const PERIOD_LABELS: Record<ClassLeaderboardSettings["period"], string> = {
+  all_time: "Toàn bộ thời gian",
+  last_7_days: "7 ngày gần nhất",
+  last_30_days: "30 ngày gần nhất",
+  term: "Từ đầu kỳ",
+};
+
+const PRIVACY_LABELS: Record<ClassLeaderboardSettings["privacyMode"], string> = {
+  full_name: "Hiện đầy đủ họ tên",
+  abbreviated: "Viết tắt tên học viên khác",
+  anonymous: "Ẩn danh học viên khác",
+};
+
 function formatScore(score: number | null) {
   return score === null ? "—" : score.toFixed(1);
 }
@@ -79,6 +98,10 @@ export default function ClassLeaderboardTab({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [revision, setRevision] = useState(0);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsDraft, setSettingsDraft] = useState<ClassLeaderboardSettings | null>(null);
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [settingsError, setSettingsError] = useState(false);
 
   const loadLeaderboard = useCallback(() => setRevision((value) => value + 1), []);
 
@@ -95,7 +118,10 @@ export default function ClassLeaderboardTab({
         if (!response.ok) throw new Error("leaderboard_unavailable");
         return response.json() as Promise<LeaderboardPayload>;
       })
-      .then(setData)
+      .then((payload) => {
+        setData(payload);
+        setSettingsDraft(payload.settings);
+      })
       .catch((loadError: unknown) => {
         if (loadError instanceof DOMException && loadError.name === "AbortError") return;
         setError(true);
@@ -111,9 +137,33 @@ export default function ClassLeaderboardTab({
     [data],
   );
   const podium = useMemo(
-    () => data?.entries.filter((entry) => entry.averageScore !== null).slice(0, 3) ?? [],
+    () => data?.entries.filter((entry) => entry.rank !== null).slice(0, 3) ?? [],
     [data],
   );
+
+  async function saveSettings() {
+    if (!settingsDraft || audience !== "teacher") return;
+    setSettingsSaving(true);
+    setSettingsError(false);
+    try {
+      const response = await fetch(`/api/teacher/classes/${encodeURIComponent(classId)}/leaderboard`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify(settingsDraft),
+      });
+      if (!response.ok) throw new Error("leaderboard_settings_save_failed");
+      const saved = await response.json() as ClassLeaderboardSettings;
+      setSettingsDraft(saved);
+      setData((current) => current ? { ...current, settings: saved } : current);
+      setSettingsOpen(false);
+      setRevision((value) => value + 1);
+    } catch {
+      setSettingsError(true);
+    } finally {
+      setSettingsSaving(false);
+    }
+  }
 
   if (loading) return <LeaderboardSkeleton />;
 
@@ -134,15 +184,169 @@ export default function ClassLeaderboardTab({
     );
   }
 
+  if (audience === "student" && !data.settings.enabled) {
+    return (
+      <Card className="border-dashed">
+        <CardContent className="flex flex-col items-center px-6 py-14 text-center">
+          <EyeOff className="mb-4 h-12 w-12 text-muted-foreground/40" />
+          <h3 className="font-semibold">Bảng xếp hạng chưa được mở</h3>
+          <p className="mt-1 max-w-md text-sm text-muted-foreground">
+            Giáo viên đang tạm ẩn bảng xếp hạng của lớp này.
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
     <div className="space-y-5">
+      {audience === "teacher" && settingsDraft && (
+        <Card className="overflow-hidden">
+          <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                <Settings2 className="h-5 w-5" />
+              </div>
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="font-bold">Cấu hình bảng xếp hạng</h3>
+                  <Badge variant={data.settings.enabled ? "secondary" : "outline"}>
+                    {data.settings.enabled ? "Đang hiện với học viên" : "Đang ẩn với học viên"}
+                  </Badge>
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {PERIOD_LABELS[data.settings.period]} · Tối thiểu {data.settings.minimumAssessments} bài · {PRIVACY_LABELS[data.settings.privacyMode]}
+                </p>
+              </div>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              aria-expanded={settingsOpen}
+              onClick={() => {
+                setSettingsDraft(data.settings);
+                setSettingsError(false);
+                setSettingsOpen((open) => !open);
+              }}
+            >
+              <Settings2 className="mr-2 h-4 w-4" />
+              {settingsOpen ? "Đóng cấu hình" : "Chỉnh cấu hình"}
+            </Button>
+          </div>
+
+          {settingsOpen && (
+            <CardContent className="border-t border-border bg-muted/20 p-4 md:p-5">
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold text-muted-foreground">Hiển thị cho học viên</label>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={settingsDraft.enabled}
+                    onClick={() => setSettingsDraft((current) => current ? { ...current, enabled: !current.enabled } : current)}
+                    className="flex h-10 w-full items-center justify-between rounded-xl border border-border bg-background px-3 text-sm font-medium"
+                  >
+                    <span>{settingsDraft.enabled ? "Đang bật" : "Đang tắt"}</span>
+                    <span className={`relative h-5 w-9 rounded-full transition ${settingsDraft.enabled ? "bg-primary" : "bg-muted-foreground/30"}`}>
+                      <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-all ${settingsDraft.enabled ? "left-[18px]" : "left-0.5"}`} />
+                    </span>
+                  </button>
+                </div>
+
+                <div className="space-y-2">
+                  <label htmlFor="leaderboard-period" className="text-xs font-semibold text-muted-foreground">Chu kỳ tính điểm</label>
+                  <select
+                    id="leaderboard-period"
+                    value={settingsDraft.period}
+                    onChange={(event) => setSettingsDraft((current) => current ? {
+                      ...current,
+                      period: event.target.value as ClassLeaderboardSettings["period"],
+                    } : current)}
+                    className="h-10 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-primary/30"
+                  >
+                    {Object.entries(PERIOD_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                  </select>
+                </div>
+
+                <div className="space-y-2">
+                  <label htmlFor="leaderboard-minimum" className="text-xs font-semibold text-muted-foreground">Số bài tối thiểu</label>
+                  <input
+                    id="leaderboard-minimum"
+                    type="number"
+                    min={1}
+                    max={20}
+                    value={settingsDraft.minimumAssessments}
+                    onChange={(event) => setSettingsDraft((current) => current ? {
+                      ...current,
+                      minimumAssessments: Math.min(20, Math.max(1, Number(event.target.value) || 1)),
+                    } : current)}
+                    className="h-10 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-primary/30"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label htmlFor="leaderboard-privacy" className="text-xs font-semibold text-muted-foreground">Quyền riêng tư</label>
+                  <select
+                    id="leaderboard-privacy"
+                    value={settingsDraft.privacyMode}
+                    onChange={(event) => setSettingsDraft((current) => current ? {
+                      ...current,
+                      privacyMode: event.target.value as ClassLeaderboardSettings["privacyMode"],
+                    } : current)}
+                    className="h-10 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-primary/30"
+                  >
+                    {Object.entries(PRIVACY_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              {settingsDraft.period === "term" && (
+                <div className="mt-4 max-w-sm space-y-2">
+                  <label htmlFor="leaderboard-term-start" className="text-xs font-semibold text-muted-foreground">Ngày bắt đầu kỳ</label>
+                  <input
+                    id="leaderboard-term-start"
+                    type="date"
+                    required
+                    value={settingsDraft.termStartDate ?? ""}
+                    onChange={(event) => setSettingsDraft((current) => current ? { ...current, termStartDate: event.target.value || null } : current)}
+                    className="h-10 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-primary/30"
+                  />
+                </div>
+              )}
+
+              <div className="mt-5 flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
+                <p className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <ShieldCheck className="h-4 w-4 text-emerald-600" /> Giáo viên luôn thấy tên đầy đủ; chế độ riêng tư chỉ áp dụng cho học viên.
+                </p>
+                <div className="flex items-center gap-2">
+                  {settingsError && <span className="text-xs font-medium text-red-600">Không thể lưu cấu hình.</span>}
+                  <Button type="button" variant="outline" size="sm" onClick={() => { setSettingsDraft(data.settings); setSettingsOpen(false); }}>
+                    Hủy
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={settingsSaving || (settingsDraft.period === "term" && !settingsDraft.termStartDate)}
+                    onClick={saveSettings}
+                  >
+                    {settingsSaving ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                    Lưu cấu hình
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          )}
+        </Card>
+      )}
+
       <section className="relative overflow-hidden rounded-2xl border border-indigo-300/30 bg-gradient-to-br from-indigo-600 via-violet-600 to-purple-700 p-5 text-white shadow-lg md:p-6">
         <div className="absolute -right-10 -top-14 h-44 w-44 rounded-full bg-white/10 blur-2xl" />
         <div className="absolute -bottom-16 left-1/3 h-40 w-40 rounded-full bg-fuchsia-300/15 blur-3xl" />
         <div className="relative flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
           <div>
             <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-white/80">
-              <Sparkles className="h-4 w-4" /> Thành tích trong lớp
+              <Sparkles className="h-4 w-4" /> Thành tích trong lớp · {PERIOD_LABELS[data.settings.period]}
             </div>
             <h2 className="flex items-center gap-3 text-2xl font-black md:text-3xl">
               <Trophy className="h-8 w-8 text-amber-300" /> Bảng xếp hạng
@@ -157,7 +361,7 @@ export default function ClassLeaderboardTab({
           <div className="grid grid-cols-3 gap-2 md:min-w-[360px]">
             {(audience === "teacher" ? [
               { label: "Điểm TB lớp", value: formatScore(data.classAverage), icon: Target },
-              { label: "Đã có điểm", value: `${data.scoredStudents}/${data.totalStudents}`, icon: Trophy },
+              { label: "Đủ xếp hạng", value: `${data.entries.filter((entry) => entry.eligibleForRanking).length}/${data.totalStudents}`, icon: Trophy },
               { label: "Tổng học viên", value: data.totalStudents, icon: Users },
             ] : [
               { label: "Hạng của bạn", value: currentStudent?.rank ? `#${currentStudent.rank}` : "—", icon: Trophy },
@@ -232,14 +436,18 @@ export default function ClassLeaderboardTab({
           <div>
             <h3 className="font-bold">Toàn bộ lớp</h3>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              Khi bằng điểm, học viên có nhiều bài đã tính điểm hơn được xếp trước.
+              Cần ít nhất {data.settings.minimumAssessments} bài để được xếp hạng; khi bằng điểm, học viên có nhiều bài hơn được xếp trước.
             </p>
           </div>
           <Badge variant="outline" className="w-fit">{data.totalStudents} học viên</Badge>
         </div>
         <div className="divide-y divide-border/60">
           {data.entries.map((entry) => (
-            <LeaderboardRow key={entry.studentId} entry={entry} />
+            <LeaderboardRow
+              key={entry.studentId}
+              entry={entry}
+              minimumAssessments={data.settings.minimumAssessments}
+            />
           ))}
         </div>
       </Card>
@@ -247,7 +455,13 @@ export default function ClassLeaderboardTab({
   );
 }
 
-function LeaderboardRow({ entry }: { entry: ClassLeaderboardEntry }) {
+function LeaderboardRow({
+  entry,
+  minimumAssessments,
+}: {
+  entry: ClassLeaderboardEntry;
+  minimumAssessments: number;
+}) {
   const rankClass = entry.rank === 1
     ? "bg-amber-100 text-amber-700 dark:bg-amber-900/35 dark:text-amber-300"
     : entry.rank === 2
@@ -269,13 +483,19 @@ function LeaderboardRow({ entry }: { entry: ClassLeaderboardEntry }) {
             {entry.isCurrentStudent && <Badge className="shrink-0 border-0 bg-primary/10 text-primary">Bạn</Badge>}
           </div>
           <p className="mt-0.5 text-xs text-muted-foreground md:hidden">
-            {entry.assessments > 0 ? `${entry.assessments} bài đã tính` : "Chưa có điểm"}
+            {entry.assessments === 0
+              ? "Chưa có điểm"
+              : entry.eligibleForRanking
+                ? `${entry.assessments} bài đã tính`
+                : `${entry.assessments}/${minimumAssessments} bài để được xếp hạng`}
           </p>
         </div>
       </div>
       <div className="hidden text-right md:block">
         <p className="text-sm font-semibold">{entry.assessments}</p>
-        <p className="text-[11px] text-muted-foreground">Bài đã tính</p>
+        <p className="text-[11px] text-muted-foreground">
+          {entry.assessments > 0 && !entry.eligibleForRanking ? `Cần ${minimumAssessments} bài` : "Bài đã tính"}
+        </p>
       </div>
       <div className="text-right">
         <p className={`text-lg font-black ${entry.averageScore === null ? "text-muted-foreground" : "text-foreground"}`}>

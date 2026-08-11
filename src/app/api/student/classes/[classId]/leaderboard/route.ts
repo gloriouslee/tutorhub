@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getRequestIdentity } from "@/lib/api-auth";
 import {
+  applyStudentLeaderboardPrivacy,
   leaderboardStudentIds,
   loadClassLeaderboard,
+  loadClassLeaderboardSettings,
   loadLeaderboardClassScope,
 } from "@/lib/class-leaderboard-server";
 
@@ -45,11 +47,24 @@ export async function GET(
       );
     }
 
-    return NextResponse.json(
-      await loadClassLeaderboard(classScope, {
+    const settings = await loadClassLeaderboardSettings(classId);
+    if (!settings.enabled) {
+      return NextResponse.json({
+        classId,
+        generatedAt: new Date().toISOString(),
+        settings,
+        entries: [],
+        classAverage: null,
+        scoredStudents: 0,
+        totalStudents: 0,
+      }, PRIVATE_NO_STORE);
+    }
+    const leaderboard = await loadClassLeaderboard(classScope, {
         studentId: identity.studentId,
         displayName: identity.displayName,
-      }),
+      }, settings);
+    return NextResponse.json(
+      applyStudentLeaderboardPrivacy(leaderboard, identity.studentId),
       PRIVATE_NO_STORE,
     );
   } catch {

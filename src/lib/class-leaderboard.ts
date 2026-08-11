@@ -11,6 +11,27 @@ export interface LeaderboardScoreSample {
   recordedAt?: string | null;
 }
 
+export type LeaderboardPeriod = "all_time" | "last_7_days" | "last_30_days" | "term";
+export type LeaderboardPrivacyMode = "full_name" | "abbreviated" | "anonymous";
+
+export interface ClassLeaderboardSettings {
+  enabled: boolean;
+  period: LeaderboardPeriod;
+  termStartDate: string | null;
+  minimumAssessments: number;
+  privacyMode: LeaderboardPrivacyMode;
+  updatedAt: string | null;
+}
+
+export const DEFAULT_CLASS_LEADERBOARD_SETTINGS: ClassLeaderboardSettings = {
+  enabled: true,
+  period: "all_time",
+  termStartDate: null,
+  minimumAssessments: 1,
+  privacyMode: "full_name",
+  updatedAt: null,
+};
+
 export interface ClassLeaderboardEntry {
   studentId: string;
   displayName: string;
@@ -20,6 +41,7 @@ export interface ClassLeaderboardEntry {
   assessments: number;
   lastActivity: string | null;
   isCurrentStudent: boolean;
+  eligibleForRanking: boolean;
 }
 
 export interface ClassLeaderboardSummary {
@@ -44,11 +66,35 @@ function normalizedScore(sample: LeaderboardScoreSample) {
   return Math.min(100, Math.max(0, (sample.score / sample.maxScore) * 100));
 }
 
+export function filterLeaderboardSamplesForPeriod(
+  samples: LeaderboardScoreSample[],
+  settings: ClassLeaderboardSettings,
+  now = new Date(),
+) {
+  let startsAt: Date | null = null;
+  if (settings.period === "last_7_days") {
+    startsAt = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1_000);
+  } else if (settings.period === "last_30_days") {
+    startsAt = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1_000);
+  } else if (settings.period === "term" && settings.termStartDate) {
+    startsAt = new Date(`${settings.termStartDate}T00:00:00.000Z`);
+  }
+
+  if (!startsAt || Number.isNaN(startsAt.getTime())) return samples;
+  return samples.filter((sample) => {
+    if (!sample.recordedAt) return false;
+    const recordedAt = new Date(sample.recordedAt);
+    return !Number.isNaN(recordedAt.getTime()) && recordedAt >= startsAt;
+  });
+}
+
 export function buildClassLeaderboard(
   students: LeaderboardStudent[],
   samples: LeaderboardScoreSample[],
   currentStudentId: string,
+  options: { minimumAssessments?: number } = {},
 ): ClassLeaderboardSummary {
+  const minimumAssessments = Math.max(1, Math.floor(options.minimumAssessments ?? 1));
   const samplesByStudent = new Map<string, LeaderboardScoreSample[]>();
   const studentIds = new Set(students.map((student) => student.id));
 
@@ -82,10 +128,12 @@ export function buildClassLeaderboard(
       assessments: scoreValues.length,
       lastActivity: dates[0] ?? null,
       isCurrentStudent: student.id === currentStudentId,
+      eligibleForRanking: averageScore !== null && scoreValues.length >= minimumAssessments,
     };
   });
 
   entries.sort((a, b) => {
+    if (a.eligibleForRanking !== b.eligibleForRanking) return a.eligibleForRanking ? -1 : 1;
     if (a.averageScore === null) return b.averageScore === null
       ? collator.compare(a.displayName, b.displayName)
       : 1;
@@ -99,7 +147,7 @@ export function buildClassLeaderboard(
   let previousAssessments: number | null = null;
   let previousRank = 0;
   entries.forEach((entry, index) => {
-    if (entry.averageScore === null) return;
+    if (!entry.eligibleForRanking || entry.averageScore === null) return;
     if (
       previousScore === entry.averageScore
       && previousAssessments === entry.assessments

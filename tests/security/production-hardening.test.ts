@@ -19,7 +19,10 @@ import { parseExamText } from "../../src/lib/examTextParser";
 import { convertOmmlInDocumentXml, ommlFragmentToLatex } from "../../src/lib/ommlToLatex";
 import { googleDrivePreviewUrl } from "../../src/lib/google-drive";
 import { resolveStudentClassWorkspace, resolveTeacherClassWorkspace } from "../../src/lib/class-workspace-tabs";
-import { buildClassLeaderboard } from "../../src/lib/class-leaderboard";
+import {
+  buildClassLeaderboard,
+  filterLeaderboardSamplesForPeriod,
+} from "../../src/lib/class-leaderboard";
 
 const read = (path: string) => readFile(path, "utf8");
 
@@ -71,22 +74,60 @@ test("class leaderboard normalizes scores and keeps ties deterministic", () => {
   assert.equal(result.scoredStudents, 2);
 });
 
+test("class leaderboard applies ranking eligibility and score periods", () => {
+  const samples = [
+    { studentId: "s1", score: 9, maxScore: 10, recordedAt: "2026-08-10" },
+    { studentId: "s1", score: 8, maxScore: 10, recordedAt: "2026-07-01" },
+    { studentId: "s1", score: 8, maxScore: 10, recordedAt: "2026-08-08" },
+    { studentId: "s2", score: 10, maxScore: 10, recordedAt: "2026-08-09" },
+  ];
+  const recent = filterLeaderboardSamplesForPeriod(samples, {
+    enabled: true,
+    period: "last_7_days",
+    termStartDate: null,
+    minimumAssessments: 2,
+    privacyMode: "full_name",
+    updatedAt: null,
+  }, new Date("2026-08-11T12:00:00.000Z"));
+  const result = buildClassLeaderboard([
+    { id: "s1", fullName: "An", avatarUrl: "" },
+    { id: "s2", fullName: "Bình", avatarUrl: "" },
+  ], recent, "", { minimumAssessments: 2 });
+
+  assert.equal(recent.length, 3);
+  assert.deepEqual(result.entries.map((entry) => ({
+    studentId: entry.studentId,
+    rank: entry.rank,
+    eligible: entry.eligibleForRanking,
+  })), [
+    { studentId: "s1", rank: 1, eligible: true },
+    { studentId: "s2", rank: null, eligible: false },
+  ]);
+});
+
 test("class leaderboard is role-scoped and exposes only roster display fields", async () => {
   const studentRoute = await read("src/app/api/student/classes/[classId]/leaderboard/route.ts");
   const teacherRoute = await read("src/app/api/teacher/classes/[classId]/leaderboard/route.ts");
   const server = await read("src/lib/class-leaderboard-server.ts");
   const component = await read("src/components/student/StudentLeaderboardTab.tsx");
+  const migration = await read("supabase/migrations/20260811160000_class_leaderboard_settings.sql");
 
   assert.match(studentRoute, /identity\?\.role !== "student"/);
   assert.match(studentRoute, /leaderboardStudentIds\(classScope\)\.includes\(identity\.studentId\)/);
   assert.match(teacherRoute, /identity\.role !== "teacher" && identity\.role !== "admin"/);
   assert.match(teacherRoute, /classScope\.tutor_id !== identity\.teacherId/);
+  assert.match(teacherRoute, /export async function PUT/);
+  assert.match(teacherRoute, /hasValidMutationOrigin/);
   assert.match(server, /\.eq\("class_id", classId\)/);
   assert.match(server, /select\("id,full_name,avatar_url"\)/);
   assert.doesNotMatch(server, /select\("[^"]*email/);
+  assert.match(server, /applyStudentLeaderboardPrivacy/);
   assert.match(component, /Bảng xếp hạng/);
   assert.match(component, /audience === "teacher"/);
+  assert.match(component, /Cấu hình bảng xếp hạng/);
   assert.match(component, /credentials: "same-origin"/);
+  assert.match(migration, /class_leaderboard_settings/);
+  assert.match(migration, /revoke all[^;]+from anon, authenticated/);
 });
 
 test("class portals expose curriculum-first workspaces without duplicating legacy tabs", async () => {
