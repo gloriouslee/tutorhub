@@ -14,6 +14,7 @@ import { getTeacherHomework, getAllTeacherAttendance, getStudents, type TeacherA
 import { useTeacherContext } from "@/hooks/useTeacherContext";
 import type { Class, Student } from "@/types";
 import { weekdayLabelVi } from "@/lib/weekday";
+import LearningSupportPanel from "@/components/teacher/LearningSupportPanel";
 
 // Days that have class today (computed from schedule)
 function getTodaySessions(classes: Class[]) {
@@ -133,6 +134,8 @@ export default function TeacherDashboard() {
         <StatCard title="Ca dạy hôm nay" value={todaySessions.length} icon={Clock} iconBg="bg-rose-100 dark:bg-rose-900/30" iconColor="text-rose-600" delay={200} />
         <StatCard title="Bài tập đang mở" value={openHw.length} icon={FileText} iconBg="bg-red-100 dark:bg-red-900/30" iconColor="text-red-600" delay={300} />
       </div>
+
+      <LearningSupportPanel />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* My classes */}

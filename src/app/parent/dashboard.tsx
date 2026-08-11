@@ -19,6 +19,7 @@ import {
 import { getInvoices, getNotifications, type TuitionInvoice, type StoredExamScore } from "@/lib/storage";
 import type { Notification } from "@/types";
 import { weekdayLabelVi } from "@/lib/weekday";
+import ParentGrowthPanel from "@/components/parent/ParentGrowthPanel";
 
 
 // Trạng thái hiển thị cho hóa đơn thật: quá hạn khi chưa thanh toán và trễ hạn.
@@ -191,6 +192,8 @@ export default function ParentDashboard() {
         <StatCard title="Điểm trung bình" value={avgScore != null ? avgScore.toFixed(1) : "—"} icon={TrendingUp} iconBg="bg-blue-100 dark:bg-blue-900/30" iconColor="text-blue-600" delay={200} />
         <StatCard title="Học phí chờ đóng" value={formatCurrency(pendingTotal)} icon={DollarSign} iconBg="bg-amber-100 dark:bg-amber-900/30" iconColor="text-amber-600" delay={300} />
       </div>
+
+      <ParentGrowthPanel />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Progress & Payments */}

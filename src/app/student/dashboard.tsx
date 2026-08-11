@@ -22,6 +22,7 @@ import { useStudentContext } from "@/hooks/useStudentContext";
 import ScheduleCalendar from "@/components/student/ScheduleCalendar";
 import { useRouter } from "next/navigation";
 import { AreaChart, Area, Tooltip, ResponsiveContainer } from "recharts";
+import StudentGrowthPanel from "@/components/student/StudentGrowthPanel";
 
 interface HomeworkItem {
   id: string;
@@ -306,6 +307,8 @@ export default function StudentDashboard() {
       </div>
 
       {/* ── Lịch học ─────────────────────────────────────── */}
+      <StudentGrowthPanel />
+
       <section id="lich-hoc" className="space-y-4 animate-fade-in delay-200">
         <div>
           <h2 className="text-2xl font-bold text-foreground">Lịch học</h2>

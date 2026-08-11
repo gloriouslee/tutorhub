@@ -23,6 +23,12 @@ import {
   buildClassLeaderboard,
   filterLeaderboardSamplesForPeriod,
 } from "../../src/lib/class-leaderboard";
+import {
+  currentValueForGoal,
+  detectSupportAlert,
+  goalProgressPercent,
+  xpLevel,
+} from "../../src/lib/learning-growth";
 
 const read = (path: string) => readFile(path, "utf8");
 
@@ -103,6 +109,76 @@ test("class leaderboard applies ranking eligibility and score periods", () => {
     { studentId: "s1", rank: 1, eligible: true },
     { studentId: "s2", rank: null, eligible: false },
   ]);
+});
+
+test("learning support prioritizes combined score, attendance and homework risks", () => {
+  const alert = detectSupportAlert({
+    studentId: "s1",
+    studentName: "An",
+    classId: "c1",
+    className: "Toán 10",
+    scores: [
+      { value: 91, recordedAt: "2026-07-01" },
+      { value: 89, recordedAt: "2026-07-08" },
+      { value: 70, recordedAt: "2026-07-15" },
+      { value: 72, recordedAt: "2026-07-22" },
+    ],
+    attendance: [
+      { status: "absent", date: "2026-08-01" },
+      { status: "absent", date: "2026-08-05" },
+      { status: "late", date: "2026-08-08" },
+    ],
+    homework: [
+      { dueAt: "2026-08-02T23:59:59.999Z", submittedAt: null },
+      { dueAt: "2026-08-06T23:59:59.999Z", submittedAt: "2026-08-08T10:00:00.000Z" },
+    ],
+  }, new Date("2026-08-11T12:00:00.000Z"));
+
+  assert.ok(alert);
+  assert.equal(alert.priority, "high");
+  assert.deepEqual(alert.signals.map((signal) => signal.type), ["score_drop", "absence", "homework"]);
+});
+
+test("learning goals and XP levels use bounded deterministic progress", () => {
+  assert.equal(currentValueForGoal("average_score", {
+    homeworkCompleted: 2,
+    averageScore: 8.4,
+    attendanceRate: 90,
+    lessonsCompleted: 4,
+    xpEarned: 75,
+  }), 8.4);
+  assert.equal(goalProgressPercent(8.4, 8), 100);
+  assert.deepEqual(xpLevel(640), {
+    level: 3,
+    currentLevelXp: 140,
+    nextLevelXp: 250,
+    progressPercent: 56,
+  });
+});
+
+test("learning growth APIs stay role-scoped and weekly reports require cron authorization", async () => {
+  const migration = await read("supabase/migrations/20260811190000_learning_growth_suite.sql");
+  const teacherRoute = await read("src/app/api/teacher/learning-support/route.ts");
+  const studentRoute = await read("src/app/api/student/learning-growth/route.ts");
+  const parentRoute = await read("src/app/api/parent/learning-growth/route.ts");
+  const cronRoute = await read("src/app/api/cron/weekly-parent-reports/route.ts");
+  const server = await read("src/lib/learning-growth-server.ts");
+
+  assert.match(migration, /student_support_alerts/);
+  assert.match(migration, /weekly_parent_reports/);
+  assert.match(migration, /student_xp_events/);
+  assert.match(migration, /student_badges/);
+  assert.match(migration, /learning_goals/);
+  assert.match(migration, /student_topic_mastery/);
+  assert.match(migration, /revoke all[^;]+from anon, authenticated/g);
+  assert.match(teacherRoute, /identity\?\.teacherId/);
+  assert.match(teacherRoute, /hasValidMutationOrigin/);
+  assert.match(studentRoute, /identity\?\.studentId/);
+  assert.match(studentRoute, /contains\("student_ids", \[identity\.studentId\]\)/);
+  assert.match(parentRoute, /identity\?\.parentId/);
+  assert.match(server, /getActiveChildIdsForParent/);
+  assert.match(cronRoute, /CRON_SECRET/);
+  assert.match(cronRoute, /timingSafeEqual/);
 });
 
 test("class leaderboard is role-scoped and exposes only roster display fields", async () => {
