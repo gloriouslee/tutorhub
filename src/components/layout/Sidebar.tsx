@@ -34,7 +34,7 @@ const navConfig: Record<UserRole, NavItem[]> = {
     { label: "Bài tập",    href: "/student/homework",       icon: ClipboardList },
     { label: "Cộng đồng",   href: "/student/questions",      icon: Users },
     { label: "Tài liệu",   href: "/student/materials",      icon: BookMarked },
-    { label: "Điểm thi",   href: "/student/scores",         icon: GraduationCap },
+    { label: "Điểm & phân tích", href: "/student/scores",  icon: GraduationCap },
     { label: "Thanh toán", href: "/student/payments",       icon: DollarSign },
     { label: "Hồ sơ",      href: "/student/profile",        icon: User },
   ],

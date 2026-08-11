@@ -133,7 +133,7 @@ export default function StudentGrowthPanel() {
   if (error || !data) return null;
 
   return (
-    <section className="space-y-5">
+    <section id="learning-growth" className="scroll-mt-24 space-y-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <div className="flex items-center gap-2">

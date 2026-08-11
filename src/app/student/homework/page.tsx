@@ -15,6 +15,7 @@ import StudentScopeBar, {
 import {
   FileText, Clock, CheckCircle2, Upload, Calendar,
   AlertCircle, X, Check, Download, Loader2, Star, NotebookPen, PenSquare, PlayCircle,
+  ArrowRight, RefreshCw, RotateCcw, Search, SlidersHorizontal,
 } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import {
@@ -34,7 +35,17 @@ function daysLeft(due: string) {
   return Math.ceil((new Date(due).setHours(23, 59, 59) - Date.now()) / 86400000);
 }
 
-type FilterTab = "all" | "pending" | "submitted" | "graded";
+type FilterTab = "todo" | "returned" | "submitted" | "done" | "all";
+type TypeFilter = "all" | "file" | "exam";
+type SortKey = "priority" | "due" | "newest";
+
+const STATE_PRIORITY: Record<FilterTab, number> = {
+  returned: 0,
+  todo: 1,
+  submitted: 2,
+  done: 3,
+  all: 4,
+};
 
 interface HomeworkItem {
   id: string;
@@ -70,7 +81,12 @@ export default function StudentHomeworkPage() {
   const myHomework: HomeworkItem[] = teacherHw;
   const [submissions,  setSubmissions]  = useState<SubmissionRecord[]>([]);
   const [loadingHomework, setLoadingHomework] = useState(true);
-  const [filterTab,    setFilterTab]    = useState<FilterTab>("all");
+  const [loadWarning, setLoadWarning] = useState("");
+  const [reloadVersion, setReloadVersion] = useState(0);
+  const [filterTab,    setFilterTab]    = useState<FilterTab>("todo");
+  const [query,        setQuery]        = useState("");
+  const [typeFilter,   setTypeFilter]   = useState<TypeFilter>("all");
+  const [sortKey,      setSortKey]      = useState<SortKey>("priority");
   const [selectedHw,   setSelectedHw]   = useState<HomeworkItem | null>(null);
   const [modalType,    setModalType]    = useState<"submit" | "detail" | null>(null);
   const [file,         setFile]         = useState<File | null>(null);
@@ -78,6 +94,8 @@ export default function StudentHomeworkPage() {
   const [uploadState,  setUploadState]  = useState<"idle" | "uploading" | "success">("idle");
   const [errorMsg,     setErrorMsg]     = useState("");
   const deepLinkHandledRef = useRef("");
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     const classKey = myClassIds.join(",");
@@ -95,10 +113,21 @@ export default function StudentHomeworkPage() {
     }
 
     let cancelled = false;
+    let partialFailure = false;
     setLoadingHomework(true);
+    setLoadWarning("");
+
+    async function safely<T>(work: Promise<T>, fallback: T) {
+      try {
+        return await work;
+      } catch {
+        partialFailure = true;
+        return fallback;
+      }
+    }
 
     const curriculumPromise = Promise.all(myClassIds.map(async cid => {
-      const chapters = await getStudentCurriculum(cid).catch(() => []);
+      const chapters = await safely(getStudentCurriculum(cid), []);
       const items: HomeworkItem[] = [];
       const examItems: Promise<HomeworkItem>[] = [];
       const today = new Date().toISOString().slice(0, 10);
@@ -116,8 +145,7 @@ export default function StudentHomeworkPage() {
               });
             } else if (lesson.type === "exam") {
               examItems.push(
-                getExamResult(cid, lesson.id, STUDENT_ID)
-                  .catch(() => null)
+                safely(getExamResult(cid, lesson.id, STUDENT_ID), null)
                   .then(result => {
                     const manual = result
                       ? Object.values(result.manual_scores ?? {}).reduce((a, b) => a + b, 0)
@@ -142,9 +170,9 @@ export default function StudentHomeworkPage() {
     }));
 
     Promise.all([
-      getTeacherHomework<HomeworkItem>(myClassIds).catch(() => []),
+      safely(getTeacherHomework<HomeworkItem>(myClassIds), []),
       curriculumPromise,
-      getSubmissionsByStudent(STUDENT_ID).catch(() => []),
+      safely(getSubmissionsByStudent(STUDENT_ID), []),
     ])
       .then(([allManual, curriculumByClass, studentSubmissions]) => {
         if (cancelled) return;
@@ -158,6 +186,12 @@ export default function StudentHomeworkPage() {
         }
         setTeacherHw([...merged.values()]);
         setSubmissions(studentSubmissions);
+        if (partialFailure) {
+          setLoadWarning("Một phần dữ liệu chưa tải được. Danh sách bên dưới có thể chưa đầy đủ.");
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setLoadWarning("Không thể tải dữ liệu bài tập. Vui lòng thử lại.");
       })
       .finally(() => {
         if (!cancelled) setLoadingHomework(false);
@@ -167,7 +201,18 @@ export default function StudentHomeworkPage() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, STUDENT_ID, myClassIds.join(",")]);
+  }, [ready, STUDENT_ID, myClassIds.join(","), reloadVersion]);
+
+  useEffect(() => {
+    if (!modalType) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && uploadState !== "uploading") closeModal();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    requestAnimationFrame(() => closeButtonRef.current?.focus());
+    return () => document.removeEventListener("keydown", onKeyDown);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modalType, uploadState]);
 
   useEffect(() => {
     if (loadingHomework || typeof window === "undefined") return;
@@ -215,24 +260,24 @@ export default function StudentHomeworkPage() {
   function hwStatus(homework: HomeworkItem) {
     const sub = getSub(homework);
     if (sub?.status === "returned")
-      return { label: "Cần làm lại", color: "bg-rose-100 text-rose-700 dark:bg-rose-900/20 dark:text-rose-400", icon: AlertCircle, key: "pending" as FilterTab };
-    if (sub?.status === "graded" && sub.score != null)
-      return { label: `Đã chấm · ${sub.score}/10`, color: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400", icon: Star, key: "graded" as FilterTab };
+      return { label: "Cần làm lại", color: "bg-rose-100 text-rose-700 dark:bg-rose-900/20 dark:text-rose-400", icon: RotateCcw, key: "returned" as FilterTab };
+    if (sub?.status === "graded")
+      return { label: sub.score != null ? `Đã chấm · ${sub.score}/10` : "Đã chấm", color: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400", icon: Star, key: "done" as FilterTab };
     if (sub)
       return { label: "Đã nộp", color: "bg-blue-100 text-blue-700 dark:bg-blue-900/20 dark:text-blue-400", icon: CheckCircle2, key: "submitted" as FilterTab };
     const d = daysLeft(homework.due_date);
     if (d < 0)
-      return { label: "Quá hạn", color: "bg-red-100 text-red-700 dark:bg-red-900/20 dark:text-red-400", icon: AlertCircle, key: "pending" as FilterTab };
+      return { label: "Quá hạn", color: "bg-red-100 text-red-700 dark:bg-red-900/20 dark:text-red-400", icon: AlertCircle, key: "todo" as FilterTab };
     if (d === 0)
-      return { label: "Hôm nay", color: "bg-orange-100 text-orange-700 dark:bg-orange-900/20 dark:text-orange-400", icon: AlertCircle, key: "pending" as FilterTab };
+      return { label: "Hạn hôm nay", color: "bg-orange-100 text-orange-700 dark:bg-orange-900/20 dark:text-orange-400", icon: AlertCircle, key: "todo" as FilterTab };
     if (d <= 3)
-      return { label: `Còn ${d} ngày`, color: "bg-amber-100 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400", icon: Clock, key: "pending" as FilterTab };
-    return { label: `Còn ${d} ngày`, color: "bg-muted text-muted-foreground", icon: Clock, key: "pending" as FilterTab };
+      return { label: `Còn ${d} ngày`, color: "bg-amber-100 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400", icon: Clock, key: "todo" as FilterTab };
+    return { label: `Còn ${d} ngày`, color: "bg-muted text-muted-foreground", icon: Clock, key: "todo" as FilterTab };
   }
 
-  // Trạng thái lọc (exam-aware): bài câu hỏi đã làm = "graded", chưa làm = "pending"
+  // Trạng thái lọc: tách rõ việc cần làm, cần làm lại, chờ chấm và lịch sử đã xong.
   function statusKey(hw: HomeworkItem): FilterTab {
-    if (hw.kind === "exam") return hw.exam_done ? "graded" : "pending";
+    if (hw.kind === "exam") return hw.exam_done ? "done" : "todo";
     return hwStatus(hw).key;
   }
 
@@ -240,15 +285,28 @@ export default function StudentHomeworkPage() {
     classMatchesStudentScope(myClasses.find((cls) => cls.id === homework.class_id), scope)
   )), [myClasses, myHomework, scope]);
 
-  // Filtered list — mới nhất (giao gần đây) lên đầu
+  const normalizedQuery = query.trim().toLocaleLowerCase("vi-VN");
   const displayed = useMemo(() => scopedHomework
-    .filter(hw => filterTab === "all" ? true : statusKey(hw) === filterTab)
-    .sort((a, b) => (b.created_at ?? b.due_date ?? "").localeCompare(a.created_at ?? a.due_date ?? "")),
+    .filter(hw => filterTab === "all"
+      ? true
+      : filterTab === "todo"
+        ? statusKey(hw) === "todo" || statusKey(hw) === "returned"
+        : statusKey(hw) === filterTab)
+    .filter(hw => typeFilter === "all" || (hw.kind ?? "file") === typeFilter)
+    .filter(hw => !normalizedQuery
+      || hw.title.toLocaleLowerCase("vi-VN").includes(normalizedQuery)
+      || hw.description?.toLocaleLowerCase("vi-VN").includes(normalizedQuery))
+    .sort((a, b) => {
+      if (sortKey === "due") return new Date(a.due_date).getTime() - new Date(b.due_date).getTime();
+      if (sortKey === "newest") return (b.created_at ?? b.due_date ?? "").localeCompare(a.created_at ?? a.due_date ?? "");
+      return STATE_PRIORITY[statusKey(a)] - STATE_PRIORITY[statusKey(b)]
+        || new Date(a.due_date).getTime() - new Date(b.due_date).getTime();
+    }),
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  [filterTab, scopedHomework, submissions]);
+  [filterTab, normalizedQuery, scopedHomework, sortKey, submissions, typeFilter]);
 
   // Sidebar stats
-  const submittedCount = scopedHomework.filter(hw => hw.kind === "exam" ? hw.exam_done : !!getSub(hw)).length;
+  const submittedCount = scopedHomework.filter(hw => ["submitted", "done"].includes(statusKey(hw))).length;
   const gradedScores = scopedHomework.flatMap((homework) => {
     if (homework.kind === "exam") {
       return homework.exam_score != null && homework.exam_total
@@ -265,13 +323,23 @@ export default function StudentHomeworkPage() {
   // Filter tab counts
   const tabCounts: Record<FilterTab, number> = {
     all: scopedHomework.length,
-    pending: scopedHomework.filter(hw => statusKey(hw) === "pending").length,
+    todo: scopedHomework.filter(hw => statusKey(hw) === "todo" || statusKey(hw) === "returned").length,
+    returned: scopedHomework.filter(hw => statusKey(hw) === "returned").length,
     submitted: scopedHomework.filter(hw => statusKey(hw) === "submitted").length,
-    graded: scopedHomework.filter(hw => statusKey(hw) === "graded").length,
+    done: scopedHomework.filter(hw => statusKey(hw) === "done").length,
   };
+
+  const completionPercent = scopedHomework.length > 0
+    ? Math.round((submittedCount / scopedHomework.length) * 100)
+    : 0;
+  const priorityHomework = [...scopedHomework]
+    .filter(hw => statusKey(hw) === "returned" || statusKey(hw) === "todo")
+    .sort((a, b) => STATE_PRIORITY[statusKey(a)] - STATE_PRIORITY[statusKey(b)]
+      || new Date(a.due_date).getTime() - new Date(b.due_date).getTime())[0];
 
   // Modal helpers
   function openModal(hw: typeof myHomework[0], type: "submit" | "detail") {
+    returnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setSelectedHw(hw);
     setModalType(type);
     setFile(null);
@@ -284,6 +352,7 @@ export default function StudentHomeworkPage() {
     setFile(null);
     setUploadState("idle");
     setErrorMsg("");
+    requestAnimationFrame(() => returnFocusRef.current?.focus());
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
       if (params.has("homeworkId")) {
@@ -352,7 +421,6 @@ export default function StudentHomeworkPage() {
         saved,
       ]);
       setUploadState("success");
-      setTimeout(closeModal, 1400);
     } catch (error) {
       setErrorMsg(error instanceof Error ? error.message : "Không thể nộp bài. Vui lòng thử lại.");
       setUploadState("idle");
@@ -369,45 +437,81 @@ export default function StudentHomeworkPage() {
 
   return (
     <PortalLayout role="student" userName={STUDENT_NAME} pageTitle="Bài tập">
-      <div className="space-y-6 max-w-5xl mx-auto pb-10">
+      <div className="space-y-5 max-w-5xl mx-auto pb-10">
         <SectionHeader
-          title="Bài tập của tôi"
-          subtitle={`${scopedHomework.length} bài tập trong phạm vi đang chọn · ${submittedCount} đã hoàn thành`}
+          title="Trung tâm bài tập"
+          subtitle="Xử lý bài cần làm trước, sau đó theo dõi bài chờ chấm và kết quả."
         />
 
         <StudentScopeBar classes={myClasses} scope={scope} onChange={setScope} />
 
-        {/* ── Filter tabs ───────────────────────────────── */}
-        <div className="flex items-center gap-2 flex-wrap">
-          {(["all", "pending", "submitted", "graded"] as FilterTab[]).map(f => (
-            <button
-              key={f}
-              onClick={() => setFilterTab(f)}
-              className={`px-3.5 py-1.5 text-xs font-semibold rounded-xl transition-all flex items-center gap-1.5 ${
-                filterTab === f
-                  ? "bg-primary text-primary-foreground shadow-sm"
-                  : "bg-muted text-muted-foreground hover:bg-accent"
-              }`}
-            >
-              {{ all: "Tất cả", pending: "Chưa nộp", submitted: "Đã nộp", graded: "Đã chấm" }[f]}
-              {tabCounts[f] > 0 && f !== "all" && (
-                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
-                  filterTab === f ? "bg-primary-foreground/20" : "bg-background"
-                }`}>
-                  {tabCounts[f]}
-                </span>
-              )}
-            </button>
-          ))}
-        </div>
+        {loadWarning && (
+          <div className="flex flex-col gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-200 sm:flex-row sm:items-center">
+            <div className="flex min-w-0 flex-1 items-center gap-2"><AlertCircle className="h-4 w-4 shrink-0" /><p>{loadWarning}</p></div>
+            <Button type="button" size="sm" variant="outline" onClick={() => setReloadVersion((value) => value + 1)}><RefreshCw className="h-3.5 w-3.5" />Thử lại</Button>
+          </div>
+        )}
+
+        <section className="overflow-hidden rounded-2xl border border-primary/20 bg-gradient-to-br from-primary/[0.11] via-card to-card shadow-sm">
+          <div className="grid gap-5 p-5 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center lg:p-6">
+            <div className="min-w-0">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-primary">Tiến độ trong phạm vi đang chọn</p>
+              <h2 className="mt-2 text-xl font-bold">Đã hoàn thành {submittedCount}/{scopedHomework.length} bài</h2>
+              <p className="mt-1 text-sm text-muted-foreground">Bài bị trả lại và bài gần đến hạn luôn được đưa lên trước.</p>
+              <div className="mt-4 flex items-center gap-3">
+                <div className="h-2 min-w-0 flex-1 overflow-hidden rounded-full bg-primary/10"><div className="h-full rounded-full bg-primary transition-all" style={{ width: `${completionPercent}%` }} /></div>
+                <span className="text-xs font-bold text-primary">{completionPercent}%</span>
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <div className="min-w-[78px] rounded-xl border bg-background/80 px-3 py-2.5 text-center"><p className="text-xl font-bold">{tabCounts.todo}</p><p className="text-[10px] text-muted-foreground">Cần xử lý</p></div>
+              <div className="min-w-[78px] rounded-xl border border-rose-200 bg-rose-50/80 px-3 py-2.5 text-center dark:border-rose-900 dark:bg-rose-950/20"><p className="text-xl font-bold text-rose-600 dark:text-rose-400">{tabCounts.returned}</p><p className="text-[10px] text-muted-foreground">Làm lại</p></div>
+              <div className="min-w-[78px] rounded-xl border border-blue-200 bg-blue-50/80 px-3 py-2.5 text-center dark:border-blue-900 dark:bg-blue-950/20"><p className="text-xl font-bold text-blue-600 dark:text-blue-400">{tabCounts.submitted}</p><p className="text-[10px] text-muted-foreground">Chờ chấm</p></div>
+            </div>
+          </div>
+          {priorityHomework && (
+            <div className="flex flex-col gap-3 border-t border-primary/15 bg-background/45 px-5 py-3.5 sm:flex-row sm:items-center sm:justify-between lg:px-6">
+              <div className="min-w-0"><p className="text-[10px] font-bold uppercase tracking-wide text-primary">Ưu tiên tiếp theo</p><p className="truncate text-sm font-semibold">{priorityHomework.title}</p></div>
+              <Button type="button" size="sm" variant="gradient" onClick={() => priorityHomework.kind === "exam" ? router.push(`/student/classes/${priorityHomework.class_id}/exam/${priorityHomework.id}`) : openModal(priorityHomework, "submit")}>Bắt đầu ngay<ArrowRight className="h-3.5 w-3.5" /></Button>
+            </div>
+          )}
+        </section>
+
+        <section className="space-y-3 rounded-2xl border border-border bg-card p-3 sm:p-4" aria-label="Bộ lọc bài tập">
+          <div className="flex gap-2 overflow-x-auto pb-1" role="tablist" aria-label="Lọc theo trạng thái">
+            {(["todo", "returned", "submitted", "done", "all"] as FilterTab[]).map(f => (
+              <button
+                type="button"
+                role="tab"
+                aria-selected={filterTab === f}
+                key={f}
+                onClick={() => setFilterTab(f)}
+                className={`flex shrink-0 items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-semibold transition-all ${filterTab === f ? "bg-primary text-primary-foreground shadow-sm" : "bg-muted text-muted-foreground hover:bg-accent"}`}
+              >
+                {{ todo: "Cần xử lý", returned: "Cần làm lại", submitted: "Chờ chấm", done: "Đã xong", all: "Tất cả" }[f]}
+                <span className="text-[10px] opacity-75">{tabCounts[f]}</span>
+              </button>
+            ))}
+          </div>
+          <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
+            <label className="relative block">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <span className="sr-only">Tìm bài tập</span>
+              <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Tìm theo tên hoặc nội dung…" className="h-10 w-full rounded-xl border border-border bg-background pl-9 pr-3 text-sm outline-none focus:border-primary/40 focus:ring-2 focus:ring-primary/15" />
+            </label>
+            <label className="flex items-center gap-2 rounded-xl border border-border bg-background px-3"><SlidersHorizontal className="h-4 w-4 text-muted-foreground" /><span className="sr-only">Loại bài</span><select value={typeFilter} onChange={(event) => setTypeFilter(event.target.value as TypeFilter)} className="h-10 bg-transparent text-xs font-medium outline-none"><option value="all">Mọi loại bài</option><option value="file">Nộp bằng file</option><option value="exam">Làm trên hệ thống</option></select></label>
+            <label className="rounded-xl border border-border bg-background px-3"><span className="sr-only">Sắp xếp</span><select value={sortKey} onChange={(event) => setSortKey(event.target.value as SortKey)} className="h-10 bg-transparent text-xs font-medium outline-none"><option value="priority">Ưu tiên cần xử lý</option><option value="due">Hạn gần nhất</option><option value="newest">Giao gần đây</option></select></label>
+          </div>
+        </section>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* ── Homework list ────────────────────────────── */}
-          <div className="lg:col-span-2 space-y-4">
+          <div className="order-2 space-y-4 lg:order-1 lg:col-span-2">
             {displayed.length === 0 ? (
               <div className="py-16 text-center text-muted-foreground border-2 border-dashed border-border/50 rounded-2xl">
-                <FileText className="h-8 w-8 mx-auto mb-3 opacity-20" />
-                <p className="font-medium">Không có bài tập nào.</p>
+                <Search className="h-8 w-8 mx-auto mb-3 opacity-20" />
+                <p className="font-medium">Không tìm thấy bài tập phù hợp.</p>
+                <button type="button" className="mt-2 text-xs font-semibold text-primary hover:underline" onClick={() => { setQuery(""); setTypeFilter("all"); setFilterTab("all"); }}>Xóa bộ lọc</button>
               </div>
             ) : (
               displayed.map((hw, i) => {
@@ -620,14 +724,16 @@ export default function StudentHomeworkPage() {
           </div>
 
           {/* ── Sidebar ──────────────────────────────────── */}
-          <div className="space-y-5">
+          <aside className="order-1 space-y-4 lg:order-2" aria-label="Tóm tắt bài tập">
             {/* Progress card */}
             <Card className="bg-gradient-to-br from-primary/10 to-primary/5 border-primary/20">
               <CardContent className="p-5 space-y-4">
                 <div>
                   <h3 className="font-bold text-sm text-foreground mb-0.5">Tiến độ bài tập</h3>
                   <p className="text-xs text-muted-foreground">
-                    {submittedCount >= scopedHomework.length
+                    {scopedHomework.length === 0
+                      ? "Chưa có bài tập trong phạm vi này"
+                      : submittedCount >= scopedHomework.length
                       ? "Bạn đã nộp tất cả bài tập!"
                       : `Còn ${scopedHomework.length - submittedCount} bài chưa nộp`}
                   </p>
@@ -666,18 +772,22 @@ export default function StudentHomeworkPage() {
                 </div>
 
                 {/* Mini breakdown */}
-                <div className="grid grid-cols-3 gap-2 pt-1 border-t border-border/40">
+                <div className="grid grid-cols-4 gap-2 pt-1 border-t border-border/40">
                   <div className="text-center">
-                    <p className="text-lg font-bold text-amber-600 dark:text-amber-400">{tabCounts.pending}</p>
-                    <p className="text-[10px] text-muted-foreground">Chưa nộp</p>
+                    <p className="text-lg font-bold text-amber-600 dark:text-amber-400">{tabCounts.todo}</p>
+                    <p className="text-[10px] text-muted-foreground">Cần xử lý</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-lg font-bold text-rose-600 dark:text-rose-400">{tabCounts.returned}</p>
+                    <p className="text-[10px] text-muted-foreground">Làm lại</p>
                   </div>
                   <div className="text-center">
                     <p className="text-lg font-bold text-blue-600 dark:text-blue-400">{tabCounts.submitted}</p>
-                    <p className="text-[10px] text-muted-foreground">Đã nộp</p>
+                    <p className="text-[10px] text-muted-foreground">Chờ chấm</p>
                   </div>
                   <div className="text-center">
-                    <p className="text-lg font-bold text-emerald-600 dark:text-emerald-400">{tabCounts.graded}</p>
-                    <p className="text-[10px] text-muted-foreground">Đã chấm</p>
+                    <p className="text-lg font-bold text-emerald-600 dark:text-emerald-400">{tabCounts.done}</p>
+                    <p className="text-[10px] text-muted-foreground">Đã xong</p>
                   </div>
                 </div>
               </CardContent>
@@ -686,13 +796,13 @@ export default function StudentHomeworkPage() {
             {/* Upcoming deadline */}
             {(() => {
               const upcoming = scopedHomework
-                .filter(hw => !getSub(hw))
-                .sort((a, b) => a.due_date.localeCompare(b.due_date))[0];
+                .filter(hw => statusKey(hw) === "todo" || statusKey(hw) === "returned")
+                .sort((a, b) => STATE_PRIORITY[statusKey(a)] - STATE_PRIORITY[statusKey(b)] || a.due_date.localeCompare(b.due_date))[0];
               if (!upcoming) return (
                 <Card>
                   <CardContent className="p-5 flex items-center gap-3">
                     <CheckCircle2 className="h-8 w-8 text-emerald-500 shrink-0" />
-                    <p className="text-sm font-semibold text-foreground">Bạn đã nộp hết bài tập!</p>
+                    <p className="text-sm font-semibold text-foreground">{scopedHomework.length === 0 ? "Chưa có deadline cần theo dõi." : "Bạn đã hoàn thành hết bài tập!"}</p>
                   </CardContent>
                 </Card>
               );
@@ -704,7 +814,7 @@ export default function StudentHomeworkPage() {
                     <div className={`h-9 w-9 rounded-full flex items-center justify-center shrink-0 mt-0.5 ${urgent ? "bg-amber-100 dark:bg-amber-900/30" : "bg-muted"}`}>
                       <AlertCircle className={`h-5 w-5 ${urgent ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"}`} />
                     </div>
-                    <div>
+                    <div className="min-w-0 flex-1">
                       <h4 className="font-semibold text-sm text-foreground">
                         {urgent ? "Sắp đến hạn!" : "Deadline tiếp theo"}
                       </h4>
@@ -713,12 +823,13 @@ export default function StudentHomeworkPage() {
                         {" — "}
                         {d < 0 ? "đã quá hạn" : d === 0 ? "hạn nộp hôm nay" : `còn ${d} ngày`}
                       </p>
+                      <button type="button" className="mt-2 text-xs font-semibold text-primary hover:underline" onClick={() => upcoming.kind === "exam" ? router.push(`/student/classes/${upcoming.class_id}/exam/${upcoming.id}`) : openModal(upcoming, "submit")}>Mở bài tập</button>
                     </div>
                   </CardContent>
                 </Card>
               );
             })()}
-          </div>
+          </aside>
         </div>
       </div>
 
@@ -726,18 +837,21 @@ export default function StudentHomeworkPage() {
       {modalType && selectedHw && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200"
-          onClick={e => { if (e.target === e.currentTarget) closeModal(); }}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="student-homework-dialog-title"
+          onClick={e => { if (e.target === e.currentTarget && uploadState !== "uploading") closeModal(); }}
         >
           <Card className="w-full max-w-lg shadow-2xl border-0 overflow-hidden">
             {/* Header */}
             <div className="border-b border-border p-5 flex justify-between items-start bg-muted/30">
               <div>
-                <h3 className="font-bold text-base text-foreground">
+                <h3 id="student-homework-dialog-title" className="font-bold text-base text-foreground">
                   {modalType === "submit" ? "Nộp bài tập" : "Chi tiết bài tập"}
                 </h3>
                 <p className="text-muted-foreground text-sm mt-0.5 line-clamp-1">{selectedHw.title}</p>
               </div>
-              <Button size="icon" variant="ghost" className="rounded-full h-8 w-8 -mt-1 -mr-1 shrink-0" onClick={closeModal}>
+              <Button ref={closeButtonRef} type="button" size="icon" variant="ghost" aria-label="Đóng hộp thoại" className="rounded-full h-8 w-8 -mt-1 -mr-1 shrink-0" onClick={closeModal} disabled={uploadState === "uploading"}>
                 <X className="h-4 w-4" />
               </Button>
             </div>
@@ -923,24 +1037,17 @@ export default function StudentHomeworkPage() {
                     </div>
                   )}
 
-                  <div className="flex justify-end gap-3 pt-1 border-t border-border">
-                    <Button type="button" variant="ghost" onClick={closeModal} disabled={uploadState === "uploading"}>
-                      Hủy
-                    </Button>
-                    <Button
-                      type="submit"
-                      variant="gradient"
-                      disabled={!file || uploadState !== "idle"}
-                      className="min-w-[130px]"
-                    >
-                      {uploadState === "uploading" ? (
-                        <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Đang tải lên...</>
-                      ) : uploadState === "success" ? (
-                        <><Check className="h-4 w-4 mr-2" /> Đã nộp</>
-                      ) : (
-                        "Xác nhận nộp bài"
-                      )}
-                    </Button>
+                  <div className="flex justify-end gap-3 pt-3 border-t border-border">
+                    {uploadState === "success" ? (
+                      <Button type="button" variant="gradient" onClick={() => setModalType("detail")}><Check className="h-4 w-4" />Xem bài đã nộp</Button>
+                    ) : (
+                      <>
+                        <Button type="button" variant="ghost" onClick={closeModal} disabled={uploadState === "uploading"}>Hủy</Button>
+                        <Button type="submit" variant="gradient" disabled={!file || uploadState !== "idle"} className="min-w-[150px]">
+                          {uploadState === "uploading" ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Đang tải lên...</> : "Xác nhận nộp bài"}
+                        </Button>
+                      </>
+                    )}
                   </div>
                 </form>
               )}
