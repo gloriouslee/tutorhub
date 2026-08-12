@@ -247,7 +247,7 @@ test("student aggregate pages remain scoped across multiple teachers and classes
   assert.match(scores, /Mục tiêu điểm theo phạm vi/);
   assert.match(scores, /<StudentScopeBar/);
   assert.match(payments, /pendingGroups/);
-  assert.match(payments, /teacherSettings\[modalTeacherId\]/);
+  assert.match(payments, /settings\[paymentTarget\.teacherId\]/);
   assert.match(payments, /invoiceIds: group\.invoices\.map/);
   assert.doesNotMatch(payments, /myClasses\.find\(c => c\.tutor_id\)/);
   assert.match(contextRoute, /portalBranding: DEFAULT_PORTAL_BRANDING/);
@@ -779,15 +779,23 @@ test("admin entity writes are row-level and lifecycle-aware", async () => {
 
 test("teacher payment approvals are scoped to the owning class", async () => {
   const route = await read("src/app/api/payments/transactions/route.ts");
+  const approvals = await read("src/app/teacher/approvals/page.tsx");
   const migration = await read(
     "supabase/migrations/20260729180000_admin_portal_hardening.sql",
+  );
+  const paymentExperienceMigration = await read(
+    "supabase/migrations/20260811200000_payment_experience.sql",
   );
 
   assert.match(route, /\.eq\("teacher_id", actor\.teacherId\)/);
   assert.match(route, /teacher_id: product\.teacherId/);
   assert.match(route, /class_id: product\.classId/);
+  assert.match(route, /rejection_reason_required/);
+  assert.match(approvals, /rejectionReason\.trim\(\)\.length < 5/);
   assert.match(migration, /add column if not exists teacher_id/);
   assert.match(migration, /purchase_transactions_teacher_status_idx/);
+  assert.match(paymentExperienceMigration, /add column if not exists rejection_reason/);
+  assert.match(paymentExperienceMigration, /'submitted_at', now\(\)/);
 
   await assert.rejects(read("src/app/admin/transactions/page.tsx"));
   await assert.rejects(read("src/app/admin/payments/page.tsx"));
@@ -803,7 +811,8 @@ test("deleting or locking an account ends its session immediately", async () => 
 
   // Access tokens are validated locally, so authorization must hang off the
   // per-request profiles read rather than trusting the token's app_metadata.
-  assert.match(auth, /select\("role, must_reset_password, phone, disabled"\)/);
+  assert.match(auth, /select\("role, full_name, must_reset_password, phone, disabled"\)/);
+  assert.match(auth, /roleEntity\?\.fullName[\s\S]{0,120}profileDisplayName[\s\S]{0,120}metadataDisplayName/);
   assert.match(auth, /if \(!profile\) return null/);
   assert.match(auth, /profile\.disabled === true\) return null/);
   // A deleted account keeps a signed token carrying its old role; the role must

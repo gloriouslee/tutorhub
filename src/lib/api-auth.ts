@@ -166,7 +166,7 @@ export async function getRequestIdentity(
   const [profileResult, metadataEntity] = await Promise.all([
     identityStore
       .from("profiles")
-      .select("role, must_reset_password, phone, disabled")
+      .select("role, full_name, must_reset_password, phone, disabled")
       .eq("id", userId)
       .maybeSingle(),
     metadataEntityPromise,
@@ -174,6 +174,7 @@ export async function getRequestIdentity(
 
   let profile: {
     role?: unknown;
+    full_name?: unknown;
     must_reset_password?: unknown;
     phone?: unknown;
     disabled?: unknown;
@@ -191,7 +192,7 @@ export async function getRequestIdentity(
     });
     const legacyProfile = await identityStore
       .from("profiles")
-      .select("role, phone")
+      .select("role, full_name, phone")
       .eq("id", userId)
       .maybeSingle();
     profile = legacyProfile.data;
@@ -215,6 +216,16 @@ export async function getRequestIdentity(
       ? metadataEntity
       : await loadRoleEntity(roleCandidate);
   const userMetadata = claims.user_metadata;
+  const metadataDisplayName =
+    userMetadata
+    && typeof userMetadata === "object"
+    && typeof userMetadata.full_name === "string"
+      ? userMetadata.full_name.trim()
+      : "";
+  const profileDisplayName =
+    typeof profile.full_name === "string"
+      ? profile.full_name.trim()
+      : "";
   const metadataAvatarUrl =
     userMetadata && typeof userMetadata === "object"
       ? [userMetadata.avatar_url, userMetadata.picture]
@@ -224,7 +235,12 @@ export async function getRequestIdentity(
     userId,
     email,
     role: roleCandidate,
-    displayName: roleEntity?.fullName ?? email?.split("@")[0] ?? "User",
+    displayName:
+      roleEntity?.fullName
+      || profileDisplayName
+      || metadataDisplayName
+      || email?.split("@")[0]
+      || "User",
     avatarUrl: roleEntity?.avatarUrl || metadataAvatarUrl,
     mustResetPassword: profile?.must_reset_password === true,
     profileComplete:

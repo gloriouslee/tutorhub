@@ -793,6 +793,7 @@ export interface PurchaseTransaction {
   status: TxStatus;
   created_at: string;
   reviewed_at?: string;
+  rejection_reason?: string;
 }
 
 const TX_KEY = "tutorhub_transactions";
@@ -832,13 +833,24 @@ export async function createTransaction(
   return result as PurchaseTransaction;
 }
 
-export async function updateTransactionStatus(txId: string, status: "approved" | "rejected"): Promise<void> {
+export async function updateTransactionStatus(
+  txId: string,
+  status: "approved" | "rejected",
+  rejectionReason?: string,
+): Promise<void> {
   const response = await fetch("/api/payments/transactions", {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ transaction_id: txId, status }),
+    body: JSON.stringify({
+      transaction_id: txId,
+      status,
+      rejection_reason: status === "rejected" ? rejectionReason : undefined,
+    }),
   });
-  if (!response.ok) throw new Error("Không thể cập nhật giao dịch.");
+  if (!response.ok) {
+    const result = await response.json().catch(() => ({}));
+    throw new Error(result.error || "Không thể cập nhật giao dịch.");
+  }
 }
 
 // Gói được mở khóa = có giao dịch approved của học viên đó (Supabase),
@@ -1161,18 +1173,27 @@ export interface TuitionInvoice {
   due_date: string;
   status: InvoiceStatus;
   paid_at?: string;
+  submitted_at?: string;
   submitted_by?: "student" | "parent";  // who uploaded the receipt
+  receipt_path?: string;
   class_id?: string;       // liên kết với lớp học (hóa đơn do giáo viên phát hành)
   period?: string;         // "YYYY-MM"
 }
 
 export async function getInvoices(): Promise<TuitionInvoice[]> {
+  try {
+    return await getInvoicesOrThrow();
+  } catch (error) {
+    reportQueryFailure("invoices", error instanceof Error ? error.message : "unknown_error");
+    return [];
+  }
+}
+
+/** Load invoices while preserving transport errors for screens that render retry states. */
+export async function getInvoicesOrThrow(): Promise<TuitionInvoice[]> {
   const response = await fetch("/api/payments/invoices", { cache: "no-store" });
   if (!response.ok) {
-    // Trả [] cho mọi lỗi khiến "gọi hỏng" trông y hệt "chưa có hoá đơn nào": học
-    // viên thấy trang trống dù giáo viên đã phát hành. Ít nhất phải ghi lại.
-    reportQueryFailure("invoices", `HTTP ${response.status}`);
-    return [];
+    throw new Error(`Không thể tải hóa đơn (HTTP ${response.status}).`);
   }
   return response.json() as Promise<TuitionInvoice[]>;
 }

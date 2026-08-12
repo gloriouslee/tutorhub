@@ -607,7 +607,8 @@ create table if not exists public.purchase_transactions (
   transfer_note text,
   status        text not null default 'pending' check (status in ('pending','approved','rejected')),
   created_at    timestamptz not null default now(),
-  reviewed_at   timestamptz
+  reviewed_at   timestamptz,
+  rejection_reason text check (rejection_reason is null or char_length(rejection_reason) <= 500)
 );
 create index if not exists idx_tx_student on public.purchase_transactions (student_id, status);
 create index if not exists purchase_transactions_teacher_status_idx
@@ -2088,6 +2089,7 @@ begin
       then item || jsonb_build_object(
         'status', 'pending_verification',
         'submitted_by', actor_role,
+        'submitted_at', now(),
         'receipt_path', p_receipt_path
       )
       else item

@@ -202,12 +202,18 @@ export async function PATCH(req: NextRequest) {
   ) {
     return NextResponse.json({ error: "invalid_transaction_update" }, { status: 400 });
   }
+  if (body.status === "rejected" && !isNonEmptyString(body.rejection_reason, 500)) {
+    return NextResponse.json({ error: "rejection_reason_required" }, { status: 400 });
+  }
 
   let updateQuery = createAdminClient()
     .from("purchase_transactions")
     .update({
       status: body.status,
       reviewed_at: new Date().toISOString(),
+      rejection_reason: body.status === "rejected"
+        ? String(body.rejection_reason).trim()
+        : null,
     })
     .eq("id", body.transaction_id)
     .eq("status", "pending");

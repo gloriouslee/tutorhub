@@ -14,7 +14,8 @@ CREATE TABLE IF NOT EXISTS public.purchase_transactions (
   transfer_note TEXT,
   status        TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','rejected')),
   created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  reviewed_at   TIMESTAMPTZ
+  reviewed_at   TIMESTAMPTZ,
+  rejection_reason TEXT CHECK (rejection_reason IS NULL OR char_length(rejection_reason) <= 500)
 );
 
 CREATE INDEX IF NOT EXISTS idx_tx_student ON public.purchase_transactions (student_id, status);
