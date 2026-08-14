@@ -125,6 +125,7 @@ export interface Notification {
   sender_user_id?: string;
   target_class_id?: string;
   target_class_name?: string;
+  target_student_id?: string;
 }
 
 export interface Material {

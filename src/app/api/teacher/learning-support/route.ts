@@ -46,7 +46,14 @@ export async function POST(req: NextRequest) {
       })) {
         return NextResponse.json({ error: "rate_limited" }, { status: 429, ...PRIVATE_NO_STORE });
       }
-      return NextResponse.json(await generateWeeklyReportsForTeacher(identity.teacherId), PRIVATE_NO_STORE);
+      const studentId = typeof body.studentId === "string" ? body.studentId.trim() : undefined;
+      if (studentId && studentId.length > 120) {
+        return NextResponse.json({ error: "invalid_student_id" }, { status: 400, ...PRIVATE_NO_STORE });
+      }
+      return NextResponse.json(
+        await generateWeeklyReportsForTeacher(identity.teacherId, undefined, studentId),
+        PRIVATE_NO_STORE,
+      );
     }
     if (body.action === "update_alert") {
       if (!await consumeRateLimit({

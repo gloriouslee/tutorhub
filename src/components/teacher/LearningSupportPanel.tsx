@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import {
   AlertTriangle,
@@ -32,6 +33,8 @@ type SupportAlert = {
 };
 type TopicInsight = {
   id: string;
+  studentId: string;
+  classId: string;
   studentName: string;
   className: string;
   topic: string;
@@ -45,6 +48,7 @@ type SupportPayload = {
   weakTopics: TopicInsight[];
   goals: {
     id: string;
+    studentId: string;
     studentName: string;
     title: string;
     currentValue: number;
@@ -197,6 +201,11 @@ export default function LearningSupportPanel() {
                           </div>
                         </div>
                         <div className="flex shrink-0 gap-2">
+                          <Button asChild type="button" size="sm" variant="outline">
+                            <Link href={`/teacher/students/${encodeURIComponent(alert.studentId)}?tab=${alert.signals[0]?.type === "homework" ? "homework" : alert.signals[0]?.type === "absence" || alert.signals[0]?.type === "late" ? "attendance" : "scores"}&class=${encodeURIComponent(alert.classId)}`}>
+                              Mở hồ sơ
+                            </Link>
+                          </Button>
                           <Button
                             type="button"
                             size="sm"
@@ -235,7 +244,7 @@ export default function LearningSupportPanel() {
                 {data.weakTopics.length === 0 ? (
                   <p className="py-4 text-center text-sm text-muted-foreground">Chưa có bài thi đủ dữ liệu phân tích.</p>
                 ) : data.weakTopics.slice(0, 4).map((topic) => (
-                  <div key={topic.id} className="rounded-xl border border-border p-3">
+                  <Link href={`/teacher/students/${encodeURIComponent(topic.studentId)}?tab=overview&class=${encodeURIComponent(topic.classId)}`} key={topic.id} className="block rounded-xl border border-border p-3 transition hover:border-primary/50 hover:bg-muted/30">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <p className="truncate text-sm font-bold">{topic.topic}</p>
@@ -248,7 +257,7 @@ export default function LearningSupportPanel() {
                         Đề xuất: {topic.recommendedResources[0].title}
                       </p>
                     )}
-                  </div>
+                  </Link>
                 ))}
               </CardContent>
             </Card>
@@ -275,13 +284,13 @@ export default function LearningSupportPanel() {
                   <div className="mt-4 space-y-3 border-t border-indigo-200/70 pt-4 dark:border-indigo-900/60">
                     <p className="text-xs font-bold uppercase tracking-wider text-indigo-700 dark:text-indigo-300">Tiến độ mục tiêu học viên</p>
                     {data.goals.slice(0, 3).map((goal) => (
-                      <div key={goal.id}>
+                      <Link href={`/teacher/students/${encodeURIComponent(goal.studentId)}?tab=overview`} key={goal.id} className="block rounded-lg p-1 transition hover:bg-indigo-100/60 dark:hover:bg-indigo-900/20">
                         <div className="mb-1.5 flex items-center justify-between gap-3 text-xs">
                           <p className="min-w-0 truncate"><strong>{goal.studentName}</strong> · {goal.title}</p>
                           <span className="shrink-0 font-bold text-indigo-700 dark:text-indigo-300">{goal.progressPercent}%</span>
                         </div>
                         <ProgressBar value={goal.progressPercent} size="sm" />
-                      </div>
+                      </Link>
                     ))}
                   </div>
                 )}

@@ -1272,7 +1272,9 @@ test("teacher and admin guardian invitations require parent acceptance", async (
     "src/components/guardians/StudentGuardianManager.tsx",
   );
   const parentInvitations = await read("src/app/parent/invitations/page.tsx");
-  const teacherStudents = await read("src/app/teacher/students/page.tsx");
+  const teacherStudentProfile = await read(
+    "src/components/teacher/students/StudentProfile.tsx",
+  );
   const adminStudents = await read("src/app/admin/students/page.tsx");
 
   assert.match(collectionRoute, /teacherCanManageStudent/);
@@ -1286,10 +1288,31 @@ test("teacher and admin guardian invitations require parent acceptance", async (
   assert.match(itemRoute, /replacement\?\.parent_id \?\? null/);
   assert.match(manager, /\/api\/guardians/);
   assert.match(parentInvitations, /resetAccountContextCache\(\)/);
-  assert.match(teacherStudents, /StudentGuardianPanel/);
-  assert.match(teacherStudents, /key: "guardians"/);
-  assert.match(teacherStudents, /label: "Phụ huynh"/);
+  assert.match(teacherStudentProfile, /StudentGuardianPanel/);
+  assert.match(teacherStudentProfile, /value: "family"/);
+  assert.match(teacherStudentProfile, /label: "Gia đình"/);
   assert.match(adminStudents, /StudentGuardianManager/);
+});
+
+test("teacher student workspace keeps aggregates scoped and notes attributable", async () => {
+  const workspaceRoute = await read("src/app/api/teacher/students/route.ts");
+  const notesRoute = await read("src/app/api/teacher/student-comments/route.ts");
+  const noteItemRoute = await read("src/app/api/teacher/student-comments/[id]/route.ts");
+  const growthServer = await read("src/lib/learning-growth-server.ts");
+  const storage = await read("src/lib/storage.ts");
+  const migration = await read("supabase/migrations/20260814120000_student_notes_workspace.sql");
+  const notificationRoute = await read("src/app/api/data/entities/[entity]/route.ts");
+
+  assert.match(workspaceRoute, /identity\.role !== "teacher"/);
+  assert.match(workspaceRoute, /loadTeacherStudentProfile\(identity\.teacherId, studentId\)/);
+  assert.match(growthServer, /source: "online" as const/);
+  assert.match(growthServer, /latestSubmissionByHomework/);
+  assert.match(notesRoute, /author_user_id: identity\.userId/);
+  assert.match(noteItemRoute, /eq\("author_user_id", identity\.userId\)/);
+  assert.doesNotMatch(storage, /student_comments"\)\.delete\(\)\.eq\("student_id"/);
+  assert.match(migration, /visibility in \('private', 'shared'\)/);
+  assert.match(migration, /target_student_id = public\.my_student_id\(\)/);
+  assert.match(notificationRoute, /data\.student_ids\.includes\(item\.target_student_id\)/);
 });
 
 test("all parent-sensitive API reads use accepted guardian relationships", async () => {

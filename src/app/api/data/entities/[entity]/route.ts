@@ -15,7 +15,7 @@ const ENTITY_FIELDS: Record<string, Set<string>> = {
   ]),
   notifications: new Set([
     "id", "title", "content", "category", "target_role", "target_class_id",
-    "sent_by", "sender_user_id", "is_read", "created_at",
+    "target_student_id", "sent_by", "sender_user_id", "is_read", "created_at",
   ]),
 };
 
@@ -72,11 +72,16 @@ async function teacherCanWriteNotification(
   }
   const { data } = await admin
     .from("classes")
-    .select("id")
+    .select("id,student_ids")
     .eq("id", item.target_class_id)
     .eq("tutor_id", teacherId ?? "")
     .maybeSingle();
-  return Boolean(data);
+  if (!data) return false;
+  if (item.target_student_id === undefined || item.target_student_id === null || item.target_student_id === "") return true;
+  return typeof item.target_student_id === "string"
+    && item.target_student_id.length <= 120
+    && Array.isArray(data.student_ids)
+    && data.student_ids.includes(item.target_student_id);
 }
 
 export async function POST(

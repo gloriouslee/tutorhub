@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { Button } from "@/components/ui/button";
@@ -37,6 +37,7 @@ interface Assignment {
   fileUrl?: string;
   submitted: number;
   ungraded: number;
+  assignedTo?: string[] | null;
 }
 
 type Tab = "todo" | "all" | "exam";
@@ -74,10 +75,12 @@ export default function TeacherHomeworkPage() {
   const [tab, setTab] = useState<Tab>("todo");
   const [classFilter, setClassFilter] = useState("all");
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [studentOptions, setStudentOptions] = useState<{ id: string; full_name: string }[]>([]);
+  const deepLinkHandled = useRef(false);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<Assignment | null>(null);
-  const [form, setForm] = useState({ title: "", classId: "", due: "", description: "" });
+  const [form, setForm] = useState({ title: "", classId: "", due: "", description: "", studentId: "" });
   const [formError, setFormError] = useState("");
 
   const classById = useMemo(
@@ -112,6 +115,7 @@ export default function TeacherHomeworkPage() {
                     dueDate: lesson.due_date ?? session.date ?? today,
                     createdAt: session.date ?? today,
                     fileUrl: lesson.file_url, submitted: 0, ungraded: 0,
+                    assignedTo: lesson.assigned_to ?? null,
                   });
                 } else if (lesson.type === "exam") {
                   rows.push({
@@ -146,6 +150,7 @@ export default function TeacherHomeworkPage() {
           createdAt: String(row.created_at ?? row.due_date ?? today),
           submitted: 0,
           ungraded: 0,
+          assignedTo: Array.isArray(row.assigned_to) ? row.assigned_to.map(String) : null,
         }));
 
       const all = [...manualRows, ...curriculum];
@@ -182,11 +187,37 @@ export default function TeacherHomeworkPage() {
 
       setAssignments(all);
       setSubmissions(loaded);
+      setStudentOptions(students.map((student) => ({ id: student.id, full_name: student.full_name })));
       setForm((current) => ({ ...current, classId: current.classId || classIds[0] || "" }));
     })().finally(() => { if (!cancelled) setLoadingHomework(false); });
 
     return () => { cancelled = true; };
   }, [ready, teacherId, myClasses, submissionRefreshRevision]);
+
+  useEffect(() => {
+    if (deepLinkHandled.current || myClasses.length === 0) return;
+    const params = new URLSearchParams(window.location.search);
+    const requestedClass = params.get("class");
+    const requestedHomework = params.get("homework");
+    const requestedStudent = params.get("student") ?? "";
+    if (requestedClass && myClasses.some((item) => item.id === requestedClass)) {
+      setClassFilter(requestedClass);
+      setForm((current) => ({ ...current, classId: requestedClass, studentId: requestedStudent }));
+    }
+    if (requestedHomework) setExpanded(requestedHomework);
+    if (params.get("action") === "create") {
+      setEditTarget(null);
+      setForm({
+        title: "",
+        classId: requestedClass && myClasses.some((item) => item.id === requestedClass) ? requestedClass : myClasses[0]?.id ?? "",
+        due: "",
+        description: "",
+        studentId: requestedStudent,
+      });
+      setModalOpen(true);
+    }
+    deepLinkHandled.current = true;
+  }, [myClasses]);
 
   const totalUngraded = assignments.reduce((sum, row) => sum + row.ungraded, 0);
   // Chỉ bài thi đã mở mới thật sự "đang chạy"; bản nháp học viên chưa nhìn thấy.
@@ -212,7 +243,7 @@ export default function TeacherHomeworkPage() {
 
   function openCreate() {
     setEditTarget(null);
-    setForm({ title: "", classId: myClasses[0]?.id ?? "", due: "", description: "" });
+    setForm({ title: "", classId: myClasses[0]?.id ?? "", due: "", description: "", studentId: "" });
     setFormError("");
     setModalOpen(true);
   }
@@ -222,6 +253,7 @@ export default function TeacherHomeworkPage() {
     setForm({
       title: row.title, classId: row.classId, due: row.dueDate,
       description: row.description ?? "",
+      studentId: row.assignedTo?.[0] ?? "",
     });
     setFormError("");
     setModalOpen(true);
@@ -231,7 +263,7 @@ export default function TeacherHomeworkPage() {
     if (!form.title.trim()) { setFormError("Vui lòng nhập tiêu đề bài tập."); return; }
     if (!form.due) { setFormError("Vui lòng chọn hạn nộp."); return; }
     const row: Assignment = editTarget
-      ? { ...editTarget, title: form.title.trim(), classId: form.classId, dueDate: form.due, description: form.description }
+      ? { ...editTarget, title: form.title.trim(), classId: form.classId, dueDate: form.due, description: form.description, assignedTo: form.studentId ? [form.studentId] : null }
       : {
           id: `hw_${crypto.randomUUID()}`,
           classId: form.classId,
@@ -242,11 +274,13 @@ export default function TeacherHomeworkPage() {
           createdAt: toLocalDateKey(new Date()),
           submitted: 0,
           ungraded: 0,
+          assignedTo: form.studentId ? [form.studentId] : null,
         };
     try {
       await upsertTeacherHomework({
         id: row.id, class_id: row.classId, title: row.title,
         description: row.description, due_date: row.dueDate, created_at: row.createdAt,
+        assigned_to: row.assignedTo,
       });
       setAssignments((current) =>
         current.some((item) => item.id === row.id)
@@ -331,6 +365,17 @@ export default function TeacherHomeworkPage() {
                 {myClasses.map((cls) => (
                   <option key={cls.id} value={cls.id}>{cls.class_name}</option>
                 ))}
+              </select>
+              <select
+                value={form.studentId}
+                onChange={(event) => setForm({ ...form, studentId: event.target.value })}
+                aria-label="Học viên nhận bài"
+                className="h-10 w-full rounded-xl border border-input bg-card px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+              >
+                <option value="">Cả lớp</option>
+                {studentOptions
+                  .filter((student) => myClasses.find((item) => item.id === form.classId)?.student_ids?.includes(student.id))
+                  .map((student) => <option key={student.id} value={student.id}>{student.full_name}</option>)}
               </select>
             </>
           )}
@@ -558,7 +603,7 @@ export default function TeacherHomeworkPage() {
                 className="w-full resize-none rounded-xl border border-input bg-card px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
               />
               <p className="text-xs text-muted-foreground">
-                Học viên sẽ nộp bài bằng file. Bài thi làm trên hệ thống được soạn trong tab Lộ trình của lớp.
+                {form.studentId ? "Bài này chỉ giao cho học viên đã chọn." : "Bài này được giao cho cả lớp."} Học viên sẽ nộp bài bằng file.
               </p>
               {formError && <p className="text-sm text-red-600" role="alert">{formError}</p>}
             </div>

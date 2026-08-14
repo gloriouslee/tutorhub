@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import {
   deleteNotification,
+  getStudents,
   getNotifications,
   upsertNotification,
 } from "@/lib/storage";
@@ -51,6 +52,8 @@ export default function TeacherAnnouncementsPage() {
   const [category, setCategory] = useState<NotificationCategory>("general");
   const [target,   setTarget]   = useState("all-students");
   const [submitting, setSubmitting] = useState(false);
+  const [targetedStudent, setTargetedStudent] = useState<{ id: string; full_name: string; classId: string } | null>(null);
+  const deepLinkHandled = useRef(false);
 
   const load = useCallback(async () => {
     const all = await getNotifications();
@@ -62,13 +65,42 @@ export default function TeacherAnnouncementsPage() {
 
   useEffect(() => { load(); }, [load]);
 
+  useEffect(() => {
+    if (deepLinkHandled.current || MY_CLASSES.length === 0) return;
+    const params = new URLSearchParams(window.location.search);
+    const requestedClass = params.get("class");
+    const requestedStudent = params.get("student");
+    if (requestedClass && MY_CLASSES.some((item) => item.id === requestedClass)) setTarget(requestedClass);
+    if (requestedStudent && MY_CLASSES.some((item) => item.student_ids?.includes(requestedStudent))) {
+      getStudents().then((students) => {
+        const student = students.find((item) => item.id === requestedStudent);
+        if (student) {
+          setTargetedStudent({
+            id: student.id,
+            full_name: student.full_name,
+            classId: requestedClass && MY_CLASSES.some((item) => item.id === requestedClass)
+              ? requestedClass
+              : MY_CLASSES.find((item) => item.student_ids?.includes(student.id))?.id ?? "",
+          });
+          setTarget(`student:${student.id}`);
+        }
+      }).catch(() => undefined);
+    }
+    deepLinkHandled.current = true;
+  }, [MY_CLASSES]);
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!title.trim() || !content.trim()) return;
     setSubmitting(true);
 
-    const targetClasses =
-      target === "all-students"
+    const individualStudentId = target.startsWith("student:") ? target.slice("student:".length) : "";
+    const targetClasses = individualStudentId
+      ? MY_CLASSES.filter((item) =>
+          item.student_ids?.includes(individualStudentId)
+          && (!targetedStudent?.classId || item.id === targetedStudent.classId),
+        ).slice(0, 1)
+      : target === "all-students"
         ? MY_CLASSES
         : MY_CLASSES.filter((item) => item.id === target);
     try {
@@ -82,12 +114,13 @@ export default function TeacherAnnouncementsPage() {
             category,
             sent_by: teacherName,
             target_class_id: targetClass.id,
+            target_student_id: individualStudentId || undefined,
             is_read: false,
             created_at: new Date().toISOString(),
           }),
         ),
       );
-      setTitle(""); setContent(""); setCategory("general"); setTarget("all-students");
+      setTitle(""); setContent(""); setCategory("general"); setTarget(targetedStudent ? `student:${targetedStudent.id}` : "all-students");
       await load();
     } finally {
       setSubmitting(false);
@@ -131,6 +164,21 @@ export default function TeacherAnnouncementsPage() {
                     Gửi đến *
                   </label>
                   <div className="space-y-1.5">
+                    {targetedStudent && (
+                      <button
+                        type="button"
+                        onClick={() => setTarget(`student:${targetedStudent.id}`)}
+                        className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl border text-sm font-medium transition-all text-left ${
+                          target === `student:${targetedStudent.id}`
+                            ? "border-primary bg-primary/5 text-primary"
+                            : "border-border text-muted-foreground hover:border-primary/40 hover:bg-muted/40"
+                        }`}
+                      >
+                        <Avatar size="sm"><AvatarFallback name={targetedStudent.full_name} /></Avatar>
+                        <span className="truncate">Riêng {targetedStudent.full_name}</span>
+                        {target === `student:${targetedStudent.id}` && <div className="ml-auto h-2 w-2 rounded-full bg-primary shrink-0" />}
+                      </button>
+                    )}
                     {TARGET_OPTIONS.map(opt => {
                       const Icon = opt.Icon;
                       const selected = target === opt.value;

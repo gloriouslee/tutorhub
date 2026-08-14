@@ -597,6 +597,7 @@ export interface NewNotification {
   // 1 lớp khi giao bài / chấm bài. Bỏ trống = gửi cho mọi người thuộc target_role.
   target_class_id?: string;
   target_class_name?: string;
+  target_student_id?: string;
 }
 
 /** Thêm một thông báo (đọc danh sách hiện tại rồi ghi kèm mục mới lên đầu). */
@@ -618,6 +619,7 @@ export async function addNotifications(items: NewNotification[]): Promise<void> 
     category: n.category,
     sent_by: n.sent_by,
     target_class_id: n.target_class_id,
+    target_student_id: n.target_student_id,
   }));
   await Promise.all(fulls.map(upsertNotification));
 }
@@ -668,25 +670,25 @@ export async function getStudentCommentsMany(
 }
 
 export async function saveStudentComment(studentId: string, commentsList: { text: string; date: string; rating: number }[]): Promise<void> {
-  // Replace-all semantics: callers pass the full updated list for the student.
-  const del = await supabase.from("student_comments").delete().eq("student_id", studentId);
-  if (del.error) {
-    console.error("saveStudentComment(delete):", del.error);
-    throw del.error;
-  }
-  if (commentsList.length === 0) return;
-  const rows = commentsList.map(c => ({
-    id: `cmt_${crypto.randomUUID()}`,
-    student_id: studentId,
-    comment_text: c.text,
-    comment_date: c.date,
-    rating: c.rating,
-  }));
-  const { error } = await supabase.from("student_comments").insert(rows);
-  if (error) {
-    console.error("saveStudentComment(insert):", error);
-    throw error;
-  }
+  // Compatibility for legacy callers: they put the newly-created note first.
+  // Persist only that record so one teacher can never replace another teacher's
+  // notes through a read-modify-write race.
+  const newest = commentsList[0];
+  if (!newest) return;
+  const response = await fetch("/api/teacher/student-comments", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      studentId,
+      text: newest.text,
+      date: newest.date,
+      rating: newest.rating,
+      visibility: "shared",
+      tag: "general",
+    }),
+  });
+  if (!response.ok) throw new Error("Không thể lưu nhận xét học viên.");
 }
 
 // ── Teacher-class assignment overrides (localStorage) ────────────────────────
@@ -1383,7 +1385,7 @@ export interface StoredExamScore {
 /** Tất cả điểm thi đã lưu (nhập tay) — dùng cho báo cáo/thống kê. */
 export async function getAllExamScores(): Promise<StoredExamScore[]> {
   const response = await fetch("/api/exam-scores?all=true", { cache: "no-store" });
-  if (!response.ok) return [];
+  if (!response.ok) throw new Error("Không thể tải danh sách điểm thi.");
   return response.json() as Promise<StoredExamScore[]>;
 }
 
@@ -1406,6 +1408,20 @@ export async function deleteExamScore(id: string): Promise<void> {
     method: "DELETE",
   });
   if (!response.ok) throw new Error("Không thể xóa điểm thi.");
+}
+
+export async function updateExamScore(
+  id: string,
+  score: Omit<StoredExamScore, "id" | "student_id">,
+): Promise<StoredExamScore> {
+  const response = await fetch(`/api/exam-scores/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(score),
+  });
+  if (!response.ok) throw new Error("Không thể cập nhật điểm thi.");
+  return response.json() as Promise<StoredExamScore>;
 }
 
 export async function getExamScoresByStudent(studentId: string): Promise<StoredExamScore[]> {

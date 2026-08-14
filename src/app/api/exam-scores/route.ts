@@ -40,11 +40,22 @@ export async function GET(req: NextRequest) {
   }
   const studentRef = req.nextUrl.searchParams.get("student_ref");
   const classId = req.nextUrl.searchParams.get("class_id") ?? undefined;
-  if (req.nextUrl.searchParams.get("all") === "true" && actor.role === "admin") {
-    const { data, error } = await createAdminClient()
-      .from("app_exam_scores")
-      .select("*")
-      .order("exam_date", { ascending: false });
+  if (req.nextUrl.searchParams.get("all") === "true" && (actor.role === "admin" || actor.role === "teacher")) {
+    const admin = createAdminClient();
+    let allowedClassIds: string[] | null = null;
+    if (actor.role === "teacher") {
+      const results = await Promise.all([
+        admin.from("classes").select("id").eq("tutor_id", actor.teacherId ?? ""),
+        admin.from("teacher_extra_classes").select("id").eq("tutor_id", actor.teacherId ?? ""),
+      ]);
+      const failed = results.find((result) => result.error);
+      if (failed?.error) return NextResponse.json({ error: "score_list_failed" }, { status: 500 });
+      allowedClassIds = [...new Set(results.flatMap((result) => (result.data ?? []).map((row) => String(row.id))))];
+      if (allowedClassIds.length === 0) return NextResponse.json([]);
+    }
+    let query = admin.from("app_exam_scores").select("*").order("exam_date", { ascending: false });
+    if (allowedClassIds) query = query.in("class_id", allowedClassIds);
+    const { data, error } = await query;
     if (error) return NextResponse.json({ error: "score_list_failed" }, { status: 500 });
     return NextResponse.json(
       (data ?? []).map((row) => ({ ...row, student_id: row.student_ref })),

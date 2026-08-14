@@ -18,6 +18,13 @@ import {
   type TrueFalseScale,
 } from "@/lib/exam-scoring";
 import type { CurriculumChapter, CurriculumLesson, ExamQuestion, StoredExamResult } from "@/lib/storage";
+import type {
+  StudentActiveGoal,
+  StudentClassMetrics,
+  StudentRiskSummary,
+  StudentWorkspaceProfile,
+  StudentWorkspaceSummary,
+} from "@/lib/teacher-student-workspace";
 
 type AdminClient = ReturnType<typeof createAdminClient>;
 
@@ -25,6 +32,7 @@ type GrowthClass = {
   id: string;
   class_name: string;
   subject: string;
+  color: string;
   tutor_id: string | null;
   student_ids: string[];
 };
@@ -33,6 +41,9 @@ type GrowthStudent = {
   id: string;
   full_name: string;
   avatar_url: string | null;
+  grade: string;
+  school: string;
+  learning_type: string;
 };
 
 type GrowthHomework = {
@@ -50,6 +61,7 @@ type GrowthSubmission = {
   studentId: string;
   submittedAt: string;
   feedback: string | null;
+  score: number | null;
 };
 
 type GrowthAttendance = {
@@ -64,8 +76,12 @@ type GrowthScore = {
   classId: string;
   studentId: string;
   title: string;
+  score: number;
+  maxScore: number;
   value100: number;
   recordedAt: string;
+  source: "teacher" | "online";
+  reviewHref: string | null;
 };
 
 type GrowthProgress = {
@@ -107,6 +123,7 @@ type GrowthDataset = {
   scores: GrowthScore[];
   progress: GrowthProgress[];
   onlineResults: OnlineExamResult[];
+  packages: Record<string, Record<string, "online" | "advanced" | "offline">>;
 };
 
 const DAY_MS = 86_400_000;
@@ -148,7 +165,9 @@ function isoDate(value: Date) {
 }
 
 function endOfDay(value: string) {
-  return value.length === 10 ? `${value}T23:59:59.999Z` : value;
+  // TutorHub currently operates in Asia/Bangkok. A date-only deadline means
+  // the end of that local calendar day, not midnight at its beginning.
+  return value.length === 10 ? `${value}T23:59:59.999+07:00` : value;
 }
 
 function inRange(value: string, start: string, end: string) {
@@ -173,7 +192,7 @@ async function loadGrowthDataset(admin: AdminClient, classes: GrowthClass[]): Pr
   const classIds = classes.map((item) => item.id);
   const studentIds = [...new Set(classes.flatMap((item) => item.student_ids))];
   if (classIds.length === 0 || studentIds.length === 0) {
-    return { classes, students: [], homework: [], submissions: [], attendance: [], scores: [], progress: [], onlineResults: [] };
+    return { classes, students: [], homework: [], submissions: [], attendance: [], scores: [], progress: [], onlineResults: [], packages: {} };
   }
 
   const [
@@ -184,8 +203,9 @@ async function loadGrowthDataset(admin: AdminClient, classes: GrowthClass[]): Pr
     submissionsResponse,
     attendanceResponse,
     progressResponse,
+    packagesResponse,
   ] = await Promise.all([
-    admin.from("students").select("id,full_name,avatar_url").in("id", studentIds),
+    admin.from("students").select("id,full_name,avatar_url,grade,school,learning_type").in("id", studentIds),
     admin.from("app_exam_scores")
       .select("id,student_ref,class_id,exam_name,score,max_score,exam_date,created_at")
       .in("class_id", classIds)
@@ -204,6 +224,7 @@ async function loadGrowthDataset(admin: AdminClient, classes: GrowthClass[]): Pr
       .select("student_id,resource_id,lesson_id,completed,updated_at")
       .in("student_id", studentIds)
       .in("resource_id", classIds),
+    admin.from("kv_student_packages").select("id,value").in("id", classIds),
   ]);
   const failed = [
     studentsResponse,
@@ -213,6 +234,7 @@ async function loadGrowthDataset(admin: AdminClient, classes: GrowthClass[]): Pr
     submissionsResponse,
     attendanceResponse,
     progressResponse,
+    packagesResponse,
   ].find((response) => response.error);
   if (failed?.error) throw failed.error;
 
@@ -307,6 +329,7 @@ async function loadGrowthDataset(admin: AdminClient, classes: GrowthClass[]): Pr
       studentId: String(row.student_id),
       submittedAt: String(row.submitted_at ?? data.submitted_at ?? ""),
       feedback: typeof data.feedback === "string" && data.feedback.trim() ? data.feedback.trim() : null,
+      score: Number.isFinite(Number(data.score)) ? Number(data.score) : null,
     } satisfies GrowthSubmission;
   });
 
@@ -328,20 +351,29 @@ async function loadGrowthDataset(admin: AdminClient, classes: GrowthClass[]): Pr
       classId: String(row.class_id),
       studentId: String(row.student_ref),
       title: String(row.exam_name ?? "Bài kiểm tra"),
+      score: validNumber(row.score),
+      maxScore: validNumber(row.max_score),
       value100: normalizedScore(row.score, row.max_score),
       recordedAt: String(row.exam_date ?? row.created_at ?? ""),
+      source: "teacher" as const,
+      reviewHref: null,
     })),
-    ...onlineResults.map(({ id, descriptor, result }) => ({
-      id,
-      classId: descriptor.classId,
-      studentId: String(result.student_id),
-      title: descriptor.title,
-      value100: normalizedScore(
-        validNumber(result.score) + Object.values(result.manual_scores ?? {}).reduce((sum, value) => sum + validNumber(value), 0),
-        result.total,
-      ),
-      recordedAt: result.submitted_at,
-    })),
+    ...onlineResults.map(({ id, descriptor, result }) => {
+      const score = validNumber(result.score)
+        + Object.values(result.manual_scores ?? {}).reduce((sum, value) => sum + validNumber(value), 0);
+      return {
+        id,
+        classId: descriptor.classId,
+        studentId: String(result.student_id),
+        title: descriptor.title,
+        score,
+        maxScore: validNumber(result.total),
+        value100: normalizedScore(score, result.total),
+        recordedAt: result.submitted_at,
+        source: "online" as const,
+        reviewHref: `/teacher/classes/${encodeURIComponent(descriptor.classId)}?tab=curriculum&exam=${encodeURIComponent(descriptor.lessonId)}&student=${encodeURIComponent(String(result.student_id))}`,
+      };
+    }),
   ];
 
   return {
@@ -350,6 +382,9 @@ async function loadGrowthDataset(admin: AdminClient, classes: GrowthClass[]): Pr
       id: String(row.id),
       full_name: String(row.full_name ?? "Học viên"),
       avatar_url: typeof row.avatar_url === "string" ? row.avatar_url : null,
+      grade: String(row.grade ?? ""),
+      school: String(row.school ?? ""),
+      learning_type: String(row.learning_type ?? ""),
     })),
     homework,
     submissions,
@@ -363,6 +398,10 @@ async function loadGrowthDataset(admin: AdminClient, classes: GrowthClass[]): Pr
       updatedAt: String(row.updated_at ?? ""),
     })),
     onlineResults,
+    packages: Object.fromEntries((packagesResponse.data ?? []).map((row) => [
+      String(row.id),
+      object(row.value) as Record<string, "online" | "advanced" | "offline">,
+    ])),
   };
 }
 
@@ -809,13 +848,14 @@ function shapeStudentGrowth(student: GrowthStudent, snapshot: Awaited<ReturnType
 async function teacherClasses(admin: AdminClient, teacherId: string) {
   const { data, error } = await admin
     .from("classes")
-    .select("id,class_name,subject,tutor_id,student_ids")
+    .select("id,class_name,subject,color,tutor_id,student_ids")
     .eq("tutor_id", teacherId);
   if (error) throw error;
   return (data ?? []).map((row) => ({
     id: String(row.id),
     class_name: String(row.class_name ?? "Lớp học"),
     subject: String(row.subject ?? ""),
+    color: String(row.color ?? "#4f46e5"),
     tutor_id: typeof row.tutor_id === "string" ? row.tutor_id : null,
     student_ids: strings(row.student_ids),
   })) as GrowthClass[];
@@ -825,7 +865,7 @@ async function classesForStudents(admin: AdminClient, studentIds: string[]) {
   if (studentIds.length === 0) return [];
   const responses = await Promise.all(studentIds.map((studentId) =>
     admin.from("classes")
-      .select("id,class_name,subject,tutor_id,student_ids")
+      .select("id,class_name,subject,color,tutor_id,student_ids")
       .contains("student_ids", [studentId]),
   ));
   const failed = responses.find((response) => response.error);
@@ -836,6 +876,7 @@ async function classesForStudents(admin: AdminClient, studentIds: string[]) {
       id: String(row.id),
       class_name: String(row.class_name ?? "Lớp học"),
       subject: String(row.subject ?? ""),
+      color: String(row.color ?? "#4f46e5"),
       tutor_id: typeof row.tutor_id === "string" ? row.tutor_id : null,
       student_ids: strings(row.student_ids),
     });
@@ -909,6 +950,267 @@ export async function loadTeacherLearningSupport(teacherId: string) {
     reportsThisWeek: snapshot.reports.filter((row) =>
       String(row.week_start) === isoDate(mondayOfWeek(new Date(Date.now() - 7 * DAY_MS))),
     ).length,
+  };
+}
+
+function latestSubmissionByHomework(dataset: GrowthDataset, studentId: string) {
+  const latest = new Map<string, GrowthSubmission>();
+  for (const submission of dataset.submissions.filter((item) => item.studentId === studentId)) {
+    const current = latest.get(submission.homeworkId);
+    if (!current || new Date(submission.submittedAt).getTime() > new Date(current.submittedAt).getTime()) {
+      latest.set(submission.homeworkId, submission);
+    }
+  }
+  return latest;
+}
+
+function validLatestTimestamp(values: (string | null | undefined)[]) {
+  const timestamps = values
+    .filter((value): value is string => typeof value === "string" && value.length > 0)
+    .map((value) => new Date(value).getTime())
+    .filter(Number.isFinite);
+  return timestamps.length > 0 ? new Date(Math.max(...timestamps)).toISOString() : null;
+}
+
+function normalizedRisk(
+  row: Record<string, unknown> | undefined,
+  student: GrowthStudent,
+  classes: GrowthClass[],
+): StudentRiskSummary | null {
+  if (!row) return null;
+  const classId = String(row.class_id ?? "");
+  return {
+    id: String(row.id),
+    priority: ["high", "medium", "low"].includes(String(row.priority))
+      ? String(row.priority) as StudentRiskSummary["priority"]
+      : "low",
+    priorityScore: validNumber(row.priority_score),
+    status: String(row.status ?? "open"),
+    classId,
+    className: classes.find((item) => item.id === classId)?.class_name ?? "Lớp học",
+    signals: Array.isArray(row.signals) ? row.signals as StudentRiskSummary["signals"] : [],
+  };
+}
+
+function activeGoalsForStudent(
+  student: GrowthStudent,
+  snapshot: Awaited<ReturnType<typeof loadGrowthSnapshot>>,
+) {
+  return shapeStudentGrowth(student, snapshot).goals
+    .filter((goal) => goal.status === "active" || goal.status === "completed")
+    .map((goal) => goal as StudentActiveGoal);
+}
+
+function metricsForStudentClasses(
+  dataset: GrowthDataset,
+  studentId: string,
+  classIds: Set<string>,
+): StudentClassMetrics {
+  const scores = dataset.scores.filter((item) => item.studentId === studentId && classIds.has(item.classId));
+  const attendance = dataset.attendance.filter((item) => item.studentId === studentId && classIds.has(item.classId));
+  const accountableAttendance = attendance.filter((item) => item.status !== "excused");
+  const attended = accountableAttendance.filter((item) => item.status === "present" || item.status === "late");
+  const present = attendance.filter((item) => item.status === "present").length;
+  const late = attendance.filter((item) => item.status === "late").length;
+  const homework = dataset.homework.filter((item) => classIds.has(item.classId) && assignedToStudent(item.assignedTo, studentId));
+  const latestSubmissions = latestSubmissionByHomework(dataset, studentId);
+  const now = Date.now();
+  const dueHomework = homework.filter((item) => new Date(item.dueAt).getTime() <= now);
+  const submitted = dueHomework.filter((item) => latestSubmissions.has(item.id));
+  const onTime = dueHomework.filter((item) => {
+    const submission = latestSubmissions.get(item.id);
+    return submission && new Date(submission.submittedAt).getTime() <= new Date(item.dueAt).getTime();
+  });
+  const lateHomework = dueHomework.filter((item) => {
+    const submission = latestSubmissions.get(item.id);
+    return submission && new Date(submission.submittedAt).getTime() > new Date(item.dueAt).getTime();
+  }).length;
+
+  return {
+    averageScore: scores.length > 0
+      ? Math.round((scores.reduce((sum, item) => sum + item.value100 / 10, 0) / scores.length) * 10) / 10
+      : null,
+    assessmentCount: scores.length,
+    attendanceRate: accountableAttendance.length > 0
+      ? Math.round((attended.length / accountableAttendance.length) * 100)
+      : null,
+    punctualityRate: present + late > 0 ? Math.round((present / (present + late)) * 100) : null,
+    absences: attendance.filter((item) => item.status === "absent").length,
+    lates: late,
+    homeworkSubmittedRate: dueHomework.length > 0 ? Math.round((submitted.length / dueHomework.length) * 100) : null,
+    homeworkOnTimeRate: dueHomework.length > 0 ? Math.round((onTime.length / dueHomework.length) * 100) : null,
+    missingHomework: dueHomework.filter((item) => !latestSubmissions.has(item.id)).length,
+    lateHomework,
+  };
+}
+
+function shapeWorkspaceSummary(
+  dataset: GrowthDataset,
+  snapshot: Awaited<ReturnType<typeof loadGrowthSnapshot>>,
+  alerts: Record<string, unknown>[],
+  student: GrowthStudent,
+): StudentWorkspaceSummary {
+  const classes = dataset.classes.filter((item) => item.student_ids.includes(student.id));
+  const classIds = new Set(classes.map((item) => item.id));
+  const scores = dataset.scores.filter((item) => item.studentId === student.id && classIds.has(item.classId));
+  const attendance = dataset.attendance.filter((item) => item.studentId === student.id && classIds.has(item.classId));
+  const metrics = metricsForStudentClasses(dataset, student.id, classIds);
+  const studentAlerts = alerts
+    .filter((row) => String(row.student_id) === student.id)
+    .sort((a, b) => validNumber(b.priority_score) - validNumber(a.priority_score));
+  const goals = activeGoalsForStudent(student, snapshot);
+  const activeGoal = goals
+    .filter((goal) => goal.status === "active" && (!goal.classId || classIds.has(goal.classId)))
+    .sort((a, b) => a.periodEnd.localeCompare(b.periodEnd))[0] ?? null;
+  const weakTopicCount = snapshot.topics.filter((row) =>
+    String(row.student_id) === student.id
+      && classIds.has(String(row.class_id))
+      && validNumber(row.incorrect_questions) > 0,
+  ).length;
+
+  return {
+    id: student.id,
+    fullName: student.full_name,
+    avatarUrl: student.avatar_url,
+    grade: student.grade,
+    school: student.school,
+    learningType: student.learning_type,
+    classes: classes.map((item) => ({
+      id: item.id,
+      name: item.class_name,
+      subject: item.subject,
+      color: item.color,
+      package: dataset.packages[item.id]?.[student.id] ?? null,
+    })),
+    ...metrics,
+    lastActivityAt: validLatestTimestamp([
+      ...scores.map((item) => item.recordedAt),
+      ...attendance.map((item) => `${item.date}T12:00:00+07:00`),
+      ...dataset.submissions.filter((item) => item.studentId === student.id).map((item) => item.submittedAt),
+      ...dataset.progress.filter((item) => item.studentId === student.id).map((item) => item.updatedAt),
+    ]),
+    risk: normalizedRisk(studentAlerts[0], student, classes),
+    activeGoal,
+    weakTopicCount,
+    classMetrics: Object.fromEntries(classes.map((item) => [
+      item.id,
+      metricsForStudentClasses(dataset, student.id, new Set([item.id])),
+    ])),
+  };
+}
+
+async function loadTeacherWorkspaceBase(teacherId: string, studentId?: string) {
+  const admin = createAdminClient();
+  const allClasses = await teacherClasses(admin, teacherId);
+  const classes = studentId
+    ? allClasses.filter((item) => item.student_ids.includes(studentId))
+    : allClasses;
+  if (studentId && classes.length === 0) return null;
+  const dataset = await loadGrowthDataset(admin, classes);
+  await syncGrowthDataset(admin, dataset, teacherId);
+  const studentIds = dataset.students.map((item) => item.id);
+  const [snapshot, alertsResponse] = await Promise.all([
+    loadGrowthSnapshot(admin, studentIds),
+    studentIds.length === 0
+      ? Promise.resolve({ data: [], error: null })
+      : admin.from("student_support_alerts")
+          .select("*")
+          .eq("teacher_id", teacherId)
+          .in("student_id", studentIds)
+          .neq("status", "resolved")
+          .order("priority_score", { ascending: false }),
+  ]);
+  if (alertsResponse.error) throw alertsResponse.error;
+  return {
+    dataset,
+    snapshot,
+    alerts: (alertsResponse.data ?? []) as Record<string, unknown>[],
+  };
+}
+
+export async function loadTeacherStudentDirectory(teacherId: string) {
+  const base = await loadTeacherWorkspaceBase(teacherId);
+  if (!base) return { generatedAt: new Date().toISOString(), students: [] };
+  return {
+    generatedAt: new Date().toISOString(),
+    students: base.dataset.students
+      .map((student) => shapeWorkspaceSummary(base.dataset, base.snapshot, base.alerts, student))
+      .sort((a, b) => a.fullName.localeCompare(b.fullName, "vi")),
+  };
+}
+
+export async function loadTeacherStudentProfile(
+  teacherId: string,
+  studentId: string,
+): Promise<StudentWorkspaceProfile | null> {
+  const base = await loadTeacherWorkspaceBase(teacherId, studentId);
+  if (!base) return null;
+  const student = base.dataset.students.find((item) => item.id === studentId);
+  if (!student) return null;
+  const summary = shapeWorkspaceSummary(base.dataset, base.snapshot, base.alerts, student);
+  const classIds = new Set(summary.classes.map((item) => item.id));
+  const growth = shapeStudentGrowth(student, base.snapshot);
+  const latestSubmissions = latestSubmissionByHomework(base.dataset, student.id);
+  const now = Date.now();
+
+  return {
+    ...summary,
+    scores: base.dataset.scores
+      .filter((item) => item.studentId === student.id && classIds.has(item.classId))
+      .sort((a, b) => new Date(b.recordedAt).getTime() - new Date(a.recordedAt).getTime())
+      .map((item) => ({
+        id: item.id,
+        classId: item.classId,
+        title: item.title,
+        score: item.score,
+        maxScore: item.maxScore,
+        value10: Math.round((item.value100 / 10) * 100) / 100,
+        recordedAt: item.recordedAt,
+        source: item.source,
+        reviewHref: item.reviewHref,
+        canDelete: item.source === "teacher",
+      })),
+    attendance: base.dataset.attendance
+      .filter((item) => item.studentId === student.id && classIds.has(item.classId))
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .map((item) => ({ classId: item.classId, date: item.date, status: item.status })),
+    homework: base.dataset.homework
+      .filter((item) => classIds.has(item.classId) && assignedToStudent(item.assignedTo, student.id))
+      .map((item) => {
+        const submission = latestSubmissions.get(item.id) ?? null;
+        const dueAt = new Date(item.dueAt).getTime();
+        const submittedAt = submission ? new Date(submission.submittedAt).getTime() : null;
+        const status = submission
+          ? submittedAt !== null && submittedAt <= dueAt ? "on_time" as const : "late" as const
+          : dueAt < now ? "missing" as const : "upcoming" as const;
+        return {
+          id: item.id,
+          classId: item.classId,
+          title: item.title,
+          dueAt: item.dueAt,
+          submittedAt: submission?.submittedAt ?? null,
+          submissionId: submission?.id ?? null,
+          score: submission?.score ?? null,
+          feedback: submission?.feedback ?? null,
+          status,
+          gradingHref: `/teacher/homework?class=${encodeURIComponent(item.classId)}&homework=${encodeURIComponent(item.id)}&student=${encodeURIComponent(student.id)}`,
+        };
+      })
+      .sort((a, b) => new Date(b.dueAt).getTime() - new Date(a.dueAt).getTime()),
+    goals: growth.goals
+      .filter((goal) => !goal.classId || classIds.has(goal.classId))
+      .map((goal) => goal as StudentActiveGoal),
+    weakTopics: growth.weakTopics.filter((topic) => classIds.has(topic.classId)),
+    badges: growth.badges,
+    xp: growth.xp,
+    reports: growth.reports.filter((report) => report.teacherId === teacherId).map((report) => ({
+      id: report.id,
+      weekStart: report.weekStart,
+      weekEnd: report.weekEnd,
+      deliveryStatus: report.deliveryStatus,
+      deliveredAt: report.deliveredAt,
+      teacherComment: report.teacherComment,
+    })),
   };
 }
 
@@ -997,19 +1299,26 @@ export async function updateSupportAlertStatus(teacherId: string, alertId: strin
   return Boolean(data);
 }
 
-export async function generateWeeklyReportsForTeacher(teacherId: string, referenceDate = new Date(Date.now() - 7 * DAY_MS)) {
+export async function generateWeeklyReportsForTeacher(
+  teacherId: string,
+  referenceDate = new Date(Date.now() - 7 * DAY_MS),
+  onlyStudentId?: string,
+) {
   const admin = createAdminClient();
   const classes = await teacherClasses(admin, teacherId);
   const dataset = await loadGrowthDataset(admin, classes);
   await syncGrowthDataset(admin, dataset, teacherId);
-  const studentIds = dataset.students.map((item) => item.id);
+  const reportStudents = onlyStudentId
+    ? dataset.students.filter((item) => item.id === onlyStudentId)
+    : dataset.students;
+  const studentIds = reportStudents.map((item) => item.id);
   if (studentIds.length === 0) return { generated: 0, weekStart: null, weekEnd: null };
   const weekStartDate = mondayOfWeek(referenceDate);
   const weekEndDate = new Date(weekStartDate.getTime() + 6 * DAY_MS);
   const weekStart = isoDate(weekStartDate);
   const weekEnd = isoDate(weekEndDate);
   const snapshot = await loadGrowthSnapshot(admin, studentIds);
-  const rows = dataset.students.map((student) => {
+  const rows = reportStudents.map((student) => {
     const studentClasses = classes.filter((item) => item.student_ids.includes(student.id));
     const classIds = new Set(studentClasses.map((item) => item.id));
     const attendance = dataset.attendance.filter((item) =>

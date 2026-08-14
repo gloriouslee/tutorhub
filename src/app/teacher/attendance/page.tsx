@@ -92,6 +92,16 @@ export default function TeacherAttendancePage() {
   const selectedClass = teacherClasses.find(c => c.id === selectedClassId) ?? teacherClasses[0];
 
   useEffect(() => {
+    if (teacherClasses.length === 0) return;
+    const requestedClass = new URLSearchParams(window.location.search).get("class");
+    if (requestedClass && teacherClasses.some((item) => item.id === requestedClass)) {
+      setSelectedClassId(requestedClass);
+    } else if (!selectedClassId) {
+      setSelectedClassId(teacherClasses[0].id);
+    }
+  }, [teacherClassKey, selectedClassId, teacherClasses]);
+
+  useEffect(() => {
     Promise.all([loadSaved(teacherClassIds), getStudents()])
       .then(([records, studentRows]) => {
         setSavedRecords(records);
