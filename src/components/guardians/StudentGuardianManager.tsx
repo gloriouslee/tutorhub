@@ -10,6 +10,7 @@ import {
   type GuardianLink,
   type GuardianRelationship,
 } from "@/lib/guardian-types";
+import { cachedJsonFetch, invalidateClientQueries } from "@/lib/client-query-cache";
 
 function errorMessage(code: string) {
   const messages: Record<string, string> = {
@@ -18,6 +19,12 @@ function errorMessage(code: string) {
     account_already_exists_without_profile: "Email đã có tài khoản nhưng hồ sơ chưa hoàn chỉnh. Vui lòng nhờ admin kiểm tra.",
     invite_rate_limited: "Đã gửi quá nhiều lời mời. Vui lòng thử lại sau.",
     guardian_invite_email_failed: "Không thể gửi email mời lúc này.",
+    guardian_account_create_failed: "Đã tạo tài khoản nhưng chưa cấu hình được quyền phụ huynh.",
+    guardian_profile_lookup_failed: "Không thể kiểm tra hồ sơ phụ huynh hiện có.",
+    guardian_profile_create_failed: "Không thể tạo hồ sơ phụ huynh lúc này.",
+    guardian_link_create_failed: "Không thể lưu liên kết phụ huynh với học sinh.",
+    invalid_origin: "Phiên làm việc không hợp lệ. Hãy tải lại trang rồi thử lại.",
+    forbidden: "Bạn không có quyền gửi lời mời cho học sinh này.",
   };
   return messages[code] ?? "Không thể xử lý lời mời. Vui lòng thử lại.";
 }
@@ -43,12 +50,12 @@ function GuardianManagerContent({
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await fetch(
+      setLinks(await cachedJsonFetch<GuardianLink[]>(
+        `guardian-links:student:${studentId}`,
         `/api/guardians?student_id=${encodeURIComponent(studentId)}`,
         { cache: "no-store", credentials: "same-origin" },
-      );
-      if (!response.ok) throw new Error("load_failed");
-      setLinks(await response.json() as GuardianLink[]);
+        15_000,
+      ));
     } catch {
       setMessage("Không thể tải danh sách phụ huynh của học sinh.");
     } finally {
@@ -80,6 +87,7 @@ function GuardianManagerContent({
       if (!response.ok) throw new Error(String(result.error ?? "invite_failed"));
       setFullName("");
       setEmail("");
+      invalidateClientQueries(`guardian-links:student:${studentId}`);
       await load();
       setMessage(
         result.warning === "email_not_sent"
@@ -103,6 +111,7 @@ function GuardianManagerContent({
         credentials: "same-origin",
       });
       if (!response.ok) throw new Error("revoke_failed");
+      invalidateClientQueries(`guardian-links:student:${studentId}`);
       await load();
       setMessage("Đã thu hồi liên kết.");
     } catch {

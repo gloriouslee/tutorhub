@@ -16,6 +16,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ProgressBar } from "@/components/shared";
+import { cachedJsonFetch } from "@/lib/client-query-cache";
 
 type Goal = {
   id: string;
@@ -62,9 +63,12 @@ export default function ParentGrowthPanel() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await fetch("/api/parent/learning-growth", { cache: "no-store", credentials: "same-origin" });
-      if (!response.ok) throw new Error("unavailable");
-      const payload = await response.json() as ParentGrowthPayload;
+      const payload = await cachedJsonFetch<ParentGrowthPayload>(
+        "parent-learning-growth",
+        "/api/parent/learning-growth",
+        { cache: "no-store", credentials: "same-origin" },
+        30_000,
+      );
       setData(payload);
       setActiveId((current) => current ?? payload.children[0]?.studentId ?? null);
     } catch {

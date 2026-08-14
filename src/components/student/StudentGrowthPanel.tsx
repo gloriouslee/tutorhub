@@ -20,6 +20,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ProgressBar } from "@/components/shared";
+import { cachedJsonFetch, invalidateClientQueries } from "@/lib/client-query-cache";
 
 type Goal = {
   id: string;
@@ -79,9 +80,12 @@ export default function StudentGrowthPanel() {
     setLoading(true);
     setError(false);
     try {
-      const response = await fetch("/api/student/learning-growth", { cache: "no-store", credentials: "same-origin" });
-      if (!response.ok) throw new Error("unavailable");
-      setData(await response.json() as GrowthPayload);
+      setData(await cachedJsonFetch<GrowthPayload>(
+        "student-learning-growth",
+        "/api/student/learning-growth",
+        { cache: "no-store", credentials: "same-origin" },
+        30_000,
+      ));
     } catch {
       setError(true);
     } finally {
@@ -108,6 +112,7 @@ export default function StudentGrowthPanel() {
       });
       if (!response.ok) throw new Error("create_failed");
       setFormOpen(false);
+      invalidateClientQueries("student-learning-growth");
       await load();
     } catch {
       setFormError("Không thể tạo mục tiêu. Hãy kiểm tra nội dung và thời hạn.");

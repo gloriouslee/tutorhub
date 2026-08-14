@@ -1,6 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
-import { getRequestIdentity } from "@/lib/api-auth";
+import { getRequestIdentity, type RequestIdentity } from "@/lib/api-auth";
 import { teacherCanManageStudent } from "@/lib/guardian-server";
 import type {
   GuardianLinkStatus,
@@ -35,10 +35,22 @@ const LINK_SELECT = `
 
 function applicationUrl(req: NextRequest) {
   const configured = process.env.NEXT_PUBLIC_APP_URL;
-  if (configured) return configured.replace(/\/$/, "");
-  if (process.env.NODE_ENV === "production") {
-    throw new Error("NEXT_PUBLIC_APP_URL is required in production");
+  if (configured) {
+    try {
+      const url = new URL(configured);
+      if (process.env.NODE_ENV !== "production" || url.protocol === "https:") {
+        return url.origin;
+      }
+      logEvent("warn", "guardian.application_url_insecure", {
+        protocol: url.protocol,
+      });
+    } catch {
+      logEvent("warn", "guardian.application_url_invalid");
+    }
   }
+
+  // The invitation must still be actionable when the optional public URL is
+  // missing or was accidentally configured with a local/non-HTTPS value.
   return req.nextUrl.origin;
 }
 
@@ -49,10 +61,9 @@ function callbackUrl(req: NextRequest, next: string) {
 }
 
 async function canManageStudent(
-  req: NextRequest,
+  actor: RequestIdentity | null,
   studentId: string,
 ) {
-  const actor = await getRequestIdentity(req);
   if (!actor) return { actor: null, allowed: false };
   if (actor.role === "admin") return { actor, allowed: true };
   if (actor.role !== "teacher" || !actor.teacherId) {
@@ -88,7 +99,7 @@ export async function GET(req: NextRequest) {
     if (!studentId || studentId.length > 120) {
       return NextResponse.json({ error: "student_required" }, { status: 400 });
     }
-    const access = await canManageStudent(req, studentId);
+    const access = await canManageStudent(actor, studentId);
     if (!access.allowed) {
       return NextResponse.json({ error: "forbidden" }, { status: 403 });
     }
@@ -107,6 +118,11 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   if (!hasValidMutationOrigin(req)) {
     return NextResponse.json({ error: "invalid_origin" }, { status: 403 });
+  }
+
+  const actor = await getRequestIdentity(req);
+  if (!actor) {
+    return NextResponse.json({ error: "authentication_required" }, { status: 401 });
   }
 
   let body: Record<string, unknown>;
@@ -130,11 +146,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "invalid_guardian_invite" }, { status: 400 });
   }
 
-  const access = await canManageStudent(req, studentId);
-  if (!access.actor || !access.allowed) {
+  const access = await canManageStudent(actor, studentId);
+  if (!access.allowed) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
-  const actor = access.actor;
   const allowed = await consumeRateLimit({
     scope: "guardian_invite",
     key: actor.userId,
@@ -186,6 +201,11 @@ export async function POST(req: NextRequest) {
     });
     if (error || !data.user) {
       const message = error?.message.toLowerCase() ?? "";
+      logEvent("warn", "guardian.account_invite_failed", {
+        actor_id: actor.userId,
+        student_id: studentId,
+        reason: error?.message ?? "missing_invited_user",
+      });
       return NextResponse.json(
         {
           error: message.includes("already")
@@ -213,16 +233,33 @@ export async function POST(req: NextRequest) {
       }),
     ]);
     if (metadataResult.error || profileResult.error) {
+      logEvent("error", "guardian.account_setup_failed", {
+        actor_id: actor.userId,
+        student_id: studentId,
+        metadata_error: metadataResult.error?.message,
+        profile_error: profileResult.error?.message,
+      });
       await admin.auth.admin.deleteUser(userId);
       return NextResponse.json({ error: "guardian_account_create_failed" }, { status: 500 });
     }
   }
 
-  const { data: existingParent } = await admin
+  const { data: parentRows, error: parentLookupError } = await admin
     .from("parents")
     .select("id")
     .eq("user_id", userId)
-    .maybeSingle();
+    .order("created_at", { ascending: true })
+    .limit(1);
+  if (parentLookupError) {
+    logEvent("error", "guardian.parent_lookup_failed", {
+      actor_id: actor.userId,
+      student_id: studentId,
+      reason: parentLookupError.message,
+    });
+    if (createdUser) await admin.auth.admin.deleteUser(userId);
+    return NextResponse.json({ error: "guardian_profile_lookup_failed" }, { status: 500 });
+  }
+  const existingParent = parentRows?.[0];
   parentId = String(existingParent?.id ?? `par_${crypto.randomUUID()}`);
   if (!existingParent) {
     const { error } = await admin.from("parents").insert({
@@ -233,6 +270,11 @@ export async function POST(req: NextRequest) {
       phone: "",
     });
     if (error) {
+      logEvent("error", "guardian.parent_create_failed", {
+        actor_id: actor.userId,
+        student_id: studentId,
+        reason: error.message,
+      });
       if (createdUser) await admin.auth.admin.deleteUser(userId);
       return NextResponse.json({ error: "guardian_profile_create_failed" }, { status: 500 });
     }
@@ -268,6 +310,12 @@ export async function POST(req: NextRequest) {
     .select("id")
     .single();
   if (linkError || !link) {
+    logEvent("error", "guardian.link_create_failed", {
+      actor_id: actor.userId,
+      student_id: studentId,
+      parent_id: parentId,
+      reason: linkError?.message ?? "missing_guardian_link",
+    });
     if (createdUser) {
       await admin.from("parents").delete().eq("id", parentId);
       await admin.auth.admin.deleteUser(userId);

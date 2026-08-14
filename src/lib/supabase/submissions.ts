@@ -1,4 +1,9 @@
 import { createClient } from "@/lib/supabase/client";
+import {
+  cachedClientQuery,
+  invalidateClientQueries,
+  normalizedQueryKey,
+} from "@/lib/client-query-cache";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 export interface SubmissionRecord {
@@ -67,34 +72,40 @@ export async function insertSubmission(
     .select("data")
     .single();
   if (error) { console.error("Insert submission error:", error.message); return null; }
+  invalidateClientQueries("submission-records:", "homework-submissions:", "sidebar-badges:");
   return data.data as SubmissionRecord;
 }
 
 export async function getSubmissionsByStudent(
   studentId: string
 ): Promise<SubmissionRecord[]> {
-  const supabase = createClient();
-  const { data, error } = await supabase
-    .from("hw_submissions")
-    .select("data")
-    .eq("student_id", studentId)
-    .order("submitted_at", { ascending: false });
-  if (error || !data?.length) return [];
-  return data.map(row => row.data as SubmissionRecord);
+  return cachedClientQuery(`submission-records:student:${studentId}`, async () => {
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from("hw_submissions")
+      .select("data")
+      .eq("student_id", studentId)
+      .order("submitted_at", { ascending: false });
+    if (error || !data?.length) return [];
+    return data.map(row => row.data as SubmissionRecord);
+  }, 20_000);
 }
 
 export async function getSubmissionsByHomeworks(
   homeworkIds: string[]
 ): Promise<SubmissionRecord[]> {
   if (!homeworkIds.length) return [];
-  const supabase = createClient();
-  const { data, error } = await supabase
-    .from("hw_submissions")
-    .select("data")
-    .in("homework_id", homeworkIds)
-    .order("submitted_at", { ascending: false });
-  if (error || !data?.length) return [];
-  return data.map(row => row.data as SubmissionRecord);
+  const key = normalizedQueryKey("submission-records:homework", { homeworkIds });
+  return cachedClientQuery(key, async () => {
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from("hw_submissions")
+      .select("data")
+      .in("homework_id", homeworkIds)
+      .order("submitted_at", { ascending: false });
+    if (error || !data?.length) return [];
+    return data.map(row => row.data as SubmissionRecord);
+  }, 20_000);
 }
 
 export async function updateGrade(
@@ -125,5 +136,6 @@ export async function updateGrade(
     .update({ data: updated })
     .eq("id", submissionId);
   if (error) console.error("Update grade error:", error.message);
+  if (!error) invalidateClientQueries("submission-records:", "homework-submissions:");
   return !error;
 }

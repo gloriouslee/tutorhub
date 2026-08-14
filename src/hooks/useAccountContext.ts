@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import type { Class, UserRole } from "@/types";
 import type { PortalBranding } from "@/lib/portal-branding";
+import { invalidateClientQueries } from "@/lib/client-query-cache";
 
 export interface ParentChild {
   id: string;
@@ -50,7 +51,7 @@ interface AccountContextState {
   ready: boolean;
 }
 
-const CACHE_TTL_MS = 60_000;
+const CACHE_TTL_MS = 120_000;
 
 let cachedContext: AccountContext | null = null;
 let cachedAt = 0;
@@ -96,6 +97,7 @@ export function resetAccountContextCache() {
   cachedContext = null;
   cachedAt = 0;
   inFlight = null;
+  invalidateClientQueries();
   if (typeof window !== "undefined") {
     window.dispatchEvent(new Event("account-context-reset"));
   }

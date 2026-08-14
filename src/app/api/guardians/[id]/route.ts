@@ -6,14 +6,16 @@ import { hasValidMutationOrigin } from "@/lib/request-security";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
+const PRIVATE_NO_STORE = { headers: { "Cache-Control": "private, no-store" } };
 
 async function loadLink(id: string) {
   const admin = createAdminClient();
-  const { data } = await admin
+  const { data, error } = await admin
     .from("student_guardians")
     .select("id,student_id,parent_id,status")
     .eq("id", id)
     .maybeSingle();
+  if (error) throw error;
   return data;
 }
 
@@ -39,12 +41,42 @@ export async function PATCH(
   }
 
   const { id } = await params;
-  const link = await loadLink(id);
-  if (!link || link.parent_id !== actor.parentId || link.status !== "pending") {
-    return NextResponse.json({ error: "invitation_not_found" }, { status: 404 });
+  let link: Awaited<ReturnType<typeof loadLink>>;
+  try {
+    link = await loadLink(id);
+  } catch (error) {
+    logEvent("error", "guardian.invitation_lookup_failed", {
+      actor_id: actor.userId,
+      guardian_link_id: id,
+      reason: error instanceof Error ? error.message : String(error),
+    });
+    return NextResponse.json(
+      { error: "invitation_lookup_failed" },
+      { status: 500, ...PRIVATE_NO_STORE },
+    );
+  }
+  if (!link || link.parent_id !== actor.parentId) {
+    return NextResponse.json(
+      { error: "invitation_not_found" },
+      { status: 404, ...PRIVATE_NO_STORE },
+    );
   }
 
   const accepted = body.action === "accept";
+  if (link.status !== "pending") {
+    const requestedStatus = accepted ? "active" : "rejected";
+    if (link.status === requestedStatus) {
+      return NextResponse.json(
+        { success: true, alreadyProcessed: true },
+        PRIVATE_NO_STORE,
+      );
+    }
+    return NextResponse.json(
+      { error: "invitation_already_processed" },
+      { status: 409, ...PRIVATE_NO_STORE },
+    );
+  }
+
   const now = new Date().toISOString();
   const admin = createAdminClient();
   const { data: updatedLink, error } = await admin
@@ -62,20 +94,46 @@ export async function PATCH(
     .select("id")
     .maybeSingle();
   if (error) {
-    return NextResponse.json({ error: "invitation_update_failed" }, { status: 500 });
+    logEvent("error", "guardian.invitation_update_failed", {
+      actor_id: actor.userId,
+      guardian_link_id: id,
+      reason: error.message,
+    });
+    return NextResponse.json(
+      { error: "invitation_update_failed" },
+      { status: 500, ...PRIVATE_NO_STORE },
+    );
   }
   if (!updatedLink) {
-    return NextResponse.json({ error: "invitation_already_processed" }, { status: 409 });
+    const latest = await loadLink(id).catch(() => null);
+    if (latest?.parent_id === actor.parentId && latest.status === (accepted ? "active" : "rejected")) {
+      return NextResponse.json(
+        { success: true, alreadyProcessed: true },
+        PRIVATE_NO_STORE,
+      );
+    }
+    return NextResponse.json(
+      { error: "invitation_already_processed" },
+      { status: 409, ...PRIVATE_NO_STORE },
+    );
   }
 
   // Keep the legacy primary-parent field populated during the rollout. The new
   // authorization path uses student_guardians and supports additional parents.
   if (accepted) {
-    await admin
+    const { error: legacyParentError } = await admin
       .from("students")
       .update({ parent_id: actor.parentId })
       .eq("id", link.student_id)
       .is("parent_id", null);
+    if (legacyParentError) {
+      logEvent("warn", "guardian.legacy_parent_sync_failed", {
+        actor_id: actor.userId,
+        guardian_link_id: id,
+        student_id: link.student_id,
+        reason: legacyParentError.message,
+      });
+    }
   }
 
   logEvent("info", accepted ? "guardian.accepted" : "guardian.rejected", {
@@ -83,7 +141,7 @@ export async function PATCH(
     guardian_link_id: id,
     student_id: link.student_id,
   });
-  return NextResponse.json({ success: true });
+  return NextResponse.json({ success: true }, PRIVATE_NO_STORE);
 }
 
 export async function DELETE(
@@ -98,7 +156,20 @@ export async function DELETE(
     return NextResponse.json({ error: "authentication_required" }, { status: 401 });
   }
   const { id } = await params;
-  const link = await loadLink(id);
+  let link: Awaited<ReturnType<typeof loadLink>>;
+  try {
+    link = await loadLink(id);
+  } catch (error) {
+    logEvent("error", "guardian.link_lookup_failed", {
+      actor_id: actor.userId,
+      guardian_link_id: id,
+      reason: error instanceof Error ? error.message : String(error),
+    });
+    return NextResponse.json(
+      { error: "guardian_link_lookup_failed" },
+      { status: 500, ...PRIVATE_NO_STORE },
+    );
+  }
   if (!link) {
     return NextResponse.json({ error: "guardian_link_not_found" }, { status: 404 });
   }
@@ -124,6 +195,11 @@ export async function DELETE(
     .update({ status: "revoked", revoked_at: now, updated_at: now })
     .eq("id", id);
   if (error) {
+    logEvent("error", "guardian.revoke_failed", {
+      actor_id: actor.userId,
+      guardian_link_id: id,
+      reason: error.message,
+    });
     return NextResponse.json({ error: "guardian_revoke_failed" }, { status: 500 });
   }
 
@@ -148,5 +224,5 @@ export async function DELETE(
     guardian_link_id: id,
     student_id: link.student_id,
   });
-  return NextResponse.json({ success: true });
+  return NextResponse.json({ success: true }, PRIVATE_NO_STORE);
 }

@@ -14,6 +14,17 @@ import {
   type GuardianLink,
 } from "@/lib/guardian-types";
 
+function invitationErrorMessage(code: string) {
+  const messages: Record<string, string> = {
+    invalid_origin: "Phiên làm việc không hợp lệ. Hãy tải lại trang rồi thử lại.",
+    invitation_not_found: "Lời mời không còn tồn tại hoặc không thuộc tài khoản này.",
+    invitation_already_processed: "Lời mời này đã được xử lý ở một phiên khác.",
+    invitation_lookup_failed: "Chưa thể kiểm tra lời mời trên hệ thống. Vui lòng thử lại.",
+    invitation_update_failed: "Chưa thể cập nhật lời mời trên hệ thống. Vui lòng thử lại.",
+  };
+  return messages[code] ?? "Không thể xử lý lời mời. Vui lòng thử lại.";
+}
+
 export default function ParentInvitationsPage() {
   const { parentName } = useParentContext();
   const [links, setLinks] = useState<GuardianLink[]>([]);
@@ -52,16 +63,27 @@ export default function ParentInvitationsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action }),
       });
-      if (!response.ok) throw new Error("update_failed");
+      const result = await response.json().catch(() => ({})) as {
+        error?: string;
+        alreadyProcessed?: boolean;
+      };
+      if (!response.ok) throw new Error(result.error ?? "update_failed");
+      setLinks((current) => current.map((link) => link.id === id
+        ? {
+            ...link,
+            status: action === "accept" ? "active" : "rejected",
+          }
+        : link));
       if (action === "accept") resetAccountContextCache();
-      await load();
       setMessage(
-        action === "accept"
+        result.alreadyProcessed
+          ? "Lời mời này đã được xử lý trước đó. Danh sách đã được đồng bộ."
+          : action === "accept"
           ? "Đã liên kết học sinh với tài khoản phụ huynh của bạn."
           : "Đã từ chối lời mời liên kết.",
       );
-    } catch {
-      setMessage("Không thể xử lý lời mời. Vui lòng thử lại.");
+    } catch (error) {
+      setMessage(invitationErrorMessage(error instanceof Error ? error.message : ""));
     } finally {
       setBusyId("");
     }

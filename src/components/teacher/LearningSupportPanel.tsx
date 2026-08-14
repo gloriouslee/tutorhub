@@ -17,6 +17,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ProgressBar } from "@/components/shared";
+import { cachedJsonFetch, invalidateClientQueries } from "@/lib/client-query-cache";
 
 type SupportSignal = { type: string; title: string; detail: string; value: number };
 type SupportAlert = {
@@ -79,9 +80,12 @@ export default function LearningSupportPanel() {
     setLoading(true);
     setError(false);
     try {
-      const response = await fetch("/api/teacher/learning-support", { cache: "no-store", credentials: "same-origin" });
-      if (!response.ok) throw new Error("unavailable");
-      setData(await response.json() as SupportPayload);
+      setData(await cachedJsonFetch<SupportPayload>(
+        "teacher-learning-support",
+        "/api/teacher/learning-support",
+        { cache: "no-store", credentials: "same-origin" },
+        30_000,
+      ));
     } catch {
       setError(true);
     } finally {
@@ -101,6 +105,7 @@ export default function LearningSupportPanel() {
         body: JSON.stringify({ action: "update_alert", alertId, status }),
       });
       if (!response.ok) throw new Error("update_failed");
+      invalidateClientQueries("teacher-learning-support");
       setData((current) => current ? {
         ...current,
         alerts: status === "resolved"
@@ -125,6 +130,7 @@ export default function LearningSupportPanel() {
       if (!response.ok) throw new Error("report_failed");
       const result = await response.json() as { generated: number };
       setReportMessage(`Đã gửi ${result.generated} báo cáo vào Parent Portal.`);
+      invalidateClientQueries("teacher-learning-support");
       await load();
     } catch {
       setReportMessage("Không thể tạo báo cáo lúc này.");

@@ -1,5 +1,10 @@
 import { createClient } from "./supabase/client";
 import { Student, Teacher, Class, Payment, Attendance, Notification, ClassSchedule } from "@/types";
+import {
+  cachedClientQuery,
+  invalidateClientQueries,
+  normalizedQueryKey,
+} from "@/lib/client-query-cache";
 
 const supabase = createClient();
 
@@ -91,33 +96,36 @@ export async function kvGet<T>(key: string, fallback: T): Promise<T> {
     const local = kvReadLocal<T>(key);
     return local !== null ? local : fallback;
   }
-  try {
-    const { data, error } = await supabase
-      .from(route.table)
-      .select("value")
-      .eq("id", route.id)
-      .maybeSingle();
-    if (!error) {
-      if (data) {
-        kvWriteLocal(key, data.value);
-        return data.value as T;
+  return cachedClientQuery(`kv:${route.table}:${route.id}`, async () => {
+    try {
+      const { data, error } = await supabase
+        .from(route.table)
+        .select("value")
+        .eq("id", route.id)
+        .maybeSingle();
+      if (!error) {
+        if (data) {
+          kvWriteLocal(key, data.value);
+          return data.value as T;
+        }
+        // DB không có row: có thể đã bị xóa (VD "làm lại bài thi") hoặc chưa từng
+        // tồn tại. KHÔNG đẩy cache local ngược lên DB — làm vậy sẽ "hồi sinh" bản
+        // đã xóa cho mọi thiết bị. Vẫn trả local (đọc offline/legacy), nhưng deletion
+        // trên server được tôn trọng.
+        const local = kvReadLocal<T>(key);
+        return local !== null ? local : fallback;
       }
-      // DB không có row: có thể đã bị xóa (VD "làm lại bài thi") hoặc chưa từng
-      // tồn tại. KHÔNG đẩy cache local ngược lên DB — làm vậy sẽ "hồi sinh" bản
-      // đã xóa cho mọi thiết bị. Vẫn trả local (đọc offline/legacy), nhưng deletion
-      // trên server được tôn trọng.
-      const local = kvReadLocal<T>(key);
-      return local !== null ? local : fallback;
-    }
-  } catch { /* offline */ }
-  const local = kvReadLocal<T>(key);
-  return local !== null ? local : fallback;
+    } catch { /* offline */ }
+    const local = kvReadLocal<T>(key);
+    return local !== null ? local : fallback;
+  }, 30_000);
 }
 
 export async function kvSet<T>(key: string, value: T): Promise<void> {
   kvWriteLocal(key, value);
   const route = kvRoute(key);
   if (!route) return;
+  invalidateClientQueries(`kv:${route.table}:${route.id}`);
   try {
     const { error } = await supabase
       .from(route.table)
@@ -148,6 +156,7 @@ export async function kvDelete(key: string): Promise<void> {
   }
   const route = kvRoute(key);
   if (!route) return;
+  invalidateClientQueries(`kv:${route.table}:${route.id}`);
   try {
     const { error } = await supabase.from(route.table).delete().eq("id", route.id);
     if (error) console.error(`Error deleting ${route.table}/${route.id}:`, error);
@@ -161,23 +170,25 @@ async function getEntity<T>(
   table: string,
   query: () => Promise<{ data: T[] | null; error: unknown }>,
 ): Promise<T[]> {
-  try {
-    const { data, error } = await query();
-    if (!error && data) {
-      writeLocal(key, data);
-      return data;
+  return cachedClientQuery(`entity:${table}`, async () => {
+    try {
+      const { data, error } = await query();
+      if (!error && data) {
+        writeLocal(key, data);
+        return data;
+      }
+      // Một truy vấn LỖI không giống "bảng rỗng", nhưng cả hai đều rơi xuống dưới
+      // và trả về [] — nên RLS chặn, thiếu hàm helper, hay sai quyền đều hiện ra
+      // thành "không có dữ liệu" và không ai chẩn đoán được. Ít nhất phải ghi ra.
+      if (error) reportQueryFailure(table, error);
+    } catch (thrown) {
+      // Mất mạng hoặc chưa cấu hình — dùng cache. Vẫn ghi lại để phân biệt.
+      reportQueryFailure(table, thrown);
     }
-    // Một truy vấn LỖI không giống "bảng rỗng", nhưng cả hai đều rơi xuống dưới
-    // và trả về [] — nên RLS chặn, thiếu hàm helper, hay sai quyền đều hiện ra
-    // thành "không có dữ liệu" và không ai chẩn đoán được. Ít nhất phải ghi ra.
-    if (error) reportQueryFailure(table, error);
-  } catch (thrown) {
-    // Mất mạng hoặc chưa cấu hình — dùng cache. Vẫn ghi lại để phân biệt.
-    reportQueryFailure(table, thrown);
-  }
-  const local = readLocal<T>(key);
-  if (local !== null) return local;
-  return [];
+    const local = readLocal<T>(key);
+    if (local !== null) return local;
+    return [];
+  }, 30_000);
 }
 
 function reportQueryFailure(table: string, error: unknown) {
@@ -204,7 +215,9 @@ async function upsertEntity<T extends { id: string }>(
     const body = await response.json().catch(() => ({}));
     throw new Error(body.error || `Không thể lưu ${table}.`);
   }
-  return response.json() as Promise<T>;
+  const saved = await response.json() as T;
+  invalidateClientQueries(`entity:${table}`);
+  return saved;
 }
 
 async function deleteEntity(table: string, id: string): Promise<void> {
@@ -216,6 +229,7 @@ async function deleteEntity(table: string, id: string): Promise<void> {
     const body = await response.json().catch(() => ({}));
     throw new Error(body.error || `Không thể xóa ${table}.`);
   }
+  invalidateClientQueries(`entity:${table}`);
 }
 
 export async function getStudents(): Promise<Student[]> {
@@ -277,11 +291,13 @@ export async function upsertClass(cls: Class): Promise<void> {
     color: cls.color ?? "#6366f1",
   }, { onConflict: "id" });
   if (error) { console.error("upsertClass:", error); throw error; }
+  invalidateClientQueries("entity:classes");
 }
 
 export async function deleteClass(id: string): Promise<void> {
   const { error } = await supabase.from("classes").delete().eq("id", id);
   if (error) { console.error("deleteClass:", error); throw error; }
+  invalidateClientQueries("entity:classes");
 }
 
 export async function getPayments(): Promise<Payment[]> {
@@ -319,19 +335,26 @@ export async function getAllTeacherAttendance(
   filters: AttendanceQuery = {},
 ): Promise<TeacherAttendanceRecord[]> {
   if (filters.classIds?.length === 0 || filters.studentIds?.length === 0) return [];
+  const key = normalizedQueryKey("teacher-attendance", {
+    classIds: filters.classIds,
+    studentIds: filters.studentIds,
+    from: filters.from,
+    to: filters.to,
+  });
+  return cachedClientQuery(key, async () => {
+    let query = supabase.from("class_attendance").select("data");
+    if (filters.classIds) query = query.in("class_id", [...filters.classIds]);
+    if (filters.studentIds) query = query.in("student_id", [...filters.studentIds]);
+    if (filters.from) query = query.gte("attendance_date", filters.from);
+    if (filters.to) query = query.lte("attendance_date", filters.to);
 
-  let query = supabase.from("class_attendance").select("data");
-  if (filters.classIds) query = query.in("class_id", [...filters.classIds]);
-  if (filters.studentIds) query = query.in("student_id", [...filters.studentIds]);
-  if (filters.from) query = query.gte("attendance_date", filters.from);
-  if (filters.to) query = query.lte("attendance_date", filters.to);
-
-  const { data, error } = await query;
-  if (error) {
-    console.error("getAllTeacherAttendance:", error);
-    return [];
-  }
-  return (data ?? []).map(r => r.data as TeacherAttendanceRecord);
+    const { data, error } = await query;
+    if (error) {
+      console.error("getAllTeacherAttendance:", error);
+      return [];
+    }
+    return (data ?? []).map(r => r.data as TeacherAttendanceRecord);
+  }, 30_000);
 }
 
 // Upsert attendance rows (per class/student/date). Replaces the old
@@ -351,6 +374,7 @@ export async function saveClassAttendance(records: TeacherAttendanceRecord[]): P
     console.error("saveClassAttendance:", error);
     throw error;
   }
+  invalidateClientQueries("teacher-attendance:");
 }
 
 // ── Per-row wrappers for the migrated page datasets ──────────────────────────
@@ -361,21 +385,26 @@ export async function getTeacherHomework<T = Record<string, unknown>>(
   classIds?: readonly string[],
 ): Promise<T[]> {
   if (classIds?.length === 0) return [];
-  let query = supabase.from("teacher_homework").select("data");
-  if (classIds) query = query.in("class_id", [...classIds]);
-  const { data, error } = await query;
-  if (error) { console.error("getTeacherHomework:", error); return []; }
-  return (data ?? []).map(r => r.data as T);
+  const key = normalizedQueryKey("teacher-homework", { classIds });
+  return cachedClientQuery(key, async () => {
+    let query = supabase.from("teacher_homework").select("data");
+    if (classIds) query = query.in("class_id", [...classIds]);
+    const { data, error } = await query;
+    if (error) { console.error("getTeacherHomework:", error); return []; }
+    return (data ?? []).map(r => r.data as T);
+  }, 30_000);
 }
 export async function upsertTeacherHomework<T extends { id: string; class_id: string }>(hw: T): Promise<void> {
   const { error } = await supabase
     .from("teacher_homework")
     .upsert({ id: hw.id, class_id: hw.class_id, data: hw }, { onConflict: "id" });
   if (error) { console.error("upsertTeacherHomework:", error); throw error; }
+  invalidateClientQueries("teacher-homework:");
 }
 export async function removeTeacherHomework(id: string): Promise<void> {
   const { error } = await supabase.from("teacher_homework").delete().eq("id", id);
   if (error) { console.error("removeTeacherHomework:", error); throw error; }
+  invalidateClientQueries("teacher-homework:");
 }
 
 // Teacher-created classes are now unified into the core `classes` table.
@@ -407,10 +436,12 @@ export async function upsertTeacherExtraClass<T extends { id: string; tutor_id: 
   };
   const { error } = await supabase.from("classes").upsert(row, { onConflict: "id" });
   if (error) { console.error("upsertTeacherExtraClass(classes):", error); throw error; }
+  invalidateClientQueries("entity:classes");
 }
 export async function removeTeacherExtraClass(id: string): Promise<void> {
   const { error } = await supabase.from("classes").delete().eq("id", id);
   if (error) { console.error("removeTeacherExtraClass(classes):", error); throw error; }
+  invalidateClientQueries("entity:classes");
 }
 
 export interface SubmissionQuery {
@@ -428,13 +459,20 @@ export async function getHwSubmissions<T = Record<string, unknown>>(
     || filters.homeworkIds?.length === 0
   ) return [];
 
-  let query = supabase.from("hw_submissions").select("data");
-  if (filters.classIds) query = query.in("class_id", [...filters.classIds]);
-  if (filters.studentIds) query = query.in("student_id", [...filters.studentIds]);
-  if (filters.homeworkIds) query = query.in("homework_id", [...filters.homeworkIds]);
-  const { data, error } = await query;
-  if (error) { console.error("getHwSubmissions:", error); return []; }
-  return (data ?? []).map(r => r.data as T);
+  const key = normalizedQueryKey("homework-submissions", {
+    classIds: filters.classIds,
+    studentIds: filters.studentIds,
+    homeworkIds: filters.homeworkIds,
+  });
+  return cachedClientQuery(key, async () => {
+    let query = supabase.from("hw_submissions").select("data");
+    if (filters.classIds) query = query.in("class_id", [...filters.classIds]);
+    if (filters.studentIds) query = query.in("student_id", [...filters.studentIds]);
+    if (filters.homeworkIds) query = query.in("homework_id", [...filters.homeworkIds]);
+    const { data, error } = await query;
+    if (error) { console.error("getHwSubmissions:", error); return []; }
+    return (data ?? []).map(r => r.data as T);
+  }, 20_000);
 }
 export async function upsertHwSubmission<T extends { id: string; homework_id: string; student_id: string; class_id?: string }>(sub: T): Promise<void> {
   const { error } = await supabase
@@ -444,28 +482,33 @@ export async function upsertHwSubmission<T extends { id: string; homework_id: st
       { onConflict: "id" }
     );
   if (error) { console.error("upsertHwSubmission:", error); throw error; }
+  invalidateClientQueries("homework-submissions:");
 }
 
 export async function getTeacherMaterials<T = Record<string, unknown>>(
   teacherId?: string,
 ): Promise<T[]> {
-  let query = supabase.from("teacher_materials").select("data");
-  if (teacherId) query = query.eq("teacher_id", teacherId);
-  const { data, error } = await query;
-  if (error) { console.error("getTeacherMaterials:", error); return []; }
-  return (data ?? []).map(r => r.data as T);
+  return cachedClientQuery(`teacher-materials:${teacherId ?? "all"}`, async () => {
+    let query = supabase.from("teacher_materials").select("data");
+    if (teacherId) query = query.eq("teacher_id", teacherId);
+    const { data, error } = await query;
+    if (error) { console.error("getTeacherMaterials:", error); return []; }
+    return (data ?? []).map(r => r.data as T);
+  }, 60_000);
 }
 
 /** Filtered material catalog for the signed-in student.
  * Raw teacher_materials rows contain paid URLs and are intentionally not
  * selectable by student JWTs. */
 export async function getStudentMaterials<T = Record<string, unknown>>(): Promise<T[]> {
-  const response = await fetch("/api/student/materials", {
-    cache: "no-store",
-    credentials: "same-origin",
-  });
-  if (!response.ok) throw new Error("Không thể tải tài liệu học viên.");
-  return response.json() as Promise<T[]>;
+  return cachedClientQuery("student-materials", async () => {
+    const response = await fetch("/api/student/materials", {
+      cache: "no-store",
+      credentials: "same-origin",
+    });
+    if (!response.ok) throw new Error("Không thể tải tài liệu học viên.");
+    return response.json() as Promise<T[]>;
+  }, 60_000);
 }
 // Replace this teacher's catalog without a delete-first window. New/updated
 // rows are persisted before stale rows are removed, so a failed upsert cannot
@@ -499,6 +542,7 @@ export async function saveTeacherMaterials<T extends { id: string; classId?: str
   if (currentError) throw currentError;
   const keepIds = new Set(unique.map(item => item.id));
   const staleIds = (currentRows ?? []).map(row => String(row.id)).filter(id => !keepIds.has(id));
+  invalidateClientQueries("teacher-materials:", "student-materials");
   if (staleIds.length === 0) return;
   const { error: deleteError } = await supabase
     .from("teacher_materials")
@@ -514,13 +558,15 @@ export async function saveTeacherMaterials<T extends { id: string; classId?: str
 // Per-parent messages (one jsonb row per parent).
 export async function getParentMessages<T = unknown>(parentId: string): Promise<T | null> {
   if (!parentId) return null;
-  const { data, error } = await supabase
-    .from("parent_messages")
-    .select("data")
-    .eq("parent_id", parentId)
-    .maybeSingle();
-  if (error) { console.error("getParentMessages:", error); return null; }
-  return (data?.data ?? null) as T | null;
+  return cachedClientQuery(`parent-messages:${parentId}`, async () => {
+    const { data, error } = await supabase
+      .from("parent_messages")
+      .select("data")
+      .eq("parent_id", parentId)
+      .maybeSingle();
+    if (error) { console.error("getParentMessages:", error); return null; }
+    return (data?.data ?? null) as T | null;
+  }, 30_000);
 }
 export async function saveParentMessages(parentId: string, contacts: unknown): Promise<void> {
   if (!parentId) return;
@@ -528,6 +574,7 @@ export async function saveParentMessages(parentId: string, contacts: unknown): P
     .from("parent_messages")
     .upsert({ parent_id: parentId, data: contacts, updated_at: new Date().toISOString() }, { onConflict: "parent_id" });
   if (error) console.error("saveParentMessages:", error);
+  else invalidateClientQueries(`parent-messages:${parentId}`);
 }
 
 export async function getNotifications(): Promise<Notification[]> {
@@ -549,16 +596,18 @@ export async function deleteNotification(id: string): Promise<void> {
 }
 
 export async function getNotificationStates(): Promise<Record<string, { isDeleted: boolean }>> {
-  const { data, error } = await supabase
-    .from("notification_reads")
-    .select("notification_id,is_deleted");
-  if (error) throw error;
-  return Object.fromEntries(
-    (data ?? []).map(row => [
-      String(row.notification_id),
-      { isDeleted: row.is_deleted === true },
-    ]),
-  );
+  return cachedClientQuery("notification-states", async () => {
+    const { data, error } = await supabase
+      .from("notification_reads")
+      .select("notification_id,is_deleted");
+    if (error) throw error;
+    return Object.fromEntries(
+      (data ?? []).map(row => [
+        String(row.notification_id),
+        { isDeleted: row.is_deleted === true },
+      ]),
+    );
+  }, 20_000);
 }
 
 export async function markNotificationState(
@@ -572,6 +621,7 @@ export async function markNotificationState(
       { onConflict: "notification_id,user_id" },
     );
   if (error) throw error;
+  invalidateClientQueries("notification-states");
 }
 
 export async function markNotificationsRead(notificationIds: readonly string[]): Promise<void> {
@@ -585,6 +635,7 @@ export async function markNotificationsRead(notificationIds: readonly string[]):
     .from("notification_reads")
     .upsert(rows, { onConflict: "notification_id,user_id" });
   if (error) throw error;
+  invalidateClientQueries("notification-states");
 }
 
 export interface NewNotification {
@@ -735,6 +786,7 @@ export async function saveClassScheduleOverride(classId: string, schedule: Class
     .update({ schedule })
     .eq("id", classId);
   if (error) throw error;
+  invalidateClientQueries("entity:classes");
 }
 
 // ── Schedule-change notifications (localStorage) ─────────────────────────────
@@ -808,14 +860,16 @@ function writeTxLocal(txs: PurchaseTransaction[]): void {
 // Supabase-first: học viên tạo giao dịch trên máy của họ, admin duyệt trên
 // máy khác — cả hai thấy cùng dữ liệu. localStorage chỉ là cache offline.
 export async function getTransactions(): Promise<PurchaseTransaction[]> {
-  const response = await fetch("/api/payments/transactions", {
-    cache: "no-store",
-    credentials: "same-origin",
-  });
-  if (!response.ok) throw new Error("Không thể tải giao dịch.");
-  const data = (await response.json()) as PurchaseTransaction[];
-  writeTxLocal(data);
-  return data;
+  return cachedClientQuery("payment-transactions", async () => {
+    const response = await fetch("/api/payments/transactions", {
+      cache: "no-store",
+      credentials: "same-origin",
+    });
+    if (!response.ok) throw new Error("Không thể tải giao dịch.");
+    const data = (await response.json()) as PurchaseTransaction[];
+    writeTxLocal(data);
+    return data;
+  }, 20_000);
 }
 
 export async function createTransaction(
@@ -832,6 +886,7 @@ export async function createTransaction(
   });
   const result = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(result.error || "Không thể tạo giao dịch.");
+  invalidateClientQueries("payment-transactions");
   return result as PurchaseTransaction;
 }
 
@@ -853,6 +908,7 @@ export async function updateTransactionStatus(
     const result = await response.json().catch(() => ({}));
     throw new Error(result.error || "Không thể cập nhật giao dịch.");
   }
+  invalidateClientQueries("payment-transactions");
 }
 
 // Gói được mở khóa = có giao dịch approved của học viên đó (Supabase),
@@ -972,19 +1028,21 @@ export async function getCurriculum(classId: string): Promise<CurriculumChapter[
 
 /** Published, assigned and answer-free curriculum for the signed-in student. */
 export async function getStudentCurriculum(classId: string): Promise<CurriculumChapter[]> {
-  const response = await fetch(
-    `/api/student/curriculum/${encodeURIComponent(classId)}`,
-    { cache: "no-store", credentials: "same-origin" },
-  );
-  if (!response.ok) {
-    const payload = await response.json().catch(() => null) as { error?: string } | null;
-    const error = new Error(payload?.error || "student_curriculum_unavailable");
-    Object.assign(error, { status: response.status });
-    throw error;
-  }
-  const payload = await response.json() as unknown;
-  if (!Array.isArray(payload)) throw new Error("student_curriculum_invalid_response");
-  return payload as CurriculumChapter[];
+  return cachedClientQuery(`student-curriculum:${classId}`, async () => {
+    const response = await fetch(
+      `/api/student/curriculum/${encodeURIComponent(classId)}`,
+      { cache: "no-store", credentials: "same-origin" },
+    );
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null) as { error?: string } | null;
+      const error = new Error(payload?.error || "student_curriculum_unavailable");
+      Object.assign(error, { status: response.status });
+      throw error;
+    }
+    const payload = await response.json() as unknown;
+    if (!Array.isArray(payload)) throw new Error("student_curriculum_invalid_response");
+    return payload as CurriculumChapter[];
+  }, 60_000);
 }
 
 export interface StudentLessonProgress {
@@ -997,12 +1055,14 @@ export interface StudentLessonProgress {
 export async function getStudentLessonProgress(
   resourceId: string,
 ): Promise<StudentLessonProgress[]> {
-  const response = await fetch(
-    `/api/student/progress?resource_id=${encodeURIComponent(resourceId)}`,
-    { cache: "no-store", credentials: "same-origin" },
-  );
-  if (!response.ok) return [];
-  return response.json() as Promise<StudentLessonProgress[]>;
+  return cachedClientQuery(`student-progress:${resourceId}`, async () => {
+    const response = await fetch(
+      `/api/student/progress?resource_id=${encodeURIComponent(resourceId)}`,
+      { cache: "no-store", credentials: "same-origin" },
+    );
+    if (!response.ok) return [];
+    return response.json() as Promise<StudentLessonProgress[]>;
+  }, 20_000);
 }
 
 export async function saveStudentLessonProgress(
@@ -1021,7 +1081,9 @@ export async function saveStudentLessonProgress(
     }),
   });
   if (!response.ok) throw new Error("Không thể lưu tiến độ học tập.");
-  return response.json() as Promise<StudentLessonProgress>;
+  const saved = await response.json() as StudentLessonProgress;
+  invalidateClientQueries(`student-progress:${resourceId}`);
+  return saved;
 }
 
 export async function saveCurriculum(classId: string, curriculum: CurriculumChapter[]): Promise<void> {
@@ -1161,6 +1223,7 @@ export async function saveOnlineLink(classId: string, link: string): Promise<voi
     .update({ zoom_link: link.trim() || null })
     .eq("id", classId);
   if (error) throw error;
+  invalidateClientQueries("entity:classes");
 }
 
 // ── Shared tuition invoices (localStorage) ───────────────────────────────────
@@ -1193,11 +1256,13 @@ export async function getInvoices(): Promise<TuitionInvoice[]> {
 
 /** Load invoices while preserving transport errors for screens that render retry states. */
 export async function getInvoicesOrThrow(): Promise<TuitionInvoice[]> {
-  const response = await fetch("/api/payments/invoices", { cache: "no-store" });
-  if (!response.ok) {
-    throw new Error(`Không thể tải hóa đơn (HTTP ${response.status}).`);
-  }
-  return response.json() as Promise<TuitionInvoice[]>;
+  return cachedClientQuery("payment-invoices", async () => {
+    const response = await fetch("/api/payments/invoices", { cache: "no-store" });
+    if (!response.ok) {
+      throw new Error(`Không thể tải hóa đơn (HTTP ${response.status}).`);
+    }
+    return response.json() as Promise<TuitionInvoice[]>;
+  }, 20_000);
 }
 
 /** Hoá đơn đã lưu dùng cho báo cáo/thống kê. */
@@ -1219,6 +1284,7 @@ export async function updateInvoiceStatus(
     body: JSON.stringify({ invoice_id: invoiceId, child_id: childId, action }),
   });
   if (!response.ok) throw new Error("Không thể cập nhật hóa đơn.");
+  invalidateClientQueries("payment-invoices");
 }
 
 /** Giáo viên phát hành hóa đơn học phí cho một học sinh trong lớp (idempotent theo id). */
@@ -1243,6 +1309,7 @@ export async function submitInvoiceReceipt(
     const result = await response.json().catch(() => ({}));
     throw new Error(result.error || "Không thể gửi biên lai học phí.");
   }
+  invalidateClientQueries("payment-invoices");
 }
 
 export async function issueTuitionInvoice(params: {
@@ -1267,7 +1334,9 @@ export async function issueTuitionInvoice(params: {
     }),
   });
   if (!response.ok) throw new Error("Không thể phát hành hóa đơn.");
-  return response.json() as Promise<TuitionInvoice>;
+  const invoice = await response.json() as TuitionInvoice;
+  invalidateClientQueries("payment-invoices");
+  return invoice;
 }
 
 /** Giáo viên xác nhận đã thu tiền cho một hóa đơn. */
@@ -1278,6 +1347,7 @@ export async function confirmInvoicePaid(invoiceId: string): Promise<TuitionInvo
     body: JSON.stringify({ invoice_id: invoiceId, action: "mark_paid" }),
   });
   if (!response.ok) return null;
+  invalidateClientQueries("payment-invoices");
   return { id: invoiceId, status: "paid" } as TuitionInvoice;
 }
 
@@ -1319,6 +1389,7 @@ export async function saveTeacherSettings(teacherId: string, settings: TeacherSe
       updated_at: new Date().toISOString(),
     });
   if (error) throw error;
+  invalidateClientQueries(`kv:kv_teacher_settings:${teacherId}`);
 }
 
 export interface StudentAccount {
@@ -1336,12 +1407,14 @@ export interface StudentAccount {
 }
 
 export async function getStudentAccounts(): Promise<StudentAccount[]> {
-  const response = await fetch("/api/account/profile", {
-    cache: "no-store",
-    credentials: "same-origin",
-  });
-  if (!response.ok) return [];
-  return [await response.json() as StudentAccount];
+  return cachedClientQuery("student-account", async () => {
+    const response = await fetch("/api/account/profile", {
+      cache: "no-store",
+      credentials: "same-origin",
+    });
+    if (!response.ok) return [];
+    return [await response.json() as StudentAccount];
+  }, 60_000);
 }
 
 export async function changeStudentPassword(
@@ -1384,9 +1457,11 @@ export interface StoredExamScore {
 
 /** Tất cả điểm thi đã lưu (nhập tay) — dùng cho báo cáo/thống kê. */
 export async function getAllExamScores(): Promise<StoredExamScore[]> {
-  const response = await fetch("/api/exam-scores?all=true", { cache: "no-store" });
-  if (!response.ok) throw new Error("Không thể tải danh sách điểm thi.");
-  return response.json() as Promise<StoredExamScore[]>;
+  return cachedClientQuery("exam-scores:all", async () => {
+    const response = await fetch("/api/exam-scores?all=true", { cache: "no-store" });
+    if (!response.ok) throw new Error("Không thể tải danh sách điểm thi.");
+    return response.json() as Promise<StoredExamScore[]>;
+  }, 30_000);
 }
 
 export async function saveExamScore(score: Omit<StoredExamScore, "id">): Promise<StoredExamScore> {
@@ -1400,6 +1475,7 @@ export async function saveExamScore(score: Omit<StoredExamScore, "id">): Promise
   });
   if (!response.ok) throw new Error("Không thể lưu điểm thi.");
   const record = await response.json();
+  invalidateClientQueries("exam-scores:");
   return { ...record, student_id: record.student_ref } as StoredExamScore;
 }
 
@@ -1408,6 +1484,7 @@ export async function deleteExamScore(id: string): Promise<void> {
     method: "DELETE",
   });
   if (!response.ok) throw new Error("Không thể xóa điểm thi.");
+  invalidateClientQueries("exam-scores:");
 }
 
 export async function updateExamScore(
@@ -1421,16 +1498,20 @@ export async function updateExamScore(
     body: JSON.stringify(score),
   });
   if (!response.ok) throw new Error("Không thể cập nhật điểm thi.");
-  return response.json() as Promise<StoredExamScore>;
+  const saved = await response.json() as StoredExamScore;
+  invalidateClientQueries("exam-scores:");
+  return saved;
 }
 
 export async function getExamScoresByStudent(studentId: string): Promise<StoredExamScore[]> {
-  const response = await fetch(
-    `/api/exam-scores?student_ref=${encodeURIComponent(studentId)}`,
-    { cache: "no-store" },
-  );
-  if (!response.ok) return [];
-  return response.json() as Promise<StoredExamScore[]>;
+  return cachedClientQuery(`exam-scores:student:${studentId}`, async () => {
+    const response = await fetch(
+      `/api/exam-scores?student_ref=${encodeURIComponent(studentId)}`,
+      { cache: "no-store" },
+    );
+    if (!response.ok) return [];
+    return response.json() as Promise<StoredExamScore[]>;
+  }, 30_000);
 }
 
 // ── Class materials (localStorage) ────────────────────────────────────────────
@@ -1453,16 +1534,18 @@ export interface StoredClassMaterial {
 }
 
 export async function getClassMaterials(classId: string): Promise<StoredClassMaterial[]> {
-  const { data, error } = await supabase
-    .from("class_materials")
-    .select("*")
-    .eq("class_id", classId)
-    .order("created_at", { ascending: false });
-  if (error) {
-    console.error("getClassMaterials:", error);
-    return [];
-  }
-  return (data ?? []) as StoredClassMaterial[];
+  return cachedClientQuery(`class-materials:${classId}`, async () => {
+    const { data, error } = await supabase
+      .from("class_materials")
+      .select("*")
+      .eq("class_id", classId)
+      .order("created_at", { ascending: false });
+    if (error) {
+      console.error("getClassMaterials:", error);
+      return [];
+    }
+    return (data ?? []) as StoredClassMaterial[];
+  }, 60_000);
 }
 
 export async function saveClassMaterial(mat: Omit<StoredClassMaterial, "id" | "download_count">): Promise<StoredClassMaterial> {
@@ -1472,6 +1555,7 @@ export async function saveClassMaterial(mat: Omit<StoredClassMaterial, "id" | "d
     console.error("saveClassMaterial:", error);
     throw error;
   }
+  invalidateClientQueries(`class-materials:${mat.class_id}`);
   return record;
 }
 
@@ -1481,6 +1565,7 @@ export async function deleteClassMaterial(materialId: string): Promise<void> {
     console.error("deleteClassMaterial:", error);
     throw error;
   }
+  invalidateClientQueries("class-materials:");
 }
 
 export async function incrementMaterialDownload(materialId: string): Promise<void> {
@@ -1686,6 +1771,7 @@ export async function removeStudentFromClass(classId: string, studentId: string)
         .from("classes")
         .update({ student_ids: ids.filter(x => x !== studentId) })
         .eq("id", classId);
+      invalidateClientQueries("entity:classes");
     }
   } catch { /* offline — DB sẽ không đổi, extra-students local vẫn được cập nhật */ }
 }

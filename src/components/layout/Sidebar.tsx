@@ -19,6 +19,7 @@ import {
   useAccountContext,
 } from "@/hooks/useAccountContext";
 import { DEFAULT_PORTAL_BRANDING } from "@/lib/portal-branding";
+import { cachedClientQuery, invalidateClientQueries } from "@/lib/client-query-cache";
 
 // ── Nav config (no static badges) ────────────────────────────────────────────
 interface NavItem {
@@ -248,7 +249,20 @@ export default function Sidebar({
     if ((role === "student" || role === "parent") && !contextReady) return;
     let cancelled = false;
     const timer = window.setTimeout(async () => {
-      const next = await computeBadges(role, studentId, myClasses.map(c => c.id));
+      if (
+        pathname === "/student/homework"
+        || pathname === "/student/questions"
+        || pathname === "/parent/invitations"
+        || pathname === "/teacher/classes"
+        || pathname === "/teacher/questions"
+      ) {
+        invalidateClientQueries(`sidebar-badges:${role}:`);
+      }
+      const next = await cachedClientQuery(
+        `sidebar-badges:${role}:${studentId}:${myClassKey}`,
+        () => computeBadges(role, studentId, myClasses.map(c => c.id)),
+        30_000,
+      );
       if (!cancelled) setBadges(next);
     }, 100);
     return () => {

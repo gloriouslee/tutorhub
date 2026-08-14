@@ -1077,7 +1077,7 @@ test("cache policy speeds shared and versioned data without caching private stat
 
   // Account context stays in memory for smooth navigation, but never enters a
   // browser/shared HTTP cache and refreshes after its short TTL.
-  assert.match(accountHook, /CACHE_TTL_MS = 60_000/);
+  assert.match(accountHook, /CACHE_TTL_MS = 120_000/);
   assert.match(accountHook, /fetch\("\/api\/account\/context", \{ cache: "no-store" \}\)/);
   assert.match(accountHook, /ready: current\.context !== null/);
   assert.match(accountRoute, /"Cache-Control": "private, no-store"/);
@@ -1292,6 +1292,35 @@ test("teacher and admin guardian invitations require parent acceptance", async (
   assert.match(teacherStudentProfile, /value: "family"/);
   assert.match(teacherStudentProfile, /label: "Gia đình"/);
   assert.match(adminStudents, /StudentGuardianManager/);
+});
+
+test("guardian invitation retries are idempotent and authenticated reads are briefly deduplicated", async () => {
+  const collectionRoute = await read("src/app/api/guardians/route.ts");
+  const itemRoute = await read("src/app/api/guardians/[id]/route.ts");
+  const parentInvitations = await read("src/app/parent/invitations/page.tsx");
+  const queryCache = await read("src/lib/client-query-cache.ts");
+  const storage = await read("src/lib/storage.ts");
+  const accountContext = await read("src/hooks/useAccountContext.ts");
+
+  assert.equal(
+    collectionRoute.match(/getRequestIdentity\(req\)/g)?.length,
+    2,
+    "GET and POST should resolve identity once each",
+  );
+  assert.match(collectionRoute, /canManageStudent\(actor, studentId\)/);
+  assert.match(itemRoute, /alreadyProcessed: true/);
+  assert.match(itemRoute, /latest\.status === \(accepted \? "active" : "rejected"\)/);
+  assert.match(itemRoute, /guardian\.invitation_update_failed/);
+  assert.match(parentInvitations, /await response\.json\(\)\.catch/);
+  assert.match(parentInvitations, /setLinks\(\(current\) => current\.map/);
+
+  assert.match(queryCache, /typeof window === "undefined"/);
+  assert.match(queryCache, /const inFlight = new Map/);
+  assert.match(queryCache, /requestEpoch === cacheEpoch/);
+  assert.match(storage, /cachedClientQuery\("student-materials"/);
+  assert.match(storage, /normalizedQueryKey\("teacher-attendance"/);
+  assert.match(storage, /invalidateClientQueries\("teacher-homework:"\)/);
+  assert.match(accountContext, /invalidateClientQueries\(\)/);
 });
 
 test("teacher student workspace keeps aggregates scoped and notes attributable", async () => {
