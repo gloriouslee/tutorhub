@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   ArrowDownUp,
@@ -82,22 +82,28 @@ export default function StudentDirectory() {
   const { teacherName, myClasses } = useTeacherContext();
   const [students, setStudents] = useState<StudentWorkspaceSummary[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [classId, setClassId] = useState("all");
   const [riskFilter, setRiskFilter] = useState<RiskFilter>("all");
   const [sort, setSort] = useState<SortKey>("risk");
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const hasLoadedRef = useRef(false);
+
+  const load = useCallback(async (refresh = false) => {
+    if (hasLoadedRef.current) setRefreshing(true);
+    else setLoading(true);
     setError("");
     try {
-      const payload = await fetchTeacherStudentDirectory();
+      const payload = await fetchTeacherStudentDirectory({ refresh });
       setStudents(payload.students);
+      hasLoadedRef.current = true;
     } catch {
       setError("Không thể tải dữ liệu học viên. Vui lòng thử lại.");
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, []);
 
@@ -159,21 +165,22 @@ export default function StudentDirectory() {
             <h1 className="text-2xl font-black tracking-tight">Không gian học viên</h1>
             <p className="mt-1 text-sm text-muted-foreground">Ưu tiên việc cần xử lý, sau đó mở hồ sơ để xem nguyên nhân và hành động tiếp theo.</p>
           </div>
-          <Button type="button" variant="outline" size="sm" disabled={loading} onClick={() => void load()}>
-            {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
-            Làm mới dữ liệu
+          <Button type="button" variant="outline" size="sm" disabled={loading || refreshing} onClick={() => void load(true)}>
+            {loading || refreshing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+            {refreshing ? "Đang làm mới" : "Làm mới dữ liệu"}
           </Button>
         </header>
 
-        {loading ? <DirectorySkeleton /> : error ? (
+        {loading ? <DirectorySkeleton /> : error && !hasLoadedRef.current ? (
           <Card className="border-dashed"><CardContent className="flex flex-col items-center py-14 text-center">
             <AlertTriangle className="mb-3 h-10 w-10 text-amber-500" />
             <p className="font-bold">Chưa tải được danh sách học viên</p>
             <p className="mt-1 text-sm text-muted-foreground">{error}</p>
-            <Button className="mt-4" type="button" onClick={() => void load()}>Thử lại</Button>
+            <Button className="mt-4" type="button" onClick={() => void load(true)}>Thử lại</Button>
           </CardContent></Card>
         ) : (
           <>
+            {error && <p className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800" role="status">{error} Dữ liệu đang hiển thị được giữ nguyên.</p>}
             <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Tổng quan học viên">
               {[
                 { label: "Tổng học viên", value: scopedStudents.length, Icon: Users, tone: "text-indigo-600 bg-indigo-50 dark:bg-indigo-950/30", filter: "all" as RiskFilter },

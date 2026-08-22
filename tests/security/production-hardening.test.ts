@@ -1435,6 +1435,29 @@ test("teacher student workspace keeps aggregates scoped and notes attributable",
   assert.match(notificationRoute, /data\.student_ids\.includes\(item\.target_student_id\)/);
 });
 
+test("teacher student workspace keeps navigation fast and refreshes only on demand", async () => {
+  const workspaceRoute = await read("src/app/api/teacher/students/route.ts");
+  const workspaceClient = await read("src/lib/teacher-student-workspace.ts");
+  const growthServer = await read("src/lib/learning-growth-server.ts");
+  const directory = await read("src/components/teacher/students/StudentDirectory.tsx");
+  const profile = await read("src/components/teacher/students/StudentProfile.tsx");
+
+  assert.match(workspaceClient, /STUDENT_WORKSPACE_TTL_MS = 5 \* 60_000/);
+  assert.match(workspaceClient, /cachedJsonFetch<TeacherStudentDirectoryPayload>/);
+  assert.match(workspaceClient, /teacher-student-profile:\$\{studentId\}/);
+  assert.match(workspaceClient, /action: "refresh_workspace"/);
+  assert.match(workspaceRoute, /body\.action === "refresh_workspace"/);
+  assert.match(workspaceRoute, /syncTeacherStudentWorkspace/);
+  assert.match(growthServer, /export async function syncTeacherStudentWorkspace/);
+  assert.match(growthServer, /loadDirectoryGrowthSnapshot/);
+  assert.match(directory, /fetchTeacherStudentDirectory\(\{ refresh \}\)/);
+  assert.match(directory, /void load\(true\)/);
+  assert.match(profile, /fetchTeacherStudentProfile\(studentId, \{ refresh \}\)/);
+  assert.match(profile, /Dữ liệu đang hiển thị được giữ nguyên/);
+  assert.doesNotMatch(directory, /visibilitychange|window\.addEventListener\("focus"/);
+  assert.doesNotMatch(profile, /visibilitychange|window\.addEventListener\("focus"/);
+});
+
 test("all parent-sensitive API reads use accepted guardian relationships", async () => {
   const helper = await read("src/lib/guardian-server.ts");
   const account = await read("src/app/api/account/context/route.ts");

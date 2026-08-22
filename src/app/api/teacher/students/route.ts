@@ -8,6 +8,7 @@ import { teacherClassForStudent } from "@/lib/student-notes-server";
 import {
   loadTeacherStudentDirectory,
   loadTeacherStudentProfile,
+  syncTeacherStudentWorkspace,
 } from "@/lib/learning-growth-server";
 import type { GoalMetric } from "@/lib/learning-growth";
 
@@ -16,6 +17,7 @@ const PRIVATE_NO_STORE = {
 };
 
 export async function GET(req: NextRequest) {
+  const startedAt = performance.now();
   const identity = await getRequestIdentity(req);
   if (!identity?.teacherId || identity.role !== "teacher") {
     return NextResponse.json(
@@ -35,6 +37,10 @@ export async function GET(req: NextRequest) {
   try {
     if (studentId) {
       const profile = await loadTeacherStudentProfile(identity.teacherId, studentId);
+      console.info("[api/teacher/students] loaded", {
+        mode: "profile",
+        durationMs: Math.round(performance.now() - startedAt),
+      });
       return profile
         ? NextResponse.json(profile, PRIVATE_NO_STORE)
         : NextResponse.json(
@@ -42,11 +48,19 @@ export async function GET(req: NextRequest) {
             { status: 404, ...PRIVATE_NO_STORE },
           );
     }
-    return NextResponse.json(
-      await loadTeacherStudentDirectory(identity.teacherId),
-      PRIVATE_NO_STORE,
-    );
-  } catch {
+    const directory = await loadTeacherStudentDirectory(identity.teacherId);
+    console.info("[api/teacher/students] loaded", {
+      mode: "directory",
+      studentCount: directory.students.length,
+      durationMs: Math.round(performance.now() - startedAt),
+    });
+    return NextResponse.json(directory, PRIVATE_NO_STORE);
+  } catch (error) {
+    console.error("[api/teacher/students] failed", {
+      mode: studentId ? "profile" : "directory",
+      durationMs: Math.round(performance.now() - startedAt),
+      error: error instanceof Error ? error.message : String(error),
+    });
     return NextResponse.json(
       { error: "teacher_student_workspace_unavailable" },
       { status: 500, ...PRIVATE_NO_STORE },
@@ -76,17 +90,47 @@ export async function POST(req: NextRequest) {
   if (!identity?.teacherId || identity.role !== "teacher") {
     return NextResponse.json({ error: "teacher_authorization_required" }, { status: 403, ...PRIVATE_NO_STORE });
   }
-  if (!await consumeRateLimit({ scope: "teacher-learning-goal", key: identity.userId, limit: 15, windowSeconds: 3600 })) {
-    return NextResponse.json({ error: "rate_limited" }, { status: 429, ...PRIVATE_NO_STORE });
-  }
   let body: Record<string, unknown>;
   try {
     body = await req.json() as Record<string, unknown>;
   } catch {
     return NextResponse.json({ error: "invalid_json" }, { status: 400, ...PRIVATE_NO_STORE });
   }
+  if (body.action === "refresh_workspace") {
+    const studentId = typeof body.studentId === "string" ? body.studentId.trim() : "";
+    if (studentId.length > 120) {
+      return NextResponse.json({ error: "invalid_student_id" }, { status: 400, ...PRIVATE_NO_STORE });
+    }
+    if (!await consumeRateLimit({ scope: "teacher-student-workspace-refresh", key: identity.userId, limit: 20, windowSeconds: 600 })) {
+      return NextResponse.json({ error: "rate_limited" }, { status: 429, ...PRIVATE_NO_STORE });
+    }
+    const startedAt = performance.now();
+    try {
+      const synced = await syncTeacherStudentWorkspace(
+        identity.teacherId,
+        studentId || undefined,
+      );
+      console.info("[api/teacher/students] synchronized", {
+        mode: studentId ? "profile" : "directory",
+        durationMs: Math.round(performance.now() - startedAt),
+      });
+      return synced
+        ? NextResponse.json({ ok: true }, PRIVATE_NO_STORE)
+        : NextResponse.json({ error: "student_not_found" }, { status: 404, ...PRIVATE_NO_STORE });
+    } catch (error) {
+      console.error("[api/teacher/students] synchronization failed", {
+        mode: studentId ? "profile" : "directory",
+        durationMs: Math.round(performance.now() - startedAt),
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return NextResponse.json({ error: "teacher_student_workspace_refresh_failed" }, { status: 500, ...PRIVATE_NO_STORE });
+    }
+  }
   if (body.action !== "save_goal") {
     return NextResponse.json({ error: "unsupported_action" }, { status: 400, ...PRIVATE_NO_STORE });
+  }
+  if (!await consumeRateLimit({ scope: "teacher-learning-goal", key: identity.userId, limit: 15, windowSeconds: 3600 })) {
+    return NextResponse.json({ error: "rate_limited" }, { status: 429, ...PRIVATE_NO_STORE });
   }
   const studentId = typeof body.studentId === "string" ? body.studentId.trim() : "";
   const classId = typeof body.classId === "string" && body.classId.trim() ? body.classId.trim() : null;

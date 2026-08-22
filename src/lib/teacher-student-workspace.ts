@@ -1,3 +1,5 @@
+import { cachedJsonFetch, invalidateClientQueries } from "@/lib/client-query-cache";
+
 export type StudentRiskPriority = "high" | "medium" | "low";
 export type StudentWorkspaceTab =
   | "overview"
@@ -171,24 +173,75 @@ export type TeacherStudentDirectoryPayload = {
   students: StudentWorkspaceSummary[];
 };
 
-export async function fetchTeacherStudentDirectory(signal?: AbortSignal) {
-  const response = await fetch("/api/teacher/students", {
-    cache: "no-store",
-    credentials: "same-origin",
-    signal,
-  });
-  if (!response.ok) throw new Error("student_directory_unavailable");
-  return response.json() as Promise<TeacherStudentDirectoryPayload>;
+const STUDENT_WORKSPACE_TTL_MS = 5 * 60_000;
+
+type StudentWorkspaceFetchOptions = {
+  refresh?: boolean;
+  signal?: AbortSignal;
+};
+
+function invalidateStudentWorkspace(studentId?: string) {
+  invalidateClientQueries("teacher-student-directory");
+  invalidateClientQueries(
+    studentId ? `teacher-student-profile:${studentId}` : "teacher-student-profile:",
+  );
 }
 
-export async function fetchTeacherStudentProfile(studentId: string, signal?: AbortSignal) {
-  const response = await fetch(
-    `/api/teacher/students?student_id=${encodeURIComponent(studentId)}`,
-    { cache: "no-store", credentials: "same-origin", signal },
+async function synchronizeStudentWorkspace(studentId?: string) {
+  const response = await fetch("/api/teacher/students", {
+    method: "POST",
+    cache: "no-store",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      action: "refresh_workspace",
+      ...(studentId ? { studentId } : {}),
+    }),
+  });
+  if (!response.ok) throw new Error("student_workspace_refresh_failed");
+}
+
+export async function fetchTeacherStudentDirectory(
+  options: StudentWorkspaceFetchOptions = {},
+) {
+  if (options.refresh) {
+    await synchronizeStudentWorkspace();
+    invalidateStudentWorkspace();
+  }
+  return cachedJsonFetch<TeacherStudentDirectoryPayload>(
+    "teacher-student-directory",
+    "/api/teacher/students",
+    {
+      cache: "no-store",
+      credentials: "same-origin",
+      signal: options.signal,
+    },
+    STUDENT_WORKSPACE_TTL_MS,
   );
-  if (!response.ok) {
-    if (response.status === 404) throw new Error("student_not_found");
+}
+
+export async function fetchTeacherStudentProfile(
+  studentId: string,
+  options: StudentWorkspaceFetchOptions = {},
+) {
+  if (options.refresh) {
+    await synchronizeStudentWorkspace(studentId);
+    invalidateStudentWorkspace(studentId);
+  }
+  const params = new URLSearchParams({ student_id: studentId });
+  try {
+    return await cachedJsonFetch<StudentWorkspaceProfile>(
+      `teacher-student-profile:${studentId}`,
+      `/api/teacher/students?${params.toString()}`,
+      {
+        cache: "no-store",
+        credentials: "same-origin",
+        signal: options.signal,
+      },
+      STUDENT_WORKSPACE_TTL_MS,
+    );
+  } catch (error) {
+    if ((error as { status?: number }).status === 404) throw new Error("student_not_found");
     throw new Error("student_profile_unavailable");
   }
-  return response.json() as Promise<StudentWorkspaceProfile>;
 }

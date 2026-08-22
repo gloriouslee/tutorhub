@@ -799,6 +799,28 @@ async function loadGrowthSnapshot(admin: AdminClient, studentIds: string[]) {
   };
 }
 
+async function loadDirectoryGrowthSnapshot(admin: AdminClient, studentIds: string[]) {
+  if (studentIds.length === 0) return { xp: [], badges: [], goals: [], topics: [], reports: [] };
+  const [goals, topics] = await Promise.all([
+    admin.from("learning_goals")
+      .select("*")
+      .in("student_id", studentIds)
+      .order("period_end", { ascending: true }),
+    admin.from("student_topic_mastery")
+      .select("student_id,class_id,incorrect_questions")
+      .in("student_id", studentIds),
+  ]);
+  const failed = [goals, topics].find((response) => response.error);
+  if (failed?.error) throw failed.error;
+  return {
+    xp: [],
+    badges: [],
+    goals: goals.data ?? [],
+    topics: topics.data ?? [],
+    reports: [],
+  };
+}
+
 function shapeStudentGrowth(student: GrowthStudent, snapshot: Awaited<ReturnType<typeof loadGrowthSnapshot>>) {
   const xpRows = snapshot.xp.filter((row) => String(row.student_id) === student.id);
   const totalXp = xpRows.reduce((sum, row) => sum + validNumber(row.points), 0);
@@ -1111,7 +1133,11 @@ function shapeWorkspaceSummary(
   };
 }
 
-async function loadTeacherWorkspaceBase(teacherId: string, studentId?: string) {
+async function loadTeacherWorkspaceBase(
+  teacherId: string,
+  studentId?: string,
+  options: { directory?: boolean } = {},
+) {
   const admin = createAdminClient();
   const allClasses = await teacherClasses(admin, teacherId);
   const classes = studentId
@@ -1119,10 +1145,11 @@ async function loadTeacherWorkspaceBase(teacherId: string, studentId?: string) {
     : allClasses;
   if (studentId && classes.length === 0) return null;
   const dataset = await loadGrowthDataset(admin, classes);
-  await syncGrowthDataset(admin, dataset, teacherId);
   const studentIds = dataset.students.map((item) => item.id);
   const [snapshot, alertsResponse] = await Promise.all([
-    loadGrowthSnapshot(admin, studentIds),
+    options.directory
+      ? loadDirectoryGrowthSnapshot(admin, studentIds)
+      : loadGrowthSnapshot(admin, studentIds),
     studentIds.length === 0
       ? Promise.resolve({ data: [], error: null })
       : admin.from("student_support_alerts")
@@ -1140,8 +1167,30 @@ async function loadTeacherWorkspaceBase(teacherId: string, studentId?: string) {
   };
 }
 
+export async function syncTeacherStudentWorkspace(
+  teacherId: string,
+  studentId?: string,
+) {
+  const admin = createAdminClient();
+  const allClasses = await teacherClasses(admin, teacherId);
+  const classes = studentId
+    ? allClasses.filter((item) => item.student_ids.includes(studentId))
+    : allClasses;
+  if (studentId && classes.length === 0) return false;
+  const dataset = await loadGrowthDataset(admin, classes);
+  await syncGrowthDataset(
+    admin,
+    dataset,
+    teacherId,
+    studentId ? [studentId] : undefined,
+  );
+  return true;
+}
+
 export async function loadTeacherStudentDirectory(teacherId: string) {
-  const base = await loadTeacherWorkspaceBase(teacherId);
+  const base = await loadTeacherWorkspaceBase(teacherId, undefined, {
+    directory: true,
+  });
   if (!base) return { generatedAt: new Date().toISOString(), students: [] };
   return {
     generatedAt: new Date().toISOString(),

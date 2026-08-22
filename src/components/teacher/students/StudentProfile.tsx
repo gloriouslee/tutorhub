@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import * as Tabs from "@radix-ui/react-tabs";
 import {
   ResponsiveContainer,
@@ -133,6 +133,7 @@ export default function StudentProfile({ studentId }: { studentId: string }) {
   const { teacherName } = useTeacherContext();
   const [profile, setProfile] = useState<StudentWorkspaceProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [tab, setTab] = useState<StudentWorkspaceTab>("overview");
   const [classId, setClassId] = useState("all");
@@ -149,17 +150,22 @@ export default function StudentProfile({ studentId }: { studentId: string }) {
   const [goalError, setGoalError] = useState("");
   const [goalForm, setGoalForm] = useState({ goalId: "", classId: "", title: "", metric: "homework_completed", targetValue: "", periodStart: "", periodEnd: "" });
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const hasLoadedRef = useRef(false);
+
+  const load = useCallback(async (refresh = false) => {
+    if (hasLoadedRef.current) setRefreshing(true);
+    else setLoading(true);
     setError("");
     try {
-      const nextProfile = await fetchTeacherStudentProfile(studentId);
+      const nextProfile = await fetchTeacherStudentProfile(studentId, { refresh });
       setProfile(nextProfile);
+      hasLoadedRef.current = true;
       setScoreForm((current) => ({ ...current, classId: current.classId || nextProfile.classes[0]?.id || "" }));
     } catch (loadError) {
       setError(loadError instanceof Error && loadError.message === "student_not_found" ? "Không tìm thấy học viên trong các lớp bạn phụ trách." : "Không thể tải hồ sơ học viên. Vui lòng thử lại.");
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, [studentId]);
 
@@ -213,7 +219,7 @@ export default function StudentProfile({ studentId }: { studentId: string }) {
       setShowScoreForm(false);
       setEditingScoreId("");
       setScoreForm((current) => ({ ...current, examName: "", score: "" }));
-      await load();
+      await load(true);
     } catch {
       setScoreError("Không thể lưu điểm. Vui lòng thử lại.");
     } finally {
@@ -234,7 +240,7 @@ export default function StudentProfile({ studentId }: { studentId: string }) {
     setScoreError("");
     try {
       await deleteExamScore(score.id);
-      await load();
+      await load(true);
     } catch {
       setScoreError("Không thể xóa điểm. Vui lòng thử lại.");
     } finally {
@@ -250,7 +256,7 @@ export default function StudentProfile({ studentId }: { studentId: string }) {
       if (!response.ok) throw new Error("failed");
       const result = await response.json() as { generated: number };
       setReportMessage(result.generated > 0 ? "Đã tạo báo cáo và gửi vào Parent Portal." : "Chưa có dữ liệu phù hợp để tạo báo cáo.");
-      await load();
+      await load(true);
     } catch {
       setReportMessage("Không thể tạo báo cáo lúc này.");
     } finally {
@@ -279,7 +285,7 @@ export default function StudentProfile({ studentId }: { studentId: string }) {
       const response = await fetch("/api/teacher/students", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "save_goal", studentId, ...goalForm, targetValue }) });
       if (!response.ok) throw new Error("failed");
       setShowGoalForm(false);
-      await load();
+      await load(true);
     } catch {
       setGoalError("Không thể lưu mục tiêu. Kiểm tra thời gian tối đa 90 ngày rồi thử lại.");
     } finally {
@@ -288,7 +294,7 @@ export default function StudentProfile({ studentId }: { studentId: string }) {
   }
 
   if (loading) return <PortalLayout role="teacher" userName={teacherName || "Giáo viên"} pageTitle="Hồ sơ học viên"><ProfileSkeleton /></PortalLayout>;
-  if (error || !profile) return <PortalLayout role="teacher" userName={teacherName || "Giáo viên"} pageTitle="Hồ sơ học viên"><div className="mx-auto max-w-xl py-20 text-center"><AlertTriangle className="mx-auto mb-3 h-10 w-10 text-amber-500" /><h1 className="text-lg font-bold">Chưa mở được hồ sơ</h1><p className="mt-2 text-sm text-muted-foreground">{error}</p><div className="mt-5 flex justify-center gap-2"><Button asChild variant="outline"><Link href="/teacher/students">Về danh sách</Link></Button><Button type="button" onClick={() => void load()}>Thử lại</Button></div></div></PortalLayout>;
+  if (!profile) return <PortalLayout role="teacher" userName={teacherName || "Giáo viên"} pageTitle="Hồ sơ học viên"><div className="mx-auto max-w-xl py-20 text-center"><AlertTriangle className="mx-auto mb-3 h-10 w-10 text-amber-500" /><h1 className="text-lg font-bold">Chưa mở được hồ sơ</h1><p className="mt-2 text-sm text-muted-foreground">{error}</p><div className="mt-5 flex justify-center gap-2"><Button asChild variant="outline"><Link href="/teacher/students">Về danh sách</Link></Button><Button type="button" onClick={() => void load(true)}>Thử lại</Button></div></div></PortalLayout>;
 
   const metrics = scopedMetrics(profile, classId);
   const classMap = new Map(profile.classes.map((item) => [item.id, item]));
@@ -306,7 +312,15 @@ export default function StudentProfile({ studentId }: { studentId: string }) {
   return (
     <PortalLayout role="teacher" userName={teacherName || "Giáo viên"} pageTitle={profile.fullName}>
       <main className="mx-auto max-w-7xl space-y-5">
-        <Link href={classId === "all" ? "/teacher/students" : `/teacher/students?class=${encodeURIComponent(classId)}`} className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"><ArrowLeft className="h-4 w-4" /> Quay lại danh sách</Link>
+        <div className="flex items-center justify-between gap-3">
+          <Link href={classId === "all" ? "/teacher/students" : `/teacher/students?class=${encodeURIComponent(classId)}`} className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"><ArrowLeft className="h-4 w-4" /> Quay lại danh sách</Link>
+          <Button type="button" size="sm" variant="outline" disabled={refreshing} onClick={() => void load(true)}>
+            {refreshing ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1.5 h-3.5 w-3.5" />}
+            {refreshing ? "Đang làm mới" : "Làm mới"}
+          </Button>
+        </div>
+
+        {error && <p className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800" role="status">{error} Dữ liệu đang hiển thị được giữ nguyên.</p>}
 
         <Card className="overflow-hidden border-border/70"><CardContent className="p-5 md:p-6">
           <div className="flex flex-col gap-5 xl:flex-row xl:items-center">
