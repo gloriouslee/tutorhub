@@ -1,5 +1,5 @@
 import { createClient } from "./supabase/client";
-import { Student, Teacher, Class, Payment, Attendance, Notification, ClassSchedule } from "@/types";
+import { Student, Teacher, Class, Notification, ClassSchedule } from "@/types";
 import type { AttendanceStatus } from "@/lib/attendance";
 import {
   cachedClientQuery,
@@ -9,13 +9,11 @@ import {
 
 const supabase = createClient();
 
-// Cache keys for the six core entity lists.
+// Cache keys for the four core entity lists that are still read directly.
 const ENTITY_KEYS = {
   students: "tutorhub_cache_v2_students",
   teachers: "tutorhub_cache_v2_teachers",
   classes: "tutorhub_cache_v2_classes",
-  payments: "tutorhub_cache_v2_payments",
-  attendance: "tutorhub_cache_v2_attendance",
   notifications: "tutorhub_cache_v2_notifications",
 } as const;
 
@@ -52,18 +50,13 @@ function writeLocal<T>(key: string, items: T[]): void {
 // NOT through this KV routing map — their old kv_* tables no longer exist.
 const KV_PREFIX_ROUTES: Array<[string, string]> = [
   ["tutorhub_curriculum_",            "kv_curriculum"],
-  ["tutorhub_schedule_",              "kv_schedules"],
-  ["tutorhub_online_link_",           "kv_online_links"],
   ["tutorhub_tuition_",               "kv_tuition"],
   ["tutorhub_student_packages_",      "kv_student_packages"],
   ["tutorhub_session_notes_",         "kv_session_notes"],
   ["tutorhub_class_extra_students_",  "kv_class_extra_students"],
   ["tutorhub_exam_result_",           "kv_exam_results"],
   ["tutorhub_exam_submissions_",      "kv_exam_submissions"],
-  ["tutorhub_exam_scores",            "kv_exam_scores"],
   ["tutorhub_invoices",               "kv_invoices"],
-  ["tutorhub_managed_users",          "kv_managed_users"],
-  ["tutorhub_student_accounts",       "kv_student_accounts"],
   ["tutorhub_teacher_settings_",      "kv_teacher_settings"],
 ];
 
@@ -299,22 +292,6 @@ export async function deleteClass(id: string): Promise<void> {
   const { error } = await supabase.from("classes").delete().eq("id", id);
   if (error) { console.error("deleteClass:", error); throw error; }
   invalidateClientQueries("entity:classes");
-}
-
-export async function getPayments(): Promise<Payment[]> {
-  return getEntity(
-    ENTITY_KEYS.payments,
-    "payments",
-    () => supabase.from("payments").select("*").order("created_at", { ascending: false }) as any
-  );
-}
-
-export async function getAttendance(): Promise<Attendance[]> {
-  return getEntity(
-    ENTITY_KEYS.attendance,
-    "attendance",
-    () => supabase.from("attendance").select("*").order("attendance_date", { ascending: false }) as any
-  );
 }
 
 /** Điểm danh THẬT do giáo viên nhập (kv_teacher_attendance) — dùng cho báo cáo. */

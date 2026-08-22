@@ -6,7 +6,7 @@ import { SectionHeader } from "@/components/shared";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
-  getAttendance,
+  getAllTeacherAttendance,
   getClasses,
   getNotifications,
   getStudents,
@@ -29,7 +29,7 @@ export default function AdminSettingsPage() {
       getStudents(),
       getTeachers(),
       getClasses(),
-      getAttendance(),
+      getAllTeacherAttendance(),
       getNotifications(),
     ]);
     const data = {

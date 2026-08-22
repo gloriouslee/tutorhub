@@ -14,7 +14,7 @@
     "db:backup": "tsx scripts/backup-supabase.ts",
     "admin:bootstrap": "tsx scripts/bootstrap-admin.ts",
     "db:seed": "tsx scripts/seed-dev.ts",
-    "db:reset": "echo \"Manually run supabase/schema.sql + supabase/migration_app_tables.sql + supabase/migration_missing_columns.sql in the Supabase SQL Editor first, then run: npm run db:seed\""
+    "db:reset": "echo \"For a fresh project, run supabase/schema_canonical.sql once, then run: npm run db:seed\""
   },
   "dependencies": {
     "@radix-ui/react-avatar": "^1.1.11",

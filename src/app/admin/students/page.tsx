@@ -12,9 +12,11 @@ import { Input } from "@/components/ui/input";
 import { useState, useEffect } from "react";
 import {
   deleteStudent,
-  getAttendance,
-  getPayments,
+  getAllTeacherAttendance,
+  getInvoices,
   getStudents,
+  type TeacherAttendanceRecord,
+  type TuitionInvoice,
   upsertStudent,
 } from "@/lib/storage";
 import { Student } from "@/types";
@@ -23,8 +25,8 @@ import { isAttendedStatus } from "@/lib/attendance";
 
 export default function AdminStudentsPage() {
   const [students, setStudents] = useState<Student[]>([]);
-  const [payments, setPayments] = useState<any[]>([]);
-  const [attendance, setAttendance] = useState<any[]>([]);
+  const [invoices, setInvoices] = useState<TuitionInvoice[]>([]);
+  const [attendance, setAttendance] = useState<TeacherAttendanceRecord[]>([]);
   const [search, setSearch] = useState("");
   const [filterMode, setFilterMode] = useState<"All" | "Online" | "Offline" | "Hybrid">("All");
 
@@ -46,11 +48,11 @@ export default function AdminStudentsPage() {
     async function loadData() {
       const [s, p, a] = await Promise.all([
         getStudents(),
-        getPayments(),
-        getAttendance(),
+        getInvoices(),
+        getAllTeacherAttendance(),
       ]);
       setStudents(s);
-      setPayments(p);
+      setInvoices(p);
       setAttendance(a);
     }
     loadData();
@@ -213,11 +215,19 @@ export default function AdminStudentsPage() {
                     </tr>
                   ) : (
                     filtered.map((student, i) => {
-                      // Ưu tiên payment pending/overdue, fallback về mới nhất
-                      const studentPayments = payments.filter(p => p.student_id === student.id);
-                      const payment = studentPayments.find(p => p.payment_status === "overdue")
-                        ?? studentPayments.find(p => p.payment_status === "pending")
-                        ?? studentPayments[studentPayments.length - 1];
+                      const today = new Date().toISOString().slice(0, 10);
+                      const studentInvoices = invoices.filter(invoice => invoice.child_id === student.id);
+                      const payment = studentInvoices.find(invoice => invoice.status === "pending" && invoice.due_date < today)
+                        ?? studentInvoices.find(invoice => invoice.status === "pending_verification")
+                        ?? studentInvoices.find(invoice => invoice.status === "pending")
+                        ?? studentInvoices[studentInvoices.length - 1];
+                      const paymentStatus = payment?.status === "paid"
+                        ? "paid"
+                        : payment?.status === "pending_verification"
+                          ? "pending_verification"
+                          : payment?.due_date && payment.due_date < today
+                            ? "overdue"
+                            : payment ? "pending" : null;
                       const attRecords = attendance.filter(a => a.student_id === student.id);
                       const presentCount = attRecords.filter(a => isAttendedStatus(a.status)).length;
                       const attRate = attRecords.length > 0 ? Math.round((presentCount / attRecords.length) * 100) : null;
@@ -246,11 +256,16 @@ export default function AdminStudentsPage() {
                           <td className="p-4">
                             {payment ? (
                               <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${
-                                payment.payment_status === "paid" ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" :
-                                payment.payment_status === "overdue" ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" :
+                                paymentStatus === "paid" ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" :
+                                paymentStatus === "overdue" ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" :
                                 "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
                               }`}>
-                                {{ paid: "Đã thu", pending: "Chờ thu", overdue: "Quá hạn" }[payment.payment_status as string] ?? payment.payment_status}
+                                {{
+                                  paid: "Đã thu",
+                                  pending: "Chờ thu",
+                                  pending_verification: "Chờ xác nhận",
+                                  overdue: "Quá hạn",
+                                }[paymentStatus ?? "pending"]}
                               </span>
                             ) : <span className="text-xs text-muted-foreground">—</span>}
                           </td>

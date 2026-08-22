@@ -33,24 +33,25 @@
 -- ============================================================================
 --
 -- ─────────────────────────── COVERAGE MANIFEST ─────────────────────────────
--- TABLES (50)
---   Core (12):    profiles, parents, teachers, students, student_guardians, classes, payments,
---                 attendance, notifications, homework, submissions, materials
---   Domain (10):  class_registration_requests, purchase_transactions,
+-- TABLES (44)
+--   Core (7):     profiles, parents, teachers, students, student_guardians,
+--                 classes, notifications
+--   Domain (13):  class_registration_requests, purchase_transactions,
 --                 app_exam_scores, class_leaderboard_settings,
+--                 student_lesson_progress, class_questions,
+--                 class_question_messages,
 --                 student_support_alerts, weekly_parent_reports,
 --                 student_xp_events, student_badges, learning_goals,
 --                 student_topic_mastery
---   KV (14):      kv_curriculum, kv_schedules, kv_online_links, kv_tuition,
---                 kv_student_packages, kv_session_notes, kv_class_extra_students,
---                 kv_exam_results, kv_exam_submissions, kv_exam_scores,
---                 kv_invoices, kv_managed_users, kv_student_accounts,
---                 kv_teacher_settings
---   Per-row (13): course_reviews, student_comments, schedule_notifications,
+--   KV (9):       kv_curriculum, kv_tuition, kv_student_packages,
+--                 kv_session_notes, kv_class_extra_students, kv_exam_results,
+--                 kv_exam_submissions, kv_invoices, kv_teacher_settings
+--   Per-row (14): course_reviews, student_comments, schedule_notifications,
 --                 schedule_notification_reads, class_materials,
 --                 homework_attachments, class_teacher_overrides,
 --                 teacher_homework, teacher_extra_classes, hw_submissions,
---                 class_attendance, teacher_materials, parent_messages
+--                 class_attendance, teacher_materials, parent_messages,
+--                 notification_reads
 --   Infra (1):    api_rate_limits
 --
 -- FUNCTIONS (17)
@@ -69,9 +70,13 @@
 --   Policies: owner-scoped avatars + class-scoped materials/submissions
 --
 -- DELIBERATE EXCLUSIONS (see the report accompanying this file)
---   - Legacy UUID `exam_scores` table (schema.sql only) and its grant/policy:
---     the app uses app_exam_scores / kv_exam_scores instead; keeping the UUID
---     table would require FKs to now-TEXT students/classes.
+--   - Legacy `payments`, `attendance`, `homework`, `submissions`, `materials`
+--     and UUID `exam_scores`: replaced by kv_invoices, class_attendance,
+--     teacher_homework, hw_submissions, teacher_materials/class_materials and
+--     app_exam_scores respectively.
+--   - Retired KV stores: kv_schedules and kv_online_links moved to columns on
+--     classes; kv_exam_scores moved to app_exam_scores; kv_managed_users and
+--     kv_student_accounts moved to profiles plus role domain tables.
 --   - Legacy UUID `enrollments` table (schema.sql only): dropped by v2, unused.
 --   - KV blobs replaced by the per-row tables above: kv_teacher_homework,
 --     kv_submissions, kv_teacher_classes, kv_teacher_attendance,
@@ -429,28 +434,6 @@ create table if not exists public.classes (
   created_at    timestamptz default now()
 );
 
-create table if not exists public.payments (
-  id             text primary key,
-  student_id     text references public.students(id) on delete cascade,
-  class_id       text references public.classes(id) on delete set null,
-  amount         numeric(12,0) not null,
-  due_date       date not null,
-  paid_date      date,
-  payment_status text check (payment_status in ('paid','pending','overdue')) default 'pending',
-  description    text,
-  created_at     timestamptz default now()
-);
-
-create table if not exists public.attendance (
-  id              text primary key,
-  class_id        text references public.classes(id) on delete cascade,
-  student_id      text references public.students(id) on delete cascade,
-  attendance_date date not null,
-  status          text check (status in ('present','absent','late','excused')) not null,
-  notes           text,
-  created_at      timestamptz default now()
-);
-
 create table if not exists public.notifications (
   id              text primary key,
   title           text not null,
@@ -465,56 +448,7 @@ create table if not exists public.notifications (
   created_at      timestamptz default now()
 );
 
-create table if not exists public.homework (
-  id          text primary key,
-  class_id    text references public.classes(id) on delete cascade,
-  title       text not null,
-  description text,
-  due_date    date not null,
-  attachments text[] default '{}',
-  created_at  timestamptz default now()
-);
-
-create table if not exists public.submissions (
-  id                text primary key,
-  homework_id       text not null,
-  student_id        text not null,
-  student_name      text,
-  file_url          text,
-  file_name         text,
-  file_size         bigint,
-  text_content      text,
-  score             numeric(5,2),
-  feedback          text,
-  teacher_file_url  text,
-  teacher_file_name text,
-  status            text check (status in ('submitted','graded','returned')) default 'submitted',
-  submitted_at      timestamptz default now(),
-  graded_at         timestamptz,
-  unique (homework_id, student_id)
-);
-
-create table if not exists public.materials (
-  id                 text primary key,
-  class_id           text,
-  title              text not null,
-  description        text,
-  file_url           text,
-  file_type          text,
-  file_size          text,
-  target_role        text,
-  target_grades      text[],
-  target_class_ids   text[],
-  target_student_ids text[],
-  uploaded_by        text,
-  created_at         timestamptz default now()
-);
-
 create index if not exists idx_students_parent    on public.students (parent_id);
-create index if not exists idx_payments_student   on public.payments (student_id);
-create index if not exists idx_attendance_student on public.attendance (student_id);
-create index if not exists idx_attendance_class   on public.attendance (class_id, attendance_date);
-create index if not exists idx_submissions_hw     on public.submissions (homework_id);
 create index if not exists parents_user_id_idx on public.parents (user_id) where user_id is not null;
 create index if not exists teachers_user_id_idx on public.teachers (user_id) where user_id is not null;
 create index if not exists students_user_id_idx on public.students (user_id) where user_id is not null;
@@ -823,8 +757,6 @@ begin
   foreach t in array array[
     -- class-scoped (id = class_id)
     'kv_curriculum',
-    'kv_schedules',
-    'kv_online_links',
     'kv_tuition',
     'kv_student_packages',
     'kv_session_notes',
@@ -833,10 +765,7 @@ begin
     'kv_exam_results',
     'kv_exam_submissions',
     -- global (id = 'global')
-    'kv_exam_scores',
     'kv_invoices',
-    'kv_managed_users',
-    'kv_student_accounts',
     -- teacher-scoped (id = teacher_id)
     'kv_teacher_settings'
   ]
@@ -1381,6 +1310,22 @@ begin
 end;
 $$;
 
+-- ──────────────── 8b. Foreign-key / hot-path indexes ──────────────────────
+create index if not exists class_question_messages_author_user_idx
+  on public.class_question_messages (author_user_id);
+create index if not exists class_registration_assigned_class_idx
+  on public.class_registration_requests (assigned_class_id);
+create index if not exists class_registration_reviewed_by_idx
+  on public.class_registration_requests (reviewed_by);
+create index if not exists learning_goals_created_by_user_idx
+  on public.learning_goals (created_by_user_id);
+create index if not exists notification_reads_user_idx
+  on public.notification_reads (user_id);
+create index if not exists purchase_transactions_class_idx
+  on public.purchase_transactions (class_id);
+create index if not exists student_guardians_invited_by_user_idx
+  on public.student_guardians (invited_by_user_id);
+
 
 -- ──────────────── 9. RLS: enable/force, grants, policies ────────────────────
 -- Enable + force RLS on every table in public, then start from no direct access
@@ -1436,12 +1381,12 @@ grant update (full_name, phone) on public.profiles to authenticated;
 drop policy if exists profiles_self_select on public.profiles;
 create policy profiles_self_select on public.profiles
   for select to authenticated
-  using (id = auth.uid() or public.get_my_role() = 'admin');
+  using (id = (select auth.uid()) or (select public.get_my_role()) = 'admin');
 drop policy if exists profiles_self_update on public.profiles;
 create policy profiles_self_update on public.profiles
   for update to authenticated
-  using (id = auth.uid())
-  with check (id = auth.uid());
+  using (id = (select auth.uid()))
+  with check (id = (select auth.uid()));
 
 -- ── students / parents / teachers / classes ─────────────────────────────────
 grant select on public.students, public.parents, public.teachers, public.classes,
@@ -1452,15 +1397,15 @@ drop policy if exists students_scoped_select on public.students;
 create policy students_scoped_select on public.students
   for select to authenticated
   using (
-    user_id::text = auth.uid()::text
+    user_id::text = (select auth.uid())::text
     or public.parent_has_student(id::text)
-    or public.get_my_role() = 'admin'
-    or (public.get_my_role() = 'teacher' and public.teaches_student(id))
+    or (select public.get_my_role()) = 'admin'
+    or ((select public.get_my_role()) = 'teacher' and public.teaches_student(id))
   );
 drop policy if exists parents_scoped_select on public.parents;
 create policy parents_scoped_select on public.parents
   for select to authenticated
-  using (user_id::text = auth.uid()::text or public.get_my_role() = 'admin');
+  using (user_id::text = (select auth.uid())::text or (select public.get_my_role()) = 'admin');
 drop policy if exists student_guardians_scoped_select on public.student_guardians;
 create policy student_guardians_scoped_select on public.student_guardians
   for select to authenticated
@@ -1496,114 +1441,27 @@ create policy classes_teacher_write on public.classes
   using (public.get_my_role() = 'admin' or tutor_id::text = public.my_teacher_id())
   with check (public.get_my_role() = 'admin' or tutor_id::text = public.my_teacher_id());
 
--- ── payments / attendance / homework / submissions / materials / notifications / app_exam_scores ──
-grant select on public.payments, public.attendance, public.homework,
-  public.submissions, public.materials, public.notifications,
-  public.app_exam_scores to authenticated;
-
-drop policy if exists payments_scoped_select on public.payments;
-create policy payments_scoped_select on public.payments
-  for select to authenticated
-  using (
-    student_id::text = public.my_student_id()
-    or public.parent_has_student(student_id::text)
-    or public.teaches_class(class_id::text)
-    or public.get_my_role() = 'admin'
-  );
-drop policy if exists attendance_scoped_select on public.attendance;
-create policy attendance_scoped_select on public.attendance
-  for select to authenticated
-  using (
-    student_id::text = public.my_student_id()
-    or public.parent_has_student(student_id::text)
-    or public.teaches_class(class_id::text)
-    or public.get_my_role() = 'admin'
-  );
-drop policy if exists homework_scoped_select on public.homework;
-create policy homework_scoped_select on public.homework
-  for select to authenticated
-  using (
-    public.enrolled_in_class(class_id::text)
-    or public.teaches_class(class_id::text)
-    or public.get_my_role() = 'admin'
-  );
-drop policy if exists submissions_scoped_select on public.submissions;
-create policy submissions_scoped_select on public.submissions
-  for select to authenticated
-  using (
-    student_id::text = public.my_student_id()
-    or public.get_my_role() = 'admin'
-    or exists (
-      select 1 from public.homework h
-      where h.id::text = submissions.homework_id::text
-        and public.teaches_class(h.class_id::text)
-    )
-  );
-grant insert, update on public.submissions to authenticated;
-drop policy if exists submissions_student_insert on public.submissions;
-create policy submissions_student_insert on public.submissions
-  for insert to authenticated
-  with check (
-    student_id::text = public.my_student_id()
-    and exists (
-      select 1 from public.homework h
-      where h.id::text = submissions.homework_id::text
-        and public.enrolled_in_class(h.class_id::text)
-    )
-  );
-drop policy if exists submissions_teacher_update on public.submissions;
-create policy submissions_teacher_update on public.submissions
-  for update to authenticated
-  using (
-    public.get_my_role() = 'admin'
-    or exists (
-      select 1 from public.homework h
-      where h.id::text = submissions.homework_id::text
-        and public.teaches_class(h.class_id::text)
-    )
-  )
-  with check (
-    public.get_my_role() = 'admin'
-    or exists (
-      select 1 from public.homework h
-      where h.id::text = submissions.homework_id::text
-        and public.teaches_class(h.class_id::text)
-    )
-  );
-drop policy if exists materials_scoped_select on public.materials;
-create policy materials_scoped_select on public.materials
-  for select to authenticated
-  using (
-    public.get_my_role() = 'admin'
-    or public.teaches_class(class_id::text)
-    or public.enrolled_in_class(class_id::text)
-    or (
-      target_class_ids is not null
-      and exists (
-        select 1 from unnest(target_class_ids) target_id
-        where public.enrolled_in_class(target_id::text)
-      )
-    )
-  );
+-- ── notifications / app_exam_scores ─────────────────────────────────────────
+grant select on public.notifications, public.app_exam_scores to authenticated;
 drop policy if exists notifications_role_select on public.notifications;
 create policy notifications_role_select on public.notifications
   for select to authenticated
   using (
-    public.get_my_role() = 'admin'
-    or sender_user_id = auth.uid()
+    (select public.get_my_role()) = 'admin'
+    or sender_user_id = (select auth.uid())
     or (
-      (target_role = 'all' or target_role = public.get_my_role())
+      (target_role = 'all' or target_role = (select public.get_my_role()))
       and (
         target_student_id is null
-        or (public.get_my_role() = 'student' and target_student_id = public.my_student_id())
-        or (public.get_my_role() = 'parent' and public.parent_has_student(target_student_id))
+        or ((select public.get_my_role()) = 'student' and target_student_id = (select public.my_student_id()))
+        or ((select public.get_my_role()) = 'parent' and public.parent_has_student(target_student_id))
       )
       and (
         target_class_id is null
-        or (public.get_my_role() = 'teacher' and public.teaches_class(target_class_id))
-        or (public.get_my_role() = 'student' and public.enrolled_in_class(target_class_id))
+        or ((select public.get_my_role()) = 'teacher' and public.teaches_class(target_class_id))
+        or ((select public.get_my_role()) = 'student' and public.enrolled_in_class(target_class_id))
         or (
-          public.get_my_role() = 'parent'
+          (select public.get_my_role()) = 'parent'
           and exists (
             select 1 from public.classes c
             where c.id = notifications.target_class_id
@@ -1622,8 +1480,8 @@ grant select, insert, update, delete on public.notification_reads to authenticat
 drop policy if exists notification_reads_owner on public.notification_reads;
 create policy notification_reads_owner on public.notification_reads
   for all to authenticated
-  using (user_id = auth.uid())
-  with check (user_id = auth.uid());
+  using (user_id = (select auth.uid()))
+  with check (user_id = (select auth.uid()));
 drop policy if exists app_exam_scores_scoped_select on public.app_exam_scores;
 create policy app_exam_scores_scoped_select on public.app_exam_scores
   for select to authenticated
@@ -1682,8 +1540,8 @@ do $$
 declare table_name text;
 begin
   foreach table_name in array array[
-    'kv_schedules', 'kv_online_links', 'kv_tuition',
-    'kv_student_packages', 'kv_session_notes', 'kv_class_extra_students'
+    'kv_tuition', 'kv_student_packages', 'kv_session_notes',
+    'kv_class_extra_students'
   ]
   loop
     execute format('grant select, insert, update, delete on public.%I to authenticated', table_name);
@@ -1709,13 +1567,13 @@ grant select, insert, update, delete on public.kv_teacher_settings to authentica
 drop policy if exists teacher_settings_read on public.kv_teacher_settings;
 create policy teacher_settings_read on public.kv_teacher_settings
   for select to authenticated using (
-    public.get_my_role() = 'admin'
-    or id::text = public.my_teacher_id()
+    (select public.get_my_role()) = 'admin'
+    or kv_teacher_settings.id = (select public.my_teacher_id())
     or exists (
       select 1 from public.classes c
-      where c.tutor_id::text = id::text
+      where c.tutor_id = kv_teacher_settings.id
         and (
-          public.my_student_id() = any (c.student_ids)
+          (select public.my_student_id()) = any (c.student_ids)
           or exists (
             select 1 from unnest(c.student_ids) student_id
             where public.parent_has_student(student_id::text)
@@ -1724,13 +1582,21 @@ create policy teacher_settings_read on public.kv_teacher_settings
     )
   );
 drop policy if exists teacher_settings_owner_write on public.kv_teacher_settings;
-create policy teacher_settings_owner_write on public.kv_teacher_settings
-  for all to authenticated
-  using (public.get_my_role() = 'admin' or id::text = public.my_teacher_id())
-  with check (public.get_my_role() = 'admin' or id::text = public.my_teacher_id());
+drop policy if exists teacher_settings_owner_write_insert on public.kv_teacher_settings;
+drop policy if exists teacher_settings_owner_write_update on public.kv_teacher_settings;
+drop policy if exists teacher_settings_owner_write_delete on public.kv_teacher_settings;
+create policy teacher_settings_owner_write_insert on public.kv_teacher_settings
+  for insert to authenticated
+  with check ((select public.get_my_role()) = 'admin' or id = (select public.my_teacher_id()));
+create policy teacher_settings_owner_write_update on public.kv_teacher_settings
+  for update to authenticated
+  using ((select public.get_my_role()) = 'admin' or id = (select public.my_teacher_id()))
+  with check ((select public.get_my_role()) = 'admin' or id = (select public.my_teacher_id()));
+create policy teacher_settings_owner_write_delete on public.kv_teacher_settings
+  for delete to authenticated
+  using ((select public.get_my_role()) = 'admin' or id = (select public.my_teacher_id()));
 
--- ── KV: remaining global tables (kv_exam_scores, kv_invoices, kv_managed_users,
---        kv_student_accounts) stay default-deny. service_role is the only path.
+-- ── KV: invoices stay default-deny. service_role is the only path. ──────────
 
 -- ── Per-row: course_reviews ──────────────────────────────────────────────────
 grant select, insert, update, delete on public.course_reviews to authenticated;
@@ -1756,15 +1622,30 @@ create policy student_comments_read on public.student_comments
     )
   );
 drop policy if exists student_comments_teacher_write on public.student_comments;
-create policy student_comments_teacher_write on public.student_comments
-  for all to authenticated
+drop policy if exists student_comments_teacher_write_insert on public.student_comments;
+drop policy if exists student_comments_teacher_write_update on public.student_comments;
+drop policy if exists student_comments_teacher_write_delete on public.student_comments;
+create policy student_comments_teacher_write_insert on public.student_comments
+  for insert to authenticated
+  with check (
+    (select public.get_my_role()) = 'admin'
+    or (public.teaches_student(student_id) and author_user_id = (select auth.uid()))
+  );
+create policy student_comments_teacher_write_update on public.student_comments
+  for update to authenticated
   using (
-    public.get_my_role() = 'admin'
-    or (public.teaches_student(student_id) and author_user_id = auth.uid())
+    (select public.get_my_role()) = 'admin'
+    or (public.teaches_student(student_id) and author_user_id = (select auth.uid()))
   )
   with check (
-    public.get_my_role() = 'admin'
-    or (public.teaches_student(student_id) and author_user_id = auth.uid())
+    (select public.get_my_role()) = 'admin'
+    or (public.teaches_student(student_id) and author_user_id = (select auth.uid()))
+  );
+create policy student_comments_teacher_write_delete on public.student_comments
+  for delete to authenticated
+  using (
+    (select public.get_my_role()) = 'admin'
+    or (public.teaches_student(student_id) and author_user_id = (select auth.uid()))
   );
 
 -- ── Per-row: schedule_notifications (+ per-user reads) ───────────────────────
@@ -1786,8 +1667,8 @@ grant select, insert, update, delete on public.schedule_notification_reads to au
 drop policy if exists schedule_reads_owner on public.schedule_notification_reads;
 create policy schedule_reads_owner on public.schedule_notification_reads
   for all to authenticated
-  using (user_id = auth.uid())
-  with check (user_id = auth.uid());
+  using (user_id = (select auth.uid()))
+  with check (user_id = (select auth.uid()));
 
 -- ── Per-row: class_materials ─────────────────────────────────────────────────
 grant select, insert, update, delete on public.class_materials to authenticated;
@@ -1925,6 +1806,90 @@ create policy parent_messages_owner on public.parent_messages
 
 -- ── api_rate_limits: no direct client access (service_role via RPC only) ─────
 revoke all on public.api_rate_limits from anon, authenticated;
+
+-- Convert write policies from FOR ALL to command-specific policies. Every
+-- table below already has a dedicated read policy; retaining SELECT in its
+-- write policy would evaluate two permissive expressions per returned row.
+do $$
+declare
+  target record;
+  source_policy record;
+begin
+  for target in
+    select * from (values
+      ('class_attendance', 'class_attendance_write'),
+      ('class_materials', 'class_materials_teacher_write'),
+      ('class_teacher_overrides', 'class_overrides_admin_write'),
+      ('classes', 'classes_teacher_write'),
+      ('course_reviews', 'course_reviews_owner_write'),
+      ('homework_attachments', 'homework_attachments_teacher_write'),
+      ('kv_class_extra_students', 'kv_class_extra_students_teacher_write'),
+      ('kv_session_notes', 'kv_session_notes_teacher_write'),
+      ('kv_student_packages', 'kv_student_packages_teacher_write'),
+      ('kv_tuition', 'kv_tuition_teacher_write'),
+      ('schedule_notifications', 'schedule_notifications_teacher_write'),
+      ('teacher_extra_classes', 'teacher_extra_classes_write'),
+      ('teacher_homework', 'teacher_homework_write'),
+      ('teacher_materials', 'teacher_materials_write')
+    ) as policies(table_name, policy_name)
+  loop
+    select
+      pg_get_expr(policy.polqual, policy.polrelid) as using_expression,
+      pg_get_expr(policy.polwithcheck, policy.polrelid) as check_expression
+    into source_policy
+    from pg_policy policy
+    join pg_class relation on relation.oid = policy.polrelid
+    join pg_namespace namespace on namespace.oid = relation.relnamespace
+    where namespace.nspname = 'public'
+      and relation.relname = target.table_name
+      and policy.polname = target.policy_name
+      and policy.polcmd = '*';
+
+    if found then
+      execute format('drop policy %I on public.%I', target.policy_name, target.table_name);
+      execute format('drop policy if exists %I on public.%I', target.policy_name || '_insert', target.table_name);
+      execute format('drop policy if exists %I on public.%I', target.policy_name || '_update', target.table_name);
+      execute format('drop policy if exists %I on public.%I', target.policy_name || '_delete', target.table_name);
+      execute format(
+        'create policy %I on public.%I for insert to authenticated with check (%s)',
+        target.policy_name || '_insert', target.table_name, source_policy.check_expression
+      );
+      execute format(
+        'create policy %I on public.%I for update to authenticated using (%s) with check (%s)',
+        target.policy_name || '_update', target.table_name,
+        source_policy.using_expression, source_policy.check_expression
+      );
+      execute format(
+        'create policy %I on public.%I for delete to authenticated using (%s)',
+        target.policy_name || '_delete', target.table_name, source_policy.using_expression
+      );
+    end if;
+  end loop;
+end
+$$;
+
+-- Browser clients are intentionally denied; service_role bypasses RLS for the
+-- server-only API layer.
+do $$
+declare table_name text;
+begin
+  foreach table_name in array array[
+    'api_rate_limits', 'class_leaderboard_settings',
+    'class_question_messages', 'class_questions',
+    'class_registration_requests', 'kv_invoices', 'learning_goals',
+    'purchase_transactions', 'student_badges', 'student_lesson_progress',
+    'student_support_alerts', 'student_topic_mastery', 'student_xp_events',
+    'weekly_parent_reports'
+  ]
+  loop
+    execute format('drop policy if exists service_only_deny on public.%I', table_name);
+    execute format(
+      'create policy service_only_deny on public.%I as restrictive for all to anon, authenticated using (false) with check (false)',
+      table_name
+    );
+  end loop;
+end
+$$;
 
 
 -- ─────────────────────── 10. Storage buckets & policies ─────────────────────

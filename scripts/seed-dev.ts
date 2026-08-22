@@ -241,50 +241,61 @@ async function main() {
 
   // ── 7. Homework ───────────────────────────────────────────────────────────
   console.log("  Creating homework...");
-  const { data: hw } = await supabase.from("homework").insert([
+  const homeworkSeed = [
     {
+      id: "hw_seed_01",
       class_id: cls1.id,
       title: "Bài tập Đạo hàm - Chương 1",
       description: "Tính đạo hàm các hàm số cho trước. Áp dụng quy tắc tích, thương, hàm hợp.",
       due_date: "2025-06-10",
     },
     {
+      id: "hw_seed_02",
       class_id: cls1.id,
       title: "Bài tập Tích phân - Chương 2",
       description: "Tính tích phân xác định, ứng dụng tính diện tích hình phẳng.",
       due_date: "2025-06-20",
     },
     {
+      id: "hw_seed_03",
       class_id: cls1.id,
       title: "Bài kiểm tra giữa kỳ",
       description: "Ôn tập chương 1 và 2. Hình thức thi trắc nghiệm + tự luận.",
       due_date: "2025-07-01",
     },
     {
+      id: "hw_seed_04",
       class_id: cls2.id,
       title: "Hình học không gian - Phần 1",
       description: "Bài tập về mặt phẳng và đường thẳng trong không gian.",
       due_date: "2025-06-15",
     },
     {
+      id: "hw_seed_05",
       class_id: cls3.id,
       title: "Phương trình bậc 2",
       description: "Giải phương trình bậc 2 một ẩn, biện luận theo tham số m.",
       due_date: "2025-06-12",
     },
     {
+      id: "hw_seed_06",
       class_id: cls4.id,
       title: "Đề ôn Olympic - Số học",
       description: "Các bài toán số học chọn lọc từ đề thi Olympic cấp tỉnh.",
       due_date: "2025-06-25",
     },
-  ]).select();
-  const [hw1, hw2, hw3, hw4, hw5, hw6] = hw!;
+  ];
+  await insert("teacher_homework", homeworkSeed.map(homework => ({
+    id: homework.id,
+    class_id: homework.class_id,
+    data: homework,
+  })));
+  const [hw1, hw2, , hw4, hw5, hw6] = homeworkSeed;
   console.log("  ✅  Homework created");
 
   // ── 9. Submissions ────────────────────────────────────────────────────────
   console.log("  Creating submissions...");
-  await insert("submissions", [
+  const submissionSeed = [
     // hw1: Tuấn graded, Phương submitted
     {
       homework_id: hw1.id,
@@ -365,12 +376,34 @@ async function main() {
       feedback: "Hoàn hảo! Tất cả các bài đều đúng và có cách giải sáng tạo.",
       graded_at: "2025-06-23T07:00:00Z",
     },
-  ]);
+  ];
+  const homeworkClasses = new Map(homeworkSeed.map(homework => [homework.id, homework.class_id]));
+  await insert("hw_submissions", submissionSeed.map((submission, index) => {
+    const id = `submission_seed_${String(index + 1).padStart(2, "0")}`;
+    const classId = homeworkClasses.get(submission.homework_id);
+    const data = { id, class_id: classId, ...submission };
+    return {
+      id,
+      homework_id: submission.homework_id,
+      student_id: submission.student_id,
+      class_id: classId,
+      data,
+      submitted_at: submission.submitted_at,
+    };
+  }));
   console.log("  ✅  Submissions created");
 
   // ── 10. Payments ──────────────────────────────────────────────────────────
   console.log("  Creating payments...");
-  await insert("payments", [
+  const paymentSeed: Array<{
+    student_id: string;
+    class_id: string;
+    amount: number;
+    due_date: string;
+    paid_date?: string;
+    payment_status: "paid" | "pending" | "overdue";
+    description: string;
+  }> = [
     {
       student_id: stu1.id, class_id: cls1.id,
       amount: 1800000, due_date: "2025-05-01", paid_date: "2025-04-28",
@@ -416,7 +449,21 @@ async function main() {
       amount: 1500000, due_date: "2025-06-01", paid_date: "2025-06-01",
       payment_status: "paid", description: "Học phí tháng 6 - Hình Học 11",
     },
-  ]);
+  ];
+  await insert("kv_invoices", [{
+    id: "global",
+    value: paymentSeed.map((payment, index) => ({
+      id: `invoice_seed_${String(index + 1).padStart(2, "0")}`,
+      child_id: payment.student_id,
+      class_id: payment.class_id,
+      title: payment.description,
+      amount: payment.amount,
+      due_date: payment.due_date,
+      status: payment.payment_status === "paid" ? "paid" : "pending",
+      paid_at: payment.paid_date,
+      period: payment.due_date.slice(0, 7),
+    })),
+  }]);
   console.log("  ✅  Payments created");
 
   // ── 11. Attendance ────────────────────────────────────────────────────────
@@ -428,7 +475,18 @@ async function main() {
     attendanceRows.push({ class_id: cls1.id, student_id: stu2.id, attendance_date: date, status: date === "2025-06-02" ? "absent" : "present" });
     attendanceRows.push({ class_id: cls1.id, student_id: stu4.id, attendance_date: date, status: date === "2025-06-09" ? "late" : "present" });
   }
-  await insert("attendance", attendanceRows);
+  await insert("class_attendance", attendanceRows.map(row => ({
+    class_id: row.class_id,
+    student_id: row.student_id,
+    attendance_date: row.attendance_date,
+    data: {
+      class_id: row.class_id,
+      student_id: row.student_id,
+      date: row.attendance_date,
+      status: row.status,
+      saved_at: new Date().toISOString(),
+    },
+  })));
   console.log("  ✅  Attendance created");
 
   // ── 12. Notifications ─────────────────────────────────────────────────────
@@ -476,7 +534,7 @@ async function main() {
 
   // ── 13. Exam scores ───────────────────────────────────────────────────────
   console.log("  Creating exam scores...");
-  await insert("exam_scores", [
+  const examScoreSeed = [
     { student_id: stu1.id, class_id: cls1.id, exam_name: "Kiểm tra 15 phút - Đạo hàm",  score: 9.0,  max_score: 10, exam_date: "2025-05-15" },
     { student_id: stu1.id, class_id: cls1.id, exam_name: "Kiểm tra 1 tiết - Chương 1",   score: 8.25, max_score: 10, exam_date: "2025-05-30" },
     { student_id: stu1.id, class_id: cls2.id, exam_name: "Kiểm tra Hình học không gian",  score: 7.5,  max_score: 10, exam_date: "2025-06-05" },
@@ -485,7 +543,16 @@ async function main() {
     { student_id: stu3.id, class_id: cls4.id, exam_name: "Đề ôn Olympic số 1",            score: 9.5,  max_score: 10, exam_date: "2025-06-07" },
     { student_id: stu4.id, class_id: cls1.id, exam_name: "Kiểm tra 15 phút - Đạo hàm",  score: 8.0,  max_score: 10, exam_date: "2025-05-15" },
     { student_id: stu5.id, class_id: cls2.id, exam_name: "Kiểm tra Hình học không gian",  score: 6.5,  max_score: 10, exam_date: "2025-06-05" },
-  ]);
+  ];
+  await insert("app_exam_scores", examScoreSeed.map((score, index) => ({
+    id: `score_seed_${String(index + 1).padStart(2, "0")}`,
+    student_ref: score.student_id,
+    class_id: score.class_id,
+    exam_name: score.exam_name,
+    score: score.score,
+    max_score: score.max_score,
+    exam_date: score.exam_date,
+  })));
   console.log("  ✅  Exam scores created");
 
   // ── Done ──────────────────────────────────────────────────────────────────
