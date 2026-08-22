@@ -11,7 +11,6 @@ import {
   type CurriculumChapter, type CurriculumSession, type CurriculumLesson, type StoredExamResult,
 } from "@/lib/storage";
 import { getTeacherSubmissionSnapshot } from "@/lib/teacher-submissions";
-import { useWindowFocusRevision } from "@/hooks/useWindowFocusRevision";
 import type { SubmissionRecord } from "@/lib/supabase/submissions";
 import { uploadClassFile } from "@/lib/upload";
 import ExamEditorModal from "@/components/teacher/ExamEditorModal";
@@ -544,7 +543,6 @@ function InlineEdit({ value, onSave, placeholder }: { value: string; onSave: (v:
 // ── Main component ────────────────────────────────────────────────────────────
 export default function CurriculumTab({ classId, schedule, students = [], gradeLessonId, onGradingOpened, initialTypeFilter = "all" }: { classId: string; schedule: ClassSchedule[]; students?: StudentLite[]; gradeLessonId?: string | null; onGradingOpened?: () => void; initialTypeFilter?: CurriculumContentFilter }) {
   const router = useRouter();
-  const submissionRefreshRevision = useWindowFocusRevision();
   const slots = generateSlots(schedule);
   const [chapters,     setChapters]     = useState<CurriculumChapter[]>([]);
   const [expanded,     setExpanded]     = useState<Set<string>>(new Set());
@@ -650,7 +648,7 @@ export default function CurriculumTab({ classId, schedule, students = [], gradeL
       }
     })();
     return () => { cancelled = true; };
-  }, [chapters, classId, submissionRefreshRevision]);
+  }, [chapters, classId]);
 
   // Mở / đóng trình chấm — đồng bộ URL (?grade=) để reload vẫn ở trang chấm.
   function openGrading(lessonId: string, lessonTitle: string) {

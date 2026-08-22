@@ -75,7 +75,7 @@ export async function insertSubmission(
   invalidateClientQueries(
     "submission-records:",
     "homework-submissions:",
-    "teacher-submission-snapshot:",
+    "teacher-submission-snapshots:",
     "sidebar-badges:",
   );
   return data.data as SubmissionRecord;
@@ -144,7 +144,7 @@ export async function updateGrade(
   if (!error) invalidateClientQueries(
     "submission-records:",
     "homework-submissions:",
-    "teacher-submission-snapshot:",
+    "teacher-submission-snapshots:",
   );
   return !error;
 }

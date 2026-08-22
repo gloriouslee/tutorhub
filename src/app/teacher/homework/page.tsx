@@ -16,12 +16,12 @@ import {
   getTeacherHomework, removeTeacherHomework, upsertTeacherHomework,
 } from "@/lib/storage";
 import { getSubmissionsByHomeworks } from "@/lib/supabase/submissions";
-import { getTeacherSubmissionSnapshot } from "@/lib/teacher-submissions";
-import { useWindowFocusRevision } from "@/hooks/useWindowFocusRevision";
+import { getTeacherSubmissionSnapshots } from "@/lib/teacher-submissions";
+import { invalidateClientQueries } from "@/lib/client-query-cache";
 import { toLocalDateKey } from "@/lib/utils";
 import {
   ArrowRight, BookOpen, Calendar, ChevronDown, ChevronRight, Download,
-  Edit2, FileText, PenSquare, Plus, Trash2, X,
+  Edit2, FileText, PenSquare, Plus, RefreshCw, Trash2, X,
 } from "lucide-react";
 
 interface Assignment {
@@ -67,16 +67,18 @@ const EXAM_BADGE = {
 export default function TeacherHomeworkPage() {
   const router = useRouter();
   const { teacherId, teacherName, myClasses, ready } = useTeacherContext();
-  const submissionRefreshRevision = useWindowFocusRevision();
 
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [submissions, setSubmissions] = useState<GradableSubmission[]>([]);
   const [loadingHomework, setLoadingHomework] = useState(true);
+  const [refreshingHomework, setRefreshingHomework] = useState(false);
+  const [reloadVersion, setReloadVersion] = useState(0);
   const [tab, setTab] = useState<Tab>("todo");
   const [classFilter, setClassFilter] = useState("all");
   const [expanded, setExpanded] = useState<string | null>(null);
   const [studentOptions, setStudentOptions] = useState<{ id: string; full_name: string }[]>([]);
   const deepLinkHandled = useRef(false);
+  const hasLoadedRef = useRef(false);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<Assignment | null>(null);
@@ -90,11 +92,15 @@ export default function TeacherHomeworkPage() {
 
   useEffect(() => {
     if (!ready || !teacherId) {
-      if (ready) setLoadingHomework(false);
+      if (ready) {
+        setLoadingHomework(false);
+        hasLoadedRef.current = true;
+      }
       return;
     }
     let cancelled = false;
-    setLoadingHomework(true);
+    if (hasLoadedRef.current) setRefreshingHomework(true);
+    else setLoadingHomework(true);
 
     (async () => {
       const classIds = myClasses.map((cls) => cls.id);
@@ -163,10 +169,12 @@ export default function TeacherHomeworkPage() {
         }));
 
       // Nguồn server-scoped dùng chung cho bài thi và file; fallback giữ tương thích dữ liệu cũ.
-      const snapshots = await Promise.all(myClasses.map(async (cls) => ({
+      const snapshotsByClass = await getTeacherSubmissionSnapshots(classIds)
+        .catch(() => ({} as Awaited<ReturnType<typeof getTeacherSubmissionSnapshots>>));
+      const snapshots = myClasses.map((cls) => ({
         classId: cls.id,
-        snapshot: await getTeacherSubmissionSnapshot(cls.id).catch(() => null),
-      })));
+        snapshot: snapshotsByClass[cls.id] ?? null,
+      }));
       const snapshotFiles = snapshots.flatMap(({ snapshot }) => snapshot?.fileSubmissions ?? []);
       const remote = snapshotFiles.length > 0
         ? snapshotFiles as GradableSubmission[]
@@ -190,10 +198,16 @@ export default function TeacherHomeworkPage() {
       setSubmissions(loaded);
       setStudentOptions(students.map((student) => ({ id: student.id, full_name: student.full_name })));
       setForm((current) => ({ ...current, classId: current.classId || classIds[0] || "" }));
-    })().finally(() => { if (!cancelled) setLoadingHomework(false); });
+    })().finally(() => {
+      if (!cancelled) {
+        hasLoadedRef.current = true;
+        setLoadingHomework(false);
+        setRefreshingHomework(false);
+      }
+    });
 
     return () => { cancelled = true; };
-  }, [ready, teacherId, myClasses, submissionRefreshRevision]);
+  }, [ready, teacherId, myClasses, reloadVersion]);
 
   useEffect(() => {
     if (deepLinkHandled.current || myClasses.length === 0) return;
@@ -247,6 +261,18 @@ export default function TeacherHomeworkPage() {
     setForm({ title: "", classId: myClasses[0]?.id ?? "", due: "", description: "", studentId: "" });
     setFormError("");
     setModalOpen(true);
+  }
+
+  function refreshHomework() {
+    invalidateClientQueries(
+      "teacher-submission-snapshots:",
+      "teacher-curricula:",
+      "teacher-homework:",
+      "homework-submissions:",
+      "submission-records:",
+      "entity:students",
+    );
+    setReloadVersion((current) => current + 1);
   }
 
   function openEdit(row: Assignment) {
@@ -323,9 +349,20 @@ export default function TeacherHomeworkPage() {
               : `Không còn bài nào chờ chấm · ${liveExams} bài thi đang mở`
           }
           action={
-            <Button size="sm" variant="gradient" onClick={openCreate}>
-              <Plus className="mr-1.5 h-4 w-4" /> Giao bài mới
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={refreshHomework}
+                disabled={refreshingHomework}
+              >
+                <RefreshCw className={`mr-1.5 h-4 w-4 ${refreshingHomework ? "animate-spin" : ""}`} />
+                {refreshingHomework ? "Đang tải" : "Tải lại"}
+              </Button>
+              <Button size="sm" variant="gradient" onClick={openCreate}>
+                <Plus className="mr-1.5 h-4 w-4" /> Giao bài mới
+              </Button>
+            </div>
           }
         />
 

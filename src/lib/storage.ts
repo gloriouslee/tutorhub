@@ -121,13 +121,13 @@ function invalidateKvRelated(table: string) {
       "teacher-curricula:",
       "student-curriculum:",
       "student-learning-snapshot:",
-      "teacher-submission-snapshot:",
+      "teacher-submission-snapshots:",
     );
   }
   if (table === "kv_exam_results" || table === "kv_exam_submissions") {
     invalidateClientQueries(
       "student-learning-snapshot:",
-      "teacher-submission-snapshot:",
+      "teacher-submission-snapshots:",
     );
   }
 }

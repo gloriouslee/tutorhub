@@ -20,7 +20,6 @@ import {
   getAllTeacherAttendance,
 } from "@/lib/storage";
 import { emptyTeacherSubmissionSnapshot, getTeacherSubmissionSnapshot } from "@/lib/teacher-submissions";
-import { useWindowFocusRevision } from "@/hooks/useWindowFocusRevision";
 import { toLocalDateKey } from "@/lib/utils";
 import { ClassSchedule, type Student } from "@/types";
 import { useTeacherContext } from "@/hooks/useTeacherContext";
@@ -115,7 +114,6 @@ export default function TeacherClassDetailPage() {
   const classId = params.classId as string;
   const router = useRouter();
   const { teacherName, myClasses, ready } = useTeacherContext();
-  const submissionRefreshRevision = useWindowFocusRevision();
 
   // Tab hiện tại đồng bộ với URL (?tab=) để nút back của trình duyệt khôi phục đúng tab.
   // Đọc từ URL khi mount + khi back/forward (popstate); mặc định "overview" để khớp SSR.
@@ -378,7 +376,7 @@ export default function TeacherClassDetailPage() {
     })()
       .catch(() => undefined)
       .finally(() => setCurriculumHomeworkLoaded(true));
-  }, [classId, activeTab, submissionRefreshRevision]);
+  }, [classId, activeTab]);
 
   // Load persisted homework and submissions.
   useEffect(() => {
@@ -400,7 +398,7 @@ export default function TeacherClassDetailPage() {
         setSubmissions(snapshot.fileSubmissions);
       })
       .finally(() => setPersistedHomeworkLoaded(true));
-  }, [classId, cls, submissionRefreshRevision]);
+  }, [classId, cls]);
 
   // Load attendance from localStorage
   useEffect(() => {

@@ -937,6 +937,8 @@ test("teacher profile, schedule and submissions use canonical stores", async () 
   const submissionStore = await read("src/lib/supabase/submissions.ts");
   const settingsPage = await read("src/app/teacher/settings/page.tsx");
   const snapshotRoute = await read("src/app/api/teacher/classes/[classId]/submissions/route.ts");
+  const snapshotBatchRoute = await read("src/app/api/teacher/submissions/route.ts");
+  const snapshotServer = await read("src/lib/teacher-submissions-server.ts");
   const classDetail = await read("src/app/teacher/classes/[classId]/page.tsx");
   const curriculumTab = await read("src/components/teacher/CurriculumTab.tsx");
   const homeworkPage = await read("src/app/teacher/homework/page.tsx");
@@ -953,14 +955,17 @@ test("teacher profile, schedule and submissions use canonical stores", async () 
   assert.doesNotMatch(submissionStore, /\.from\("submissions"\)/);
   assert.match(snapshotRoute, /identity\.role !== "teacher"/);
   assert.match(snapshotRoute, /classScope\.tutor_id !== identity\.teacherId/);
-  assert.match(snapshotRoute, /\.from\("kv_exam_results"\)/);
-  assert.match(snapshotRoute, /\.from\("hw_submissions"\)/);
-  assert.match(snapshotRoute, /lessonByRegistryId/);
-  assert.doesNotMatch(snapshotRoute, /examIds\.flatMap[\s\S]{0,180}candidateStudentIds/);
+  assert.match(snapshotBatchRoute, /scopes\.some\(\(scope\) => scope\.tutor_id !== identity\.teacherId\)/);
+  assert.match(snapshotServer, /\.from\("kv_exam_results"\)/);
+  assert.match(snapshotServer, /\.from\("hw_submissions"\)/);
+  assert.match(snapshotServer, /resultOwnerById/);
+  assert.doesNotMatch(snapshotServer, /examIds\.flatMap[\s\S]{0,180}candidateStudentIds/);
   assert.match(classDetail, /getTeacherSubmissionSnapshot/);
   assert.match(curriculumTab, /getTeacherSubmissionSnapshot/);
-  assert.match(homeworkPage, /getTeacherSubmissionSnapshot/);
-  assert.match(classDetail, /useWindowFocusRevision/);
+  assert.match(homeworkPage, /getTeacherSubmissionSnapshots/);
+  assert.doesNotMatch(classDetail, /useWindowFocusRevision/);
+  assert.doesNotMatch(curriculumTab, /useWindowFocusRevision/);
+  assert.doesNotMatch(homeworkPage, /useWindowFocusRevision/);
 });
 
 test("student portal keeps paid material, submissions and progress server-scoped", async () => {
@@ -1199,6 +1204,9 @@ test("homework navigation and data loading always provide immediate feedback", a
   // Ba nguồn độc lập tải song song; toàn bộ curriculum được batch theo lớp.
   assert.match(teacherHomework, /const \[manual, curriculaByClass, students\] = await Promise\.all/);
   assert.match(teacherHomework, /getCurricula\(classIds\)/);
+  assert.match(teacherHomework, /getTeacherSubmissionSnapshots\(classIds\)/);
+  assert.match(teacherHomework, /refreshHomework/);
+  assert.match(teacherHomework, /"Tải lại"/);
   // Chấm ngay trong hàng đợi, không điều hướng sang trang khác.
   assert.match(teacherHomework, /<SubmissionGrader/);
 
