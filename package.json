@@ -6,7 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test tests/security/production-hardening.test.ts",
+    "test": "tsx --test tests/security/production-hardening.test.ts tests/student-task-snapshot.test.ts",
     "test:integration": "tsx --test tests/security/live-rls.integration.test.ts",
     "deploy:check": "tsx scripts/assert-deploy-ready.ts",
     "start": "next start",

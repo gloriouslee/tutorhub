@@ -4,18 +4,16 @@ import { useState, useEffect } from "react";
 import {
   BookOpen, CheckSquare,
   Bell, ArrowRight, FileText,
-  PlayCircle, Trophy, Target, Sparkles, AlertCircle,
+  PlayCircle, Trophy, Target, Sparkles, AlertCircle, RotateCcw,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
-  getNotifications, getNotificationStates, getTeacherHomework, getExamScoresByStudent,
+  getNotifications, getNotificationStates, getExamScoresByStudent,
   getStudentLearningSnapshot, getAllTeacherAttendance,
-  isAssignedToStudent,
   type StudentLearningSnapshot, type TeacherAttendanceRecord,
 } from "@/lib/storage";
-import { getSubmissionsByStudent } from "@/lib/supabase/submissions";
 import Link from "next/link";
 import { formatDate } from "@/lib/utils";
 import { useStudentContext } from "@/hooks/useStudentContext";
@@ -24,17 +22,10 @@ import { useRouter } from "next/navigation";
 import { AreaChart, Area, Tooltip, ResponsiveContainer } from "recharts";
 import StudentGrowthPanel from "@/components/student/StudentGrowthPanel";
 import { isAttendedStatus } from "@/lib/attendance";
-
-interface HomeworkItem {
-  id: string;
-  class_id: string;
-  title: string;
-  description?: string;
-  due_date: string;
-  created_at?: string;
-  assigned_to?: string[] | null;
-  exam_done?: boolean;
-}
+import {
+  loadStudentTaskSnapshot,
+  type StudentTaskSnapshot,
+} from "@/lib/student-task-snapshot";
 
 function buildAttendanceChart(records: TeacherAttendanceRecord[]) {
   const now = new Date();
@@ -61,8 +52,9 @@ export default function StudentDashboard() {
   const [avgScore,       setAvgScore]       = useState<string | null>(null);
   const [attendanceRate, setAttendanceRate] = useState<number | null>(null);
   const [unreadCount,    setUnreadCount]    = useState(0);
-  const [submittedCount, setSubmittedCount] = useState(0);
-  const [teacherHw,      setTeacherHw]      = useState<HomeworkItem[]>([]);
+  const [tasks, setTasks] = useState<StudentTaskSnapshot | null>(null);
+  const [taskLoading, setTaskLoading] = useState(true);
+  const [taskLoadError, setTaskLoadError] = useState(false);
   const [attendanceChartData, setAttendanceChartData] = useState<
     { month: string; present: number }[]
   >([]);
@@ -159,61 +151,15 @@ export default function StudentDashboard() {
       ).length);
     });
 
-    // Submissions + teacher-created homework (kv wins on id collision)
-    (async () => {
-      const classIds = myClasses.map(c => c.id);
-      const [subs, allTeacherHw, curricula, { exams, results }] = await Promise.all([
-        getSubmissionsByStudent(studentId),
-        getTeacherHomework<HomeworkItem>(classIds).catch(() => [] as HomeworkItem[]),
-        curriculaPromise,
-        examResultsPromise,
-      ]);
-      const examResultByKey = new Map(
-        exams.map((exam, index) => [
-          `${exam.classId}:${exam.lesson.id}`,
-          results[index],
-        ] as const),
-      );
-      const teacher = allTeacherHw.filter(h => classIds.includes(h.class_id) && isAssignedToStudent(h.assigned_to, studentId));
-      // Bài tập / bài thi từ lộ trình (curriculum) — giống trang /student/homework.
-      const today = new Date().toISOString().slice(0, 10);
-      const currItems: HomeworkItem[] = [];
-      for (const { classId, chapters } of curricula) {
-        for (const ch of chapters) {
-          for (const s of ch.sessions) {
-            for (const lesson of s.lessons) {
-              if (lesson.type === "homework") {
-                currItems.push({
-                  id: lesson.id,
-                  class_id: classId,
-                  title: lesson.title,
-                  due_date: (lesson as any).due_date ?? s.date ?? today,
-                  created_at: s.date,
-                });
-              } else if (lesson.type === "exam") {
-                const result = examResultByKey.get(`${classId}:${lesson.id}`);
-                currItems.push({
-                  id: lesson.id,
-                  class_id: classId,
-                  title: lesson.title,
-                  due_date: (lesson as any).exam_opens_at?.slice(0, 10) ?? s.date ?? today,
-                  created_at: s.date,
-                  exam_done: !!result,
-                });
-              }
-            }
-          }
-        }
-      }
-      const merged = [...teacher];
-      const mergedIds = new Set(teacher.map(h => h.id));
-      for (const it of currItems) if (!mergedIds.has(it.id)) { merged.push(it); mergedIds.add(it.id); }
-      setTeacherHw(merged);
-      const doneExamIds = new Set(currItems.filter(i => i.exam_done).map(i => i.id));
-      setSubmittedCount(
-        merged.filter(h => subs.some(s => s.homework_id === h.id) || doneExamIds.has(h.id)).length
-      );
-    })();
+    setTaskLoadError(false);
+    setTaskLoading(true);
+    loadStudentTaskSnapshot(studentId, myClasses.map((item) => item.id))
+      .then(setTasks)
+      .catch(() => {
+        setTasks(null);
+        setTaskLoadError(true);
+      })
+      .finally(() => setTaskLoading(false));
   }, [ready, studentId, myClasses]);
 
   const now             = new Date();
@@ -221,43 +167,49 @@ export default function StudentDashboard() {
   const greetingHour    = now.getHours();
   const greeting        = greetingHour < 12 ? "Chào buổi sáng" : greetingHour < 18 ? "Chào buổi chiều" : "Chào buổi tối";
 
-  const myHomework: HomeworkItem[] = teacherHw;
-  const pendingHomework   = myHomework.filter(h => new Date(h.due_date) >= now);
-  const homeworkTotal     = myHomework.length;
-  const completionPct     = homeworkTotal > 0 ? Math.round((submittedCount / homeworkTotal) * 100) : 0;
+  const pendingHomework = tasks?.actionable ?? [];
+  const completionPct = tasks?.completionPercent ?? 0;
+  const nextTask = tasks?.nextTask ?? null;
 
   return (
     <div className="space-y-8 pb-10">
 
       {/* ── Hero banner ─────────────────────────────────── */}
-      <div className="relative overflow-hidden rounded-3xl p-8 sm:p-10 text-white shadow-2xl shadow-indigo-500/20 animate-fade-in group">
+      <div className="relative overflow-hidden rounded-3xl p-6 sm:p-8 text-white shadow-xl shadow-indigo-500/15 animate-fade-in group">
         <div className="absolute inset-0 bg-gradient-to-br from-indigo-600 via-purple-600 to-indigo-900 transition-transform duration-700 group-hover:scale-105" />
         <div className="absolute -top-24 -right-24 h-96 w-96 rounded-full bg-gradient-to-br from-white/20 to-transparent blur-3xl" />
         <div className="absolute -bottom-24 -left-24 h-80 w-80 rounded-full bg-gradient-to-tr from-fuchsia-500/30 to-transparent blur-3xl" />
         <div className="absolute top-1/2 right-1/4 h-64 w-64 rounded-full bg-gradient-to-tr from-cyan-500/20 to-transparent blur-3xl animate-pulse" />
 
         <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div className="space-y-4 max-w-xl">
+          <div className="space-y-3 max-w-2xl">
             <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/10 backdrop-blur-md border border-white/20 text-xs font-medium text-white/90">
               <Sparkles className="h-3.5 w-3.5 text-amber-300" /> TutorHub Học viên
             </div>
-            <h1 className="text-4xl md:text-5xl font-black tracking-tight leading-tight text-transparent bg-clip-text bg-gradient-to-r from-white via-indigo-100 to-white">
-              {greeting}, <br />{studentName}! 👋
+            <h1 className="text-2xl md:text-3xl font-black tracking-tight leading-tight text-transparent bg-clip-text bg-gradient-to-r from-white via-indigo-100 to-white">
+              {greeting}, {studentName}! 👋
             </h1>
-            <p className="text-white/80 text-base md:text-lg font-medium max-w-md leading-relaxed">
+            <p className="text-white/80 text-sm md:text-base font-medium max-w-xl leading-relaxed">
               {myClasses.length === 0
                 ? <>Chào mừng đến với TutorHub! Tài khoản của bạn đang được cấu hình lớp học.</>
-                : pendingHomework.length > 0
-                  ? <>Bạn có <strong className="text-white">{pendingHomework.length} bài tập</strong> đang chờ và <strong className="text-white">{myClasses.length} lớp học</strong> đang theo học.</>
+                : taskLoading
+                  ? <>Đang xác định việc học nên ưu tiên tiếp theo…</>
+                : nextTask
+                  ? <>Ưu tiên tiếp theo: <strong className="text-white">{nextTask.title}</strong> · hạn {formatDate(nextTask.due_date)}.</>
                   : <>Tuyệt vời! Bạn đã hoàn thành tất cả bài tập. Tiếp tục duy trì phong độ nhé!</>
               }
             </p>
             <div className="flex flex-wrap items-center gap-3 pt-2">
-              <Link href="/student/classes">
-                <Button size="lg" className="bg-white text-indigo-600 hover:bg-indigo-50 border-0 font-bold px-8 shadow-[0_0_20px_rgba(255,255,255,0.3)] transition-all hover:shadow-[0_0_30px_rgba(255,255,255,0.5)] hover:-translate-y-0.5">
-                  <PlayCircle className="h-5 w-5 mr-2" /> Bắt đầu học
+              {taskLoading ? (
+                <Button size="lg" disabled className="bg-white/80 text-indigo-500 border-0 font-bold px-6">
+                  Đang tải việc tiếp theo…
                 </Button>
-              </Link>
+              ) : <Link href={nextTask?.href ?? "/student/classes"}>
+                <Button size="lg" className="bg-white text-indigo-600 hover:bg-indigo-50 border-0 font-bold px-6 shadow-[0_0_20px_rgba(255,255,255,0.3)] transition-all hover:shadow-[0_0_30px_rgba(255,255,255,0.5)] hover:-translate-y-0.5">
+                  {nextTask?.state === "returned" ? <RotateCcw className="h-5 w-5 mr-2" /> : <PlayCircle className="h-5 w-5 mr-2" />}
+                  {nextTask?.state === "returned" ? "Nộp lại bài" : nextTask ? "Làm bài ngay" : "Vào lớp học"}
+                </Button>
+              </Link>}
               <Link href="#lich-hoc">
                 <Button size="lg" className="bg-white/10 hover:bg-white/20 text-white border border-white/20 backdrop-blur-md transition-all hover:-translate-y-0.5">
                   Xem thời khóa biểu
@@ -277,7 +229,7 @@ export default function StudentDashboard() {
             <div className="p-4 rounded-2xl bg-white/10 backdrop-blur-md border border-white/20 text-center min-w-[120px]">
               <Target className="h-8 w-8 mx-auto mb-2 text-emerald-300" />
               <p className="text-3xl font-bold text-white">
-                {completionPct}<span className="text-sm font-medium text-white/60">%</span>
+                {tasks ? completionPct : "—"}{tasks && <span className="text-sm font-medium text-white/60">%</span>}
               </p>
               <p className="text-xs text-white/80 mt-1 uppercase tracking-wider">Hoàn thành</p>
             </div>
@@ -286,23 +238,30 @@ export default function StudentDashboard() {
       </div>
 
       {/* ── Stat cards ──────────────────────────────────── */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-5">
+      {taskLoadError && (
+        <div role="alert" className="flex items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300">
+          <span>Chưa tải được trạng thái bài tập. Các số liệu khác vẫn có thể sử dụng.</span>
+          <Button variant="outline" size="sm" onClick={() => window.location.reload()}>Thử lại</Button>
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {[
           { title: "Lớp đang học",   value: myClasses.length,      icon: BookOpen,    color: "from-blue-500 to-indigo-500",   shadow: "shadow-blue-500/20" },
           { title: "Chuyên cần",     value: attendanceRate != null ? `${attendanceRate}%` : "—",  icon: CheckSquare, color: "from-emerald-400 to-teal-500",  shadow: "shadow-emerald-500/20" },
-          { title: "Bài tập chờ",   value: pendingHomework.length, icon: FileText,    color: "from-amber-400 to-orange-500",  shadow: "shadow-orange-500/20" },
+          { title: "Bài tập chờ",   value: taskLoading ? "—" : pendingHomework.length, icon: FileText,    color: "from-amber-400 to-orange-500",  shadow: "shadow-orange-500/20" },
           { title: "Thông báo mới", value: unreadCount,            icon: Bell,        color: "from-fuchsia-500 to-purple-500",shadow: "shadow-fuchsia-500/20" },
         ].map((stat, i) => (
           <Card key={i} className="border-0 shadow-lg hover:shadow-xl hover:-translate-y-1 transition-all duration-300 overflow-hidden group animate-fade-in" style={{ animationDelay: `${i * 100}ms` }}>
             <CardContent className="p-0 relative h-full">
-              <div className="p-6 relative z-10 flex flex-col h-full justify-between">
-                <div className="flex justify-between items-start mb-4">
-                  <p className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">{stat.title}</p>
+              <div className="p-4 sm:p-5 relative z-10 flex flex-col h-full justify-between">
+                <div className="flex justify-between items-start mb-3">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">{stat.title}</p>
                   <div className={`p-2.5 rounded-xl bg-gradient-to-br ${stat.color} ${stat.shadow} shadow-lg text-white group-hover:scale-110 transition-transform`}>
                     <stat.icon className="h-5 w-5" />
                   </div>
                 </div>
-                <h3 className="text-4xl font-black text-foreground tracking-tight">{stat.value}</h3>
+                <h3 className="text-3xl font-black text-foreground tracking-tight">{stat.value}</h3>
               </div>
               <div className={`absolute -bottom-10 -right-10 h-32 w-32 rounded-full bg-gradient-to-br ${stat.color} opacity-10 blur-2xl group-hover:opacity-20 transition-opacity`} />
             </CardContent>
@@ -311,8 +270,6 @@ export default function StudentDashboard() {
       </div>
 
       {/* ── Lịch học ─────────────────────────────────────── */}
-      <StudentGrowthPanel />
-
       <section id="lich-hoc" className="space-y-4 animate-fade-in delay-200">
         <div>
           <h2 className="text-2xl font-bold text-foreground">Lịch học</h2>
@@ -350,19 +307,19 @@ export default function StudentDashboard() {
                 <CardContent className="p-5 space-y-3">
                   {pendingHomework.slice(0, 3).map((hw) => {
                     const days = Math.ceil((new Date(hw.due_date).getTime() - Date.now()) / 86400000);
-                    const urgent = days <= 2;
+                    const urgent = hw.state === "overdue" || hw.state === "returned" || days <= 2;
                     return (
-                      <div key={hw.id} className="flex items-start gap-3 p-3 bg-white dark:bg-card rounded-xl shadow-sm border border-border/50 hover:border-amber-500/30 transition-colors">
+                      <Link key={hw.key} href={hw.href} className="flex items-start gap-3 p-3 bg-white dark:bg-card rounded-xl shadow-sm border border-border/50 hover:border-amber-500/30 transition-colors">
                         <div className={`h-9 w-9 rounded-lg flex items-center justify-center shrink-0 ${urgent ? "bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400" : "bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400"}`}>
                           {urgent ? <AlertCircle className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-bold text-foreground truncate">{hw.title}</p>
                           <p className={`text-[11px] font-semibold mt-0.5 ${urgent ? "text-red-600 dark:text-red-400" : "text-muted-foreground"}`}>
-                            {days <= 0 ? "Hết hạn hôm nay!" : days === 1 ? "Còn 1 ngày" : `Còn ${days} ngày · ${formatDate(hw.due_date)}`}
+                            {hw.state === "returned" ? "Giáo viên yêu cầu làm lại" : hw.state === "overdue" ? `Đã quá hạn · ${formatDate(hw.due_date)}` : days <= 0 ? "Hết hạn hôm nay!" : days === 1 ? "Còn 1 ngày" : `Còn ${days} ngày · ${formatDate(hw.due_date)}`}
                           </p>
                         </div>
-                      </div>
+                      </Link>
                     );
                   })}
                   <Link href="/student/homework" className="w-full block">
@@ -415,6 +372,8 @@ export default function StudentDashboard() {
             </Card>
           </div>
       </div>
+
+      <StudentGrowthPanel />
     </div>
   );
 }

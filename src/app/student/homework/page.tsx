@@ -21,10 +21,15 @@ import { formatDate } from "@/lib/utils";
 import {
   uploadSubmissionFile,
   insertSubmission,
-  getSubmissionsByStudent,
   type SubmissionRecord,
 } from "@/lib/supabase/submissions";
-import { getTeacherHomework, getStudentLearningSnapshot, isAssignedToStudent, type StudentLearningSnapshot } from "@/lib/storage";
+import {
+  findStudentTaskSubmission,
+  loadStudentTaskSnapshot,
+  resolveStudentTaskState,
+  studentTaskKey,
+  type StudentTaskAssignment,
+} from "@/lib/student-task-snapshot";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const ACCEPTED = ".pdf,.doc,.docx,.jpg,.jpeg,.png";
@@ -47,24 +52,7 @@ const STATE_PRIORITY: Record<FilterTab, number> = {
   all: 4,
 };
 
-interface HomeworkItem {
-  id: string;
-  class_id: string;
-  title: string;
-  description?: string;
-  due_date: string;
-  created_at?: string;
-  assigned_to?: string[] | null;
-  file_url?: string; // file đề bài giáo viên đính kèm (link hoặc upload)
-  kind?: "file" | "exam"; // "exam" = làm câu hỏi trên hệ thống
-  exam_done?: boolean;    // đã làm bài thi chưa (kind exam)
-  exam_score?: number;    // điểm đạt (kind exam)
-  exam_total?: number;    // điểm tối đa (kind exam)
-}
-
-function assignmentKey(homework: Pick<HomeworkItem, "class_id" | "id">) {
-  return `${homework.class_id}:${homework.id}`;
-}
+type HomeworkItem = StudentTaskAssignment;
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function StudentHomeworkPage() {
@@ -113,82 +101,14 @@ export default function StudentHomeworkPage() {
     }
 
     let cancelled = false;
-    let partialFailure = false;
     setLoadingHomework(true);
     setLoadWarning("");
 
-    async function safely<T>(work: Promise<T>, fallback: T) {
-      try {
-        return await work;
-      } catch {
-        partialFailure = true;
-        return fallback;
-      }
-    }
-
-    const learningSnapshotPromise = safely(
-      getStudentLearningSnapshot(myClassIds),
-      { curricula: {}, examResults: {} } as StudentLearningSnapshot,
-    );
-    const curriculumPromise = learningSnapshotPromise.then((snapshot) => Promise.all(myClassIds.map(async cid => {
-      const chapters = snapshot.curricula[cid] ?? [];
-      const items: HomeworkItem[] = [];
-      const examItems: HomeworkItem[] = [];
-      const today = new Date().toISOString().slice(0, 10);
-
-      for (const ch of chapters) {
-        for (const s of ch.sessions) {
-          for (const lesson of s.lessons) {
-            if (lesson.type === "homework") {
-              items.push({
-                id: lesson.id, class_id: cid, title: lesson.title,
-                description: (lesson as any).description,
-                due_date: (lesson as any).due_date ?? s.date ?? today,
-                created_at: s.date, kind: "file",
-                file_url: (lesson as any).file_url,
-              });
-            } else if (lesson.type === "exam") {
-              const result = snapshot.examResults[`${cid}:${lesson.id}`] ?? null;
-              const manual = result
-                ? Object.values(result.manual_scores ?? {}).reduce((a, b) => a + b, 0)
-                : 0;
-              examItems.push({
-                id: lesson.id, class_id: cid, title: lesson.title,
-                description: (lesson as any).description,
-                due_date: (lesson as any).exam_opens_at?.slice(0, 10) ?? s.date ?? today,
-                created_at: s.date, kind: "exam" as const,
-                exam_done: !!result,
-                exam_score: result ? Math.round((result.score + manual) * 100) / 100 : undefined,
-                exam_total: result?.total,
-              });
-            }
-          }
-        }
-      }
-
-      return [...items, ...examItems];
-    })));
-
-    Promise.all([
-      safely(getTeacherHomework<HomeworkItem>(myClassIds), []),
-      curriculumPromise,
-      safely(getSubmissionsByStudent(STUDENT_ID), []),
-    ])
-      .then(([allManual, curriculumByClass, studentSubmissions]) => {
+    loadStudentTaskSnapshot(STUDENT_ID, myClassIds)
+      .then((snapshot) => {
         if (cancelled) return;
-        const manual = allManual.filter(h =>
-          myClassIds.includes(h.class_id)
-          && isAssignedToStudent(h.assigned_to, STUDENT_ID),
-        );
-        const merged = new Map<string, HomeworkItem>();
-        for (const item of [...manual, ...curriculumByClass.flat()]) {
-          merged.set(assignmentKey(item), item);
-        }
-        setTeacherHw([...merged.values()]);
-        setSubmissions(studentSubmissions);
-        if (partialFailure) {
-          setLoadWarning("Một phần dữ liệu chưa tải được. Danh sách bên dưới có thể chưa đầy đủ.");
-        }
+        setTeacherHw(snapshot.assignments);
+        setSubmissions(snapshot.submissions);
       })
       .catch(() => {
         if (!cancelled) setLoadWarning("Không thể tải dữ liệu bài tập. Vui lòng thử lại.");
@@ -241,19 +161,7 @@ export default function StudentHomeworkPage() {
 
   // Per-homework submission lookup
   function getSub(homework: HomeworkItem) {
-    const exact = submissions.find((submission) => (
-      submission.homework_id === homework.id
-      && submission.student_id === STUDENT_ID
-      && submission.class_id === homework.class_id
-    ));
-    if (exact) return exact;
-    const sameIdAssignments = myHomework.filter((item) => item.id === homework.id);
-    if (sameIdAssignments.length !== 1) return undefined;
-    return submissions.find((submission) => (
-      submission.homework_id === homework.id
-      && submission.student_id === STUDENT_ID
-      && !submission.class_id
-    ));
+    return findStudentTaskSubmission(homework, myHomework, submissions, STUDENT_ID);
   }
 
   // Status logic
@@ -277,8 +185,9 @@ export default function StudentHomeworkPage() {
 
   // Trạng thái lọc: tách rõ việc cần làm, cần làm lại, chờ chấm và lịch sử đã xong.
   function statusKey(hw: HomeworkItem): FilterTab {
-    if (hw.kind === "exam") return hw.exam_done ? "done" : "todo";
-    return hwStatus(hw).key;
+    const state = resolveStudentTaskState(hw, getSub(hw));
+    if (state === "returned" || state === "submitted" || state === "done") return state;
+    return "todo";
   }
 
   const scopedHomework = useMemo(() => myHomework.filter((homework) => (
@@ -521,7 +430,7 @@ export default function StudentHomeworkPage() {
                 if (hw.kind === "exam") {
                   return (
                     <Card
-                      key={assignmentKey(hw)}
+                key={studentTaskKey(hw)}
                       className="hover:border-primary/40 transition-colors animate-fade-in group"
                       style={{ animationDelay: `${(i % 6) * 70}ms` }}
                     >
@@ -581,7 +490,7 @@ export default function StudentHomeworkPage() {
 
                 return (
                   <Card
-                    key={assignmentKey(hw)}
+                      key={studentTaskKey(hw)}
                     className="hover:border-primary/40 transition-colors animate-fade-in group"
                     style={{ animationDelay: `${(i % 6) * 70}ms` }}
                   >

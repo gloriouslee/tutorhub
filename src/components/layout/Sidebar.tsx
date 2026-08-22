@@ -109,27 +109,11 @@ async function computeBadges(
       cache: "no-store",
       credentials: "same-origin",
     }).catch(() => null);
-    const [
-      { getTeacherHomework, getHwSubmissions },
-      { getSubmissionsByStudent },
-    ] = await Promise.all([
-      import("@/lib/storage"),
-      import("@/lib/supabase/submissions"),
-    ]);
-    // Bài tập "Chưa nộp" — cùng nguồn với trang bài tập: homework giáo viên tạo
-    // Trừ các bài đã nộp (Supabase → local fallback).
-    const teacherHw = (await getTeacherHomework<{ id: string; class_id: string }>(myClassIds))
-      .filter(h => myClassIds.includes(h.class_id));
-    const myHw = teacherHw;
-    let subs = await getSubmissionsByStudent(sid).catch(() => []);
-    if (subs.length === 0) {
-      const local = await getHwSubmissions<{ homework_id: string; student_id: string }>({
-        studentIds: [sid],
-      });
-      subs = local.filter(s => s.student_id === sid) as typeof subs;
-    }
-    const submittedIds = new Set(subs.map(s => s.homework_id));
-    const pending = myHw.filter(h => !submittedIds.has(h.id)).length;
+    const { loadStudentTaskSnapshot } = await import("@/lib/student-task-snapshot");
+    // Dùng đúng bộ phân giải của trang Bài tập, gồm cả bài trong lộ trình,
+    // bài thi online, bài quá hạn và bài giáo viên trả lại.
+    const taskSnapshot = await loadStudentTaskSnapshot(sid, myClassIds).catch(() => null);
+    const pending = taskSnapshot?.actionable.length ?? 0;
     if (pending > 0) result["/student/homework"] = pending;
 
     const questionResponse = await questionSummaryPromise;

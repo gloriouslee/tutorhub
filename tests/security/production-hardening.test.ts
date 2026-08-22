@@ -248,6 +248,7 @@ test("class portals expose curriculum-first workspaces without duplicating legac
 test("student aggregate pages remain scoped across multiple teachers and classes", async () => {
   const scopeBar = await read("src/components/student/StudentScopeBar.tsx");
   const homework = await read("src/app/student/homework/page.tsx");
+  const taskSnapshot = await read("src/lib/student-task-snapshot.ts");
   const scores = await read("src/app/student/scores/page.tsx");
   const payments = await read("src/app/student/payments/page.tsx");
   const contextRoute = await read("src/app/api/account/context/route.ts");
@@ -256,8 +257,9 @@ test("student aggregate pages remain scoped across multiple teachers and classes
   assert.match(scopeBar, /Tất cả lớp/);
   assert.match(scopeBar, /params\.set\("teacher"/);
   assert.match(scopeBar, /params\.set\("class"/);
-  assert.match(homework, /function assignmentKey/);
-  assert.match(homework, /merged\.set\(assignmentKey\(item\), item\)/);
+  assert.match(homework, /loadStudentTaskSnapshot/);
+  assert.match(taskSnapshot, /function studentTaskKey/);
+  assert.match(taskSnapshot, /merged\.set\(studentTaskKey\(task\)/);
   assert.match(homework, /<StudentScopeBar/);
   assert.match(scores, /membershipKey/);
   assert.match(scores, /Mục tiêu điểm theo phạm vi/);
@@ -1181,6 +1183,7 @@ test("homework navigation and data loading always provide immediate feedback", a
   const sidebar = await read("src/components/layout/Sidebar.tsx");
   const loadingState = await read("src/components/shared/HomeworkLoadingState.tsx");
   const studentHomework = await read("src/app/student/homework/page.tsx");
+  const studentTaskSnapshot = await read("src/lib/student-task-snapshot.ts");
   const teacherHomework = await read("src/app/teacher/homework/page.tsx");
   const studentClass = await read("src/app/student/classes/[classId]/page.tsx");
   const studentClassHomework = await read("src/components/student/StudentHomeworkTab.tsx");
@@ -1196,8 +1199,9 @@ test("homework navigation and data loading always provide immediate feedback", a
 
   assert.match(studentHomework, /loadingHomework/);
   assert.match(studentHomework, /<HomeworkLoadingState \/>/);
-  assert.match(studentHomework, /Promise\.all\(\[/);
-  assert.match(studentHomework, /examItems/);
+  assert.match(studentHomework, /loadStudentTaskSnapshot/);
+  assert.match(studentTaskSnapshot, /Promise\.all\(\[/);
+  assert.match(studentTaskSnapshot, /curriculumAssignments/);
 
   assert.match(teacherHomework, /loadingHomework/);
   assert.match(teacherHomework, /<HomeworkLoadingState \/>/);

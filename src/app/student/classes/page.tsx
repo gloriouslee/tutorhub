@@ -1,19 +1,20 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useEffect, useState, useMemo } from "react";
 import Link from "next/link";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { LearningModeBadge, SectionHeader } from "@/components/shared";
-import { BookOpen, Clock, Video, MapPin, Users, Search, ChevronRight, GraduationCap } from "lucide-react";
+import { BookOpen, Clock, Video, MapPin, Users, Search, ChevronRight, GraduationCap, Compass } from "lucide-react";
 import { useStudentContext } from "@/hooks/useStudentContext";
 import StudentDiscoveryCatalog from "@/components/student/StudentDiscoveryCatalog";
 import { weekdayLabelVi } from "@/lib/weekday";
 
 
 type ModeFilter = "all" | "online" | "offline" | "hybrid";
+type ClassView = "enrolled" | "discover";
 
 const MODE_LABELS: Record<ModeFilter, string> = {
   all: "Tất cả", online: "Trực tuyến", offline: "Trực tiếp", hybrid: "Kết hợp",
@@ -21,9 +22,14 @@ const MODE_LABELS: Record<ModeFilter, string> = {
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function StudentClassesPage() {
-  const { studentName, myClasses } = useStudentContext();
+  const { studentName, myClasses, ready } = useStudentContext();
   const [search,      setSearch]      = useState("");
   const [modeFilter,  setModeFilter]  = useState<ModeFilter>("all");
+  const [view, setView] = useState<ClassView>("enrolled");
+
+  useEffect(() => {
+    if (ready && myClasses.length === 0) setView("discover");
+  }, [myClasses.length, ready]);
 
   const displayed = useMemo(() => myClasses.filter(cls => {
     const matchSearch = cls.class_name.toLowerCase().includes(search.toLowerCase())
@@ -36,12 +42,35 @@ export default function StudentClassesPage() {
     <PortalLayout role="student" userName={studentName} pageTitle="Lớp học của tôi">
       <div className="space-y-6 max-w-6xl mx-auto">
         <SectionHeader
-          title="Lớp học đã đăng ký"
-          subtitle={`${myClasses.length} lớp đang theo học trong học kỳ này`}
+          title="Không gian học tập"
+          subtitle="Tiếp tục lớp đang học hoặc tìm một lớp mới phù hợp với bạn."
         />
 
+        <div className="inline-flex w-full rounded-2xl border border-border bg-muted/40 p-1 sm:w-auto" role="tablist" aria-label="Chọn danh sách lớp">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={view === "enrolled"}
+            onClick={() => setView("enrolled")}
+            className={`flex flex-1 items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition-colors sm:flex-none ${view === "enrolled" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+          >
+            <BookOpen className="h-4 w-4" /> Đang học
+            <Badge variant="secondary" className="h-5 min-w-5 justify-center px-1.5">{myClasses.length}</Badge>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={view === "discover"}
+            onClick={() => setView("discover")}
+            className={`flex flex-1 items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition-colors sm:flex-none ${view === "discover" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+          >
+            <Compass className="h-4 w-4" /> Khám phá lớp mới
+          </button>
+        </div>
+
+        {view === "enrolled" ? <>
         {/* ── Search + filter bar ───────────────────────── */}
-        <div className="flex flex-col sm:flex-row gap-3 bg-card p-2 rounded-2xl border border-border shadow-sm">
+        <div className="flex flex-col sm:flex-row gap-3 bg-card p-2 rounded-2xl border border-border shadow-sm" role="tabpanel">
           {/* Search */}
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -197,9 +226,11 @@ export default function StudentClassesPage() {
           )}
         </div>
 
-        <div className="border-t border-border pt-8">
-          <StudentDiscoveryCatalog mode="classes" />
-        </div>
+        </> : (
+          <div role="tabpanel" className="rounded-2xl border border-border/60 bg-card p-4 sm:p-6">
+            <StudentDiscoveryCatalog mode="classes" />
+          </div>
+        )}
       </div>
     </PortalLayout>
   );

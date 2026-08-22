@@ -612,6 +612,9 @@ export default function StudentClassDetailPage() {
     { key: "leaderboard", label: "Bảng xếp hạng", icon: Trophy },
     { key: "notes",       label: "Ghi chú",    icon: StickyNote,   badge: notes.length > 0 ? notes.length : undefined },
   ];
+  const primaryTabs = TABS.filter(tab => ["overview", "curriculum", "homework", "sessions"].includes(tab.key));
+  const secondaryTabs = TABS.filter(tab => ["materials", "leaderboard", "notes"].includes(tab.key));
+  const activeSecondaryTab = secondaryTabs.find(tab => tab.key === activeTab);
 
   return (
     <PortalLayout role="student" userName={studentName} pageTitle={cls.class_name}>
@@ -664,9 +667,10 @@ export default function StudentClassDetailPage() {
           </div>
 
           {/* Tabs */}
-          <div className="flex gap-0 overflow-x-auto border-b border-border bg-card px-2 md:px-3">
+          <div className="hidden gap-0 overflow-x-auto border-b border-border bg-card px-2 md:flex md:px-3">
             {TABS.map(tab => (
               <button
+                type="button"
                 key={tab.key}
                 onClick={() => setActiveTab(tab.key)}
                 className={`flex items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-3 text-xs font-semibold transition-all ${
@@ -685,6 +689,34 @@ export default function StudentClassDetailPage() {
                 )}
               </button>
             ))}
+          </div>
+          <div className="flex items-stretch overflow-x-auto border-b border-border bg-card px-1 md:hidden">
+            {primaryTabs.map(tab => (
+              <button
+                type="button"
+                key={tab.key}
+                onClick={() => setActiveTab(tab.key)}
+                aria-current={activeTab === tab.key ? "page" : undefined}
+                className={`flex min-w-[64px] flex-1 flex-col items-center justify-center gap-1 border-b-2 px-2 py-2.5 text-[10px] font-semibold transition-colors ${activeTab === tab.key ? "border-primary text-primary" : "border-transparent text-muted-foreground"}`}
+              >
+                <tab.icon className="h-4 w-4" />
+                <span className="max-w-[72px] truncate">{tab.key === "curriculum" ? "Lộ trình" : tab.key === "homework" ? "Cần làm" : tab.key === "sessions" ? "Lịch học" : tab.label}</span>
+                {tab.badge != null && Number(tab.badge) > 0 && <span className="sr-only">{tab.badge} mục</span>}
+              </button>
+            ))}
+            <label className={`relative flex min-w-[68px] flex-1 flex-col items-center justify-center gap-1 border-b-2 px-1 py-2.5 text-[10px] font-semibold ${activeSecondaryTab ? "border-primary text-primary" : "border-transparent text-muted-foreground"}`}>
+              <ChevronDown className="h-4 w-4" />
+              <span>{activeSecondaryTab?.label ?? "Thêm"}</span>
+              <select
+                aria-label="Mở thêm nội dung lớp"
+                value={activeSecondaryTab?.key ?? ""}
+                onChange={(event) => event.target.value && setActiveTab(event.target.value as TabKey)}
+                className="absolute inset-0 cursor-pointer opacity-0"
+              >
+                <option value="">Thêm</option>
+                {secondaryTabs.map(tab => <option key={tab.key} value={tab.key}>{tab.label}</option>)}
+              </select>
+            </label>
           </div>
         </div>
 
