@@ -67,10 +67,8 @@ export async function loadChildScores(
   studentId: string,
   classIds: string[]
 ): Promise<StoredExamScore[]> {
-  const stored = await getExamScoresByStudent(studentId);
-
-  const taken: StoredExamScore[] = [];
-  for (const classId of classIds) {
+  const storedRequest = getExamScoresByStudent(studentId);
+  const classScoreRequests = classIds.map(async (classId): Promise<StoredExamScore[]> => {
     try {
       const chapters = await getCurriculum(classId);
       const examLessons = chapters
@@ -80,10 +78,10 @@ export async function loadChildScores(
       const results = await Promise.all(
         examLessons.map(l => getExamResult(classId, l.id, studentId))
       );
-      examLessons.forEach((lesson, i) => {
+      return examLessons.flatMap((lesson, i) => {
         const rec = results[i];
-        if (!rec) return;
-        taken.push({
+        if (!rec) return [];
+        return [{
           id:         `tutorhub_exam_result_${classId}_${lesson.id}_${studentId}`,
           student_id: studentId,
           class_id:   classId,
@@ -91,10 +89,17 @@ export async function loadChildScores(
           score:      rec.score,
           max_score:  rec.total,
           exam_date:  rec.submitted_at,
-        });
+        }];
       });
-    } catch { /* lớp offline → bỏ qua */ }
-  }
+    } catch {
+      return []; // Lớp offline hoặc chưa có lộ trình.
+    }
+  });
+  const [stored, classScores] = await Promise.all([
+    storedRequest,
+    Promise.all(classScoreRequests),
+  ]);
+  const taken = classScores.flat();
 
   const combined = [...stored, ...taken];
   const seen = new Set<string>();

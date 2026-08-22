@@ -31,7 +31,12 @@ export interface AnalyticsData {
   examScores: StoredExamScore[];
   revenueEvents: RevenueEvent[];
   teacherOf: Record<string, string | undefined>;  // classId -> teacherId (đã áp override)
+  loadedAt: string;
 }
+
+const ANALYTICS_CACHE_TTL_MS = 2 * 60 * 1000;
+let analyticsCache: { data: AnalyticsData; expiresAt: number } | null = null;
+let analyticsRequest: Promise<AnalyticsData> | null = null;
 
 function parseLocalDate(d: string): Date {
   return /^\d{4}-\d{2}-\d{2}$/.test(d) ? new Date(`${d}T00:00:00`) : new Date(d);
@@ -48,7 +53,7 @@ export function lastNMonths(n: number, now = new Date()): { year: number; month:
 }
 
 // ── Nạp toàn bộ dữ liệu thô ────────────────────────────────────────────────────
-export async function loadAnalyticsData(): Promise<AnalyticsData> {
+async function fetchAnalyticsData(): Promise<AnalyticsData> {
   const {
     getClasses,
     getStudents,
@@ -59,14 +64,19 @@ export async function loadAnalyticsData(): Promise<AnalyticsData> {
     getClassTeacherOverrides,
     getAllExamScores,
   } = await import("@/lib/storage");
-  const [classes, students, teachers, invoices, teacherAtt, overrides, storedScores] = await Promise.all([
-    getClasses(),
+  // Học phí chỉ phụ thuộc danh sách lớp. Khởi chạy ngay khi lớp tải xong thay vì
+  // đợi toàn bộ các nguồn khác, nhờ vậy không tạo waterfall ở cuối màn hình.
+  const classesRequest = getClasses();
+  const tuitionRequest = classesRequest.then(classes => getClassTuitions(classes.map(c => c.id)));
+  const [classes, students, teachers, invoices, teacherAtt, overrides, storedScores, tuitionConfigs] = await Promise.all([
+    classesRequest,
     getStudents(),
     getTeachers(),
     getInvoicesRaw(),
     getAllTeacherAttendance(),
     getClassTeacherOverrides(),
     getAllExamScores().catch(() => [] as StoredExamScore[]),
+    tuitionRequest,
   ]);
 
   // Điểm danh thật (giáo viên nhập) → chuẩn hoá về shape Attendance để tái dùng aggregation
@@ -87,7 +97,6 @@ export async function loadAnalyticsData(): Promise<AnalyticsData> {
   const revenueEvents: RevenueEvent[] = [];
 
   // 1) Học phí do giáo viên ghi nhận (chính xác nhất: có classId + studentId)
-  const tuitionConfigs = await getClassTuitions(classes.map(c => c.id));
   const tuitionKeys = new Set<string>();  // classId|studentId|period đã ghi nhận
   for (const [classId, config] of Object.entries(tuitionConfigs)) {
     for (const [sid, sdata] of Object.entries(config.students)) {
@@ -115,7 +124,36 @@ export async function loadAnalyticsData(): Promise<AnalyticsData> {
     });
   }
 
-  return { classes, students, teachers, invoices, attendance, examScores, revenueEvents, teacherOf };
+  return {
+    classes,
+    students,
+    teachers,
+    invoices,
+    attendance,
+    examScores,
+    revenueEvents,
+    teacherOf,
+    loadedAt: new Date().toISOString(),
+  };
+}
+
+/** Cache ngắn hạn dùng chung giữa các lần điều hướng trong portal. */
+export async function loadAnalyticsData(options: { force?: boolean } = {}): Promise<AnalyticsData> {
+  if (!options.force && analyticsCache && analyticsCache.expiresAt > Date.now()) {
+    return analyticsCache.data;
+  }
+  if (!options.force && analyticsRequest) return analyticsRequest;
+
+  const request = fetchAnalyticsData()
+    .then(data => {
+      analyticsCache = { data, expiresAt: Date.now() + ANALYTICS_CACHE_TTL_MS };
+      return data;
+    })
+    .finally(() => {
+      if (analyticsRequest === request) analyticsRequest = null;
+    });
+  analyticsRequest = request;
+  return request;
 }
 
 // ── Lọc dữ liệu theo khoảng thời gian (N tháng gần nhất) ────────────────────────
@@ -170,7 +208,9 @@ export function computeKpis(data: AnalyticsData, classIds?: Set<string>): Kpis {
     ? new Set(data.classes.filter(c => classIds.has(c.id)).map(c => data.teacherOf[c.id]).filter(Boolean)).size
     : data.teachers.length;
 
-  const att = data.attendance.filter(a => inClass(a.class_id));
+  // Nghỉ có phép không phản ánh việc tham gia hay vắng mặt, nên không đưa vào
+  // mẫu số. Quy tắc này cũng thống nhất với Student workspace.
+  const att = data.attendance.filter(a => inClass(a.class_id) && a.status !== "excused");
   const present = att.filter(a => isAttendedStatus(a.status)).length;
   const avgAttendancePct = att.length > 0 ? Math.round((present / att.length) * 100) : 0;
 
@@ -280,6 +320,7 @@ export function attendanceTrend(data: AnalyticsData, months: number, classIds?: 
   return buckets.map(b => {
     const recs = data.attendance.filter(a => {
       if (!inClass(a.class_id)) return false;
+      if (a.status === "excused") return false;
       const d = parseLocalDate(a.attendance_date);
       return d.getFullYear() === b.year && d.getMonth() === b.month;
     });
@@ -298,6 +339,7 @@ export function attendanceByClass(data: AnalyticsData, classIds?: Set<string>): 
   const agg = new Map<string, { ok: number; n: number }>();
   for (const a of data.attendance) {
     if (classIds && !classIds.has(a.class_id)) continue;
+    if (a.status === "excused") continue;
     const cur = agg.get(a.class_id) ?? { ok: 0, n: 0 };
     if (isAttendedStatus(a.status)) cur.ok += 1;
     cur.n += 1;
@@ -336,12 +378,155 @@ export function topStudents(data: AnalyticsData, limit: number, classIds?: Set<s
     cur.n += 1;
     agg.set(s.student_id, cur);
   }
+  const studentNames = new Map(data.students.map(student => [student.id, student.full_name]));
   return [...agg.entries()]
     .map(([sid, a]) => ({
-      name: data.students.find(s => s.id === sid)?.full_name ?? sid,
+      name: studentNames.get(sid) ?? sid,
       diem: +(a.sum / a.n).toFixed(1),
       soBai: a.n,
     }))
     .sort((a, b) => b.diem - a.diem)
     .slice(0, limit);
+}
+
+export interface AttentionItem {
+  studentId: string;
+  studentName: string;
+  className: string;
+  severity: "high" | "medium";
+  reasons: string[];
+  attendanceRate: number | null;
+  averageScore: number | null;
+}
+
+/** Danh sách ưu tiên có giải thích, không gắn nhãn học viên bằng một điểm rủi ro mơ hồ. */
+export function teacherAttentionItems(
+  data: AnalyticsData,
+  classIds?: Set<string>,
+  limit = 8,
+): AttentionItem[] {
+  const studentNames = new Map(data.students.map(student => [student.id, student.full_name]));
+  const classNames = new Map(data.classes.map(cls => [cls.id, cls.class_name]));
+  const studentClass = new Map<string, string>();
+  for (const cls of data.classes) {
+    if (classIds && !classIds.has(cls.id)) continue;
+    for (const studentId of cls.student_ids ?? []) {
+      if (!studentClass.has(studentId)) studentClass.set(studentId, cls.id);
+    }
+  }
+
+  const attendance = new Map<string, { attended: number; total: number; absent: number; late: number }>();
+  for (const record of data.attendance) {
+    if ((classIds && !classIds.has(record.class_id)) || record.status === "excused") continue;
+    const current = attendance.get(record.student_id) ?? { attended: 0, total: 0, absent: 0, late: 0 };
+    current.total += 1;
+    if (isAttendedStatus(record.status)) current.attended += 1;
+    if (record.status === "absent") current.absent += 1;
+    if (record.status === "late") current.late += 1;
+    attendance.set(record.student_id, current);
+  }
+
+  const scores = new Map<string, StoredExamScore[]>();
+  for (const score of data.examScores) {
+    if (classIds && !classIds.has(score.class_id)) continue;
+    const list = scores.get(score.student_id) ?? [];
+    list.push(score);
+    scores.set(score.student_id, list);
+  }
+
+  const items: AttentionItem[] = [];
+  for (const [studentId, classId] of studentClass) {
+    const att = attendance.get(studentId);
+    const studentScores = (scores.get(studentId) ?? []).toSorted((a, b) => a.exam_date.localeCompare(b.exam_date));
+    const normalizedScores = studentScores.map(score => score.max_score > 0 ? (score.score / score.max_score) * 10 : 0);
+    const attendanceRate = att?.total ? Math.round((att.attended / att.total) * 100) : null;
+    const averageScore = normalizedScores.length
+      ? +(normalizedScores.reduce((sum, score) => sum + score, 0) / normalizedScores.length).toFixed(1)
+      : null;
+    const reasons: string[] = [];
+
+    if (att && att.absent >= 2) reasons.push(`Vắng ${att.absent} buổi`);
+    else if (attendanceRate !== null && att && att.total >= 3 && attendanceRate < 80) reasons.push(`Chuyên cần ${attendanceRate}%`);
+    if (att && att.late >= 2) reasons.push(`Đi trễ ${att.late} buổi`);
+    if (averageScore !== null && normalizedScores.length >= 2 && averageScore < 5) reasons.push(`Điểm trung bình ${averageScore}/10`);
+
+    if (normalizedScores.length >= 4) {
+      const recent = normalizedScores.slice(-2).reduce((sum, score) => sum + score, 0) / 2;
+      const previous = normalizedScores.slice(-4, -2).reduce((sum, score) => sum + score, 0) / 2;
+      const drop = previous - recent;
+      if (drop >= 1) reasons.push(`Giảm ${drop.toFixed(1)} điểm gần đây`);
+    }
+
+    if (reasons.length === 0) continue;
+    const severity: AttentionItem["severity"] =
+      (att?.absent ?? 0) >= 3 || (averageScore !== null && averageScore < 4) || reasons.some(reason => reason.startsWith("Giảm"))
+        ? "high"
+        : "medium";
+    items.push({
+      studentId,
+      studentName: studentNames.get(studentId) ?? "Học viên",
+      className: classNames.get(classId) ?? "Lớp học",
+      severity,
+      reasons,
+      attendanceRate,
+      averageScore,
+    });
+  }
+
+  return items
+    .toSorted((a, b) => Number(b.severity === "high") - Number(a.severity === "high") || b.reasons.length - a.reasons.length)
+    .slice(0, limit);
+}
+
+export interface MetricDelta {
+  current: number;
+  previous: number;
+  delta: number;
+  hasData: boolean;
+}
+
+/** So sánh khoảng hiện tại với khoảng ngay trước đó, cùng độ dài. */
+export function analyticsDeltas(data: AnalyticsData, months: number, classIds?: Set<string>) {
+  const now = new Date();
+  const currentStart = new Date(now.getFullYear(), now.getMonth() - (months - 1), 1);
+  const previousStart = new Date(now.getFullYear(), now.getMonth() - (months * 2 - 1), 1);
+  const inClass = classFilter(classIds);
+  const period = <T,>(records: T[], dateOf: (record: T) => string, start: Date, end?: Date) => records.filter(record => {
+    const date = parseLocalDate(dateOf(record));
+    return date >= start && (!end || date < end);
+  });
+  const metric = (current: number, previous: number, hasData: boolean): MetricDelta => ({
+    current,
+    previous,
+    delta: +(current - previous).toFixed(1),
+    hasData,
+  });
+
+  const attendanceRateFor = (records: Attendance[]) => {
+    const eligible = records.filter(record => record.status !== "excused");
+    return eligible.length ? Math.round((eligible.filter(record => isAttendedStatus(record.status)).length / eligible.length) * 100) : 0;
+  };
+  const scoreAverageFor = (records: StoredExamScore[]) => records.length
+    ? +(records.reduce((sum, record) => sum + (record.max_score > 0 ? (record.score / record.max_score) * 10 : 0), 0) / records.length).toFixed(1)
+    : 0;
+
+  const scopedAttendance = data.attendance.filter(record => inClass(record.class_id));
+  const scopedScores = data.examScores.filter(record => inClass(record.class_id));
+  const scopedRevenue = data.revenueEvents.filter(record => inClass(record.classId));
+  const currentAttendance = period(scopedAttendance, record => record.attendance_date, currentStart);
+  const previousAttendance = period(scopedAttendance, record => record.attendance_date, previousStart, currentStart);
+  const currentScores = period(scopedScores, record => record.exam_date, currentStart);
+  const previousScores = period(scopedScores, record => record.exam_date, previousStart, currentStart);
+  const currentRevenue = period(scopedRevenue, record => record.date, currentStart);
+  const previousRevenue = period(scopedRevenue, record => record.date, previousStart, currentStart);
+
+  return {
+    attendance: metric(attendanceRateFor(currentAttendance), attendanceRateFor(previousAttendance), currentAttendance.length > 0),
+    score: metric(scoreAverageFor(currentScores), scoreAverageFor(previousScores), currentScores.length > 0),
+    revenue: metric(
+      currentRevenue.reduce((sum, record) => sum + record.amount, 0),
+      previousRevenue.reduce((sum, record) => sum + record.amount, 0),
+      currentRevenue.length > 0,
+    ),
+  };
 }

@@ -4,8 +4,8 @@ import PortalLayout from "@/components/layout/PortalLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { SectionHeader } from "@/components/shared";
-import { Download, Sparkles, CheckCircle2, Loader2 } from "lucide-react";
-import { useState, useEffect } from "react";
+import { AlertCircle, Download, Sparkles, CheckCircle2, Loader2, RefreshCw } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
 import dynamic from "next/dynamic";
 import type { AnalyticsData } from "@/lib/analytics";
 
@@ -30,18 +30,26 @@ export default function AdminReportsPage() {
   const [exportSuccess, setExportSuccess] = useState(false);
   const [reportType, setReportType] = useState("revenue_class");
   const [reportFormat, setReportFormat] = useState("csv");
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const loadData = useCallback(async (force = false) => {
+    setLoadError(null);
+    if (force) setRefreshing(true);
+    try {
+      const { loadAnalyticsData } = await import("@/lib/analytics");
+      setData(await loadAnalyticsData({ force }));
+    } catch (error) {
+      console.error("Admin analytics:", error);
+      setLoadError("Không thể tải dữ liệu báo cáo. Vui lòng thử lại.");
+    } finally {
+      setRefreshing(false);
+    }
+  }, []);
 
   useEffect(() => {
-    let cancelled = false;
-    import("@/lib/analytics")
-      .then(({ loadAnalyticsData }) => loadAnalyticsData())
-      .then((result) => {
-        if (!cancelled) setData(result);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    void loadData();
+  }, [loadData]);
 
   const csvEscape = (v: any) => {
     const s = String(v ?? "");
@@ -139,16 +147,33 @@ export default function AdminReportsPage() {
         <SectionHeader
           title="Báo cáo & Phân tích"
           subtitle="Doanh thu theo giáo viên & lớp, tăng trưởng học viên, chuyên cần và kết quả học tập"
+          action={data ? (
+            <Button type="button" variant="outline" size="sm" onClick={() => void loadData(true)} disabled={refreshing}>
+              <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />
+              {refreshing ? "Đang cập nhật" : "Cập nhật"}
+            </Button>
+          ) : undefined}
         />
 
-        {!data ? (
+        {loadError && !data ? (
+          <div className="flex flex-col items-center justify-center rounded-2xl border border-rose-200 bg-rose-50/50 py-16 text-center dark:border-rose-900 dark:bg-rose-950/10">
+            <AlertCircle className="h-8 w-8 text-rose-500" />
+            <p className="mt-3 text-sm font-semibold text-foreground">{loadError}</p>
+            <Button type="button" variant="outline" size="sm" className="mt-4" onClick={() => void loadData(true)}>Thử lại</Button>
+          </div>
+        ) : !data ? (
           <div className="flex flex-col items-center justify-center py-24">
             <Loader2 className="h-8 w-8 animate-spin text-primary" />
             <p className="text-sm text-muted-foreground mt-3">Đang tổng hợp dữ liệu…</p>
           </div>
         ) : (
           <>
-            <AnalyticsDashboard data={data} showTeacherBreakdown />
+            {loadError && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-300">
+                Không thể lấy dữ liệu mới. Đang hiển thị bản cập nhật gần nhất.
+              </div>
+            )}
+            <AnalyticsDashboard data={data} showTeacherBreakdown variant="admin" />
 
             {/* Export panel */}
             <Card className="border border-border">

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Link from "next/link";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -9,7 +10,7 @@ import { getStudentComments, type StoredExamScore } from "@/lib/storage";
 import { useParentContext } from "@/hooks/useParentContext";
 import { loadChildScores, loadChildrenAttendance, attendanceRate, averageScore } from "@/lib/parent-data";
 import {
-  TrendingUp, Target, Brain, Award, Calendar,
+  AlertTriangle, ArrowRight, CheckCircle2, TrendingUp, Target, Brain, Award, Calendar,
   BarChart3, ChevronDown, BookOpen, Star, FileText
 } from "lucide-react";
 import {
@@ -25,28 +26,40 @@ export default function ParentProgressPage() {
   const [latestComment, setLatestComment] = useState<any | null>(null);
   const [childExams, setChildExams] = useState<StoredExamScore[]>([]);
   const [childAttendanceRate, setChildAttendanceRate] = useState<number | null>(null);
+  const [progressLoading, setProgressLoading] = useState(false);
+  const [progressError, setProgressError] = useState(false);
 
   // Load teacher-entered scores and online exam results for each child.
   useEffect(() => {
     if (!ready || !selectedChild) return;
     let cancelled = false;
-
-    loadChildScores(selectedChild.id, selectedChild.classes.map(c => c.id))
-      .then(scores => { if (!cancelled) setChildExams(scores); });
-
-    loadChildrenAttendance([selectedChild.id])
-      .then(records => { if (!cancelled) setChildAttendanceRate(attendanceRate(records)); });
-
+    setProgressLoading(true);
+    setProgressError(false);
+    setChildExams([]);
+    setChildAttendanceRate(null);
+    setLatestComment(null);
     (async () => {
-      const studentComments = await getStudentComments(selectedChild.id);
+      const [scoresResult, attendanceResult, commentsResult] = await Promise.allSettled([
+        loadChildScores(selectedChild.id, selectedChild.classes.map(c => c.id)),
+        loadChildrenAttendance([selectedChild.id]),
+        getStudentComments(selectedChild.id),
+      ]);
       if (cancelled) return;
-      if (studentComments.length > 0) {
+      if (scoresResult.status === "fulfilled") setChildExams(scoresResult.value);
+      if (attendanceResult.status === "fulfilled") setChildAttendanceRate(attendanceRate(attendanceResult.value));
+      if (commentsResult.status === "fulfilled" && commentsResult.value.length > 0) {
+        const studentComments = commentsResult.value;
         const sorted = [...studentComments].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
         setLatestComment(sorted[0]);
-      } else {
-        setLatestComment(null);
       }
-    })();
+      setProgressError([scoresResult, attendanceResult, commentsResult].some(result => result.status === "rejected"));
+      setProgressLoading(false);
+    })().catch(() => {
+      if (!cancelled) {
+        setProgressError(true);
+        setProgressLoading(false);
+      }
+    });
 
     return () => { cancelled = true; };
   }, [ready, selectedChild?.id]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -60,6 +73,14 @@ export default function ParentProgressPage() {
   // Average score for the selected child (10-point scale)
   const avg = averageScore(childExams);
   const childAvg = avg !== null ? avg.toFixed(1) : null;
+
+  const chronologicalScores = [...normalizedExams].sort((a, b) => a.exam_date.localeCompare(b.exam_date));
+  const recentTwo = chronologicalScores.slice(-2);
+  const previousTwo = chronologicalScores.slice(-4, -2);
+  const scoreDelta = recentTwo.length === 2 && previousTwo.length === 2
+    ? Number(((recentTwo.reduce((sum, exam) => sum + exam.norm, 0) / 2) - (previousTwo.reduce((sum, exam) => sum + exam.norm, 0) / 2)).toFixed(1))
+    : null;
+  const needsAttention = (childAttendanceRate !== null && childAttendanceRate < 80) || (scoreDelta !== null && scoreDelta <= -1);
 
   // Score trend over time (sorted by exam date)
   const trendData = [...normalizedExams]
@@ -87,8 +108,45 @@ export default function ParentProgressPage() {
       <div className="space-y-8 max-w-6xl mx-auto pb-10">
         <SectionHeader
           title="Tiến độ học tập"
-          subtitle="Theo dõi kết quả và đánh giá năng lực của con"
+          subtitle="Nhìn nhanh thay đổi quan trọng và biết cách hỗ trợ con tiếp theo"
         />
+
+        {progressError && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-300">
+            Một phần dữ liệu chưa tải được. Các chỉ số có dữ liệu vẫn được hiển thị bên dưới.
+          </div>
+        )}
+
+        {selectedChild && !progressLoading && (
+          <Card className={`border ${needsAttention ? "border-amber-200 bg-amber-50/60 dark:border-amber-900 dark:bg-amber-950/10" : "border-emerald-200 bg-emerald-50/60 dark:border-emerald-900 dark:bg-emerald-950/10"}`}>
+            <CardContent className="flex flex-col gap-4 p-5 lg:flex-row lg:items-center">
+              <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl ${needsAttention ? "bg-amber-100 text-amber-600 dark:bg-amber-950" : "bg-emerald-100 text-emerald-600 dark:bg-emerald-950"}`}>
+                {needsAttention ? <AlertTriangle className="h-5 w-5" /> : <CheckCircle2 className="h-5 w-5" />}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="font-bold text-foreground">{needsAttention ? `Điều cần lưu ý với ${selectedChild.name}` : `${selectedChild.name} đang duy trì ổn định`}</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {childAttendanceRate !== null && childAttendanceRate < 80
+                    ? `Chuyên cần hiện ở mức ${childAttendanceRate}%. `
+                    : childAttendanceRate !== null ? `Chuyên cần ${childAttendanceRate}%. ` : "Chưa đủ dữ liệu chuyên cần. "}
+                  {scoreDelta !== null
+                    ? `Điểm trung bình 2 bài gần nhất ${scoreDelta > 0 ? "tăng" : scoreDelta < 0 ? "giảm" : "không đổi"} ${Math.abs(scoreDelta)} điểm so với 2 bài trước.`
+                    : "Cần ít nhất 4 kết quả để xác định xu hướng điểm."}
+                </p>
+              </div>
+              <div className="flex shrink-0 flex-wrap gap-2">
+                <Link href="/parent/attendance" className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-border bg-background px-3 text-xs font-bold text-foreground shadow-sm hover:bg-muted">
+                  Xem chuyên cần <ArrowRight className="h-3.5 w-3.5" />
+                </Link>
+                {needsAttention && (
+                  <Link href="/parent/messages" className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-primary px-3 text-xs font-bold text-primary-foreground shadow-sm hover:opacity-90">
+                    Trao đổi giáo viên <ArrowRight className="h-3.5 w-3.5" />
+                  </Link>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Child Selector & Quick Stats */}
         <div className="flex flex-col md:flex-row gap-6 items-start">

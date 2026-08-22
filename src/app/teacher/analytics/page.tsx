@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { SectionHeader } from "@/components/shared";
+import { Button } from "@/components/ui/button";
 import dynamic from "next/dynamic";
 import type { AnalyticsData } from "@/lib/analytics";
-import { Loader2 } from "lucide-react";
+import { AlertCircle, Loader2, RefreshCw } from "lucide-react";
 import { useTeacherContext } from "@/hooks/useTeacherContext";
 
 const AnalyticsDashboard = dynamic(
@@ -26,18 +27,26 @@ const AnalyticsDashboard = dynamic(
 export default function TeacherAnalyticsPage() {
   const { teacherId, teacherName } = useTeacherContext();
   const [data, setData] = useState<AnalyticsData | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const loadData = useCallback(async (force = false) => {
+    setError(null);
+    if (force) setRefreshing(true);
+    try {
+      const { loadAnalyticsData } = await import("@/lib/analytics");
+      setData(await loadAnalyticsData({ force }));
+    } catch (loadError) {
+      console.error("Teacher analytics:", loadError);
+      setError("Không thể tải dữ liệu phân tích. Vui lòng thử lại.");
+    } finally {
+      setRefreshing(false);
+    }
+  }, []);
 
   useEffect(() => {
-    let cancelled = false;
-    import("@/lib/analytics")
-      .then(({ loadAnalyticsData }) => loadAnalyticsData())
-      .then((result) => {
-        if (!cancelled) setData(result);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    void loadData();
+  }, [loadData]);
 
   // Chỉ các lớp do giáo viên này phụ trách (đã tính cả override phân công)
   const myClassIds = useMemo(() => {
@@ -49,11 +58,23 @@ export default function TeacherAnalyticsPage() {
     <PortalLayout role="teacher" userName={teacherName || "Giáo viên"} pageTitle="Xu hướng & Thống kê">
       <div className="space-y-6">
         <SectionHeader
-          title="Xu hướng của tôi"
-          subtitle="Doanh thu, sĩ số, chuyên cần và kết quả học tập theo từng lớp bạn phụ trách"
+          title="Phân tích lớp học"
+          subtitle="Ưu tiên học viên cần hỗ trợ, theo dõi chuyên cần và kết quả theo từng lớp"
+          action={data ? (
+            <Button type="button" variant="outline" size="sm" onClick={() => void loadData(true)} disabled={refreshing}>
+              <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />
+              {refreshing ? "Đang cập nhật" : "Cập nhật"}
+            </Button>
+          ) : undefined}
         />
 
-        {!data || !myClassIds ? (
+        {error && !data ? (
+          <div className="flex flex-col items-center justify-center rounded-2xl border border-rose-200 bg-rose-50/50 py-16 text-center dark:border-rose-900 dark:bg-rose-950/10">
+            <AlertCircle className="h-8 w-8 text-rose-500" />
+            <p className="mt-3 text-sm font-semibold text-foreground">{error}</p>
+            <Button type="button" variant="outline" size="sm" className="mt-4" onClick={() => void loadData(true)}>Thử lại</Button>
+          </div>
+        ) : !data || !myClassIds ? (
           <div className="flex flex-col items-center justify-center py-24">
             <Loader2 className="h-8 w-8 animate-spin text-primary" />
             <p className="text-sm text-muted-foreground mt-3">Đang tổng hợp dữ liệu…</p>
@@ -63,7 +84,14 @@ export default function TeacherAnalyticsPage() {
             <p className="text-sm text-muted-foreground">Bạn chưa phụ trách lớp nào để thống kê.</p>
           </div>
         ) : (
-          <AnalyticsDashboard data={data} classIds={myClassIds} showTeacherBreakdown={false} />
+          <>
+            {error && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-300">
+                Không thể lấy dữ liệu mới. Đang hiển thị bản cập nhật gần nhất.
+              </div>
+            )}
+            <AnalyticsDashboard data={data} classIds={myClassIds} showTeacherBreakdown={false} variant="teacher" />
+          </>
         )}
       </div>
     </PortalLayout>
