@@ -344,6 +344,16 @@ test("teacher portal branding accepts only uploaded portal logos", () => {
   );
 });
 
+test("teacher branding receives a prominent sidebar identity block", async () => {
+  const sidebar = await read("src/components/layout/Sidebar.tsx");
+
+  assert.match(sidebar, /hasTeacherBrandHeader = role === "teacher"/);
+  assert.match(sidebar, /h-14 w-14 rounded-2xl/);
+  assert.match(sidebar, /line-clamp-2 text-\[15px\] leading-snug/);
+  assert.match(sidebar, /bg-gradient-to-br from-primary\/\[0\.09\] via-card to-card/);
+  assert.match(sidebar, /activeStudentTeacherId \|\| portalBranding\.teacherId/);
+});
+
 test("profile avatars flow through the shared layout for every portal", async () => {
   const identity = await read("src/lib/api-auth.ts");
   const contextRoute = await read("src/app/api/account/context/route.ts");

@@ -226,6 +226,8 @@ export default function Sidebar({
       : DEFAULT_PORTAL_BRANDING;
   const [logoFailed, setLogoFailed] = useState(false);
   const portalLogoUrl = portalBranding.logoUrl;
+  const hasTeacherBrandHeader = role === "teacher"
+    || (role === "student" && Boolean(activeStudentTeacherId || portalBranding.teacherId));
   const isCatalogOnlyStudent =
     role === "student"
     && (
@@ -308,38 +310,71 @@ export default function Sidebar({
             : "lg:w-[260px] lg:translate-x-0",
         )}
       >
-        {/* Logo */}
-        <div className="flex items-center justify-between h-16 px-5 border-b border-border shrink-0">
+        {/* Portal brand */}
+        <div className={cn(
+          "flex shrink-0 items-center justify-between border-b border-border",
+          hasTeacherBrandHeader
+            ? "min-h-24 bg-gradient-to-br from-primary/[0.09] via-card to-card px-4 py-4"
+            : "h-16 px-5",
+        )}>
           <Link
             href={homeHref}
             prefetch={false}
             onMouseEnter={() => router.prefetch(homeHref)}
             onFocus={() => router.prefetch(homeHref)}
-            className="flex items-center gap-2.5"
-          >
-            {portalLogoUrl && !logoFailed ? (
-              // A protected image proxy is used here; Next Image cannot forward
-              // the signed-in browser session when optimizing the source.
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={portalLogoUrl}
-                alt={`Logo ${portalBranding.name}`}
-                onError={() => setLogoFailed(true)}
-                className="h-8 w-8 rounded-xl border border-border bg-white object-contain shadow-lg"
-              />
-            ) : (
-              <div className={`h-8 w-8 rounded-xl bg-gradient-to-br ${config.gradient} flex items-center justify-center shadow-lg`}>
-                <GraduationCap className="h-4 w-4 text-white" />
-              </div>
+            className={cn(
+              "flex min-w-0 flex-1 items-center",
+              hasTeacherBrandHeader ? "gap-3" : "gap-2.5",
             )}
-            <div>
-              <p className="max-w-[155px] truncate text-sm font-bold text-foreground leading-none">
+          >
+            <div className="relative shrink-0">
+              {portalLogoUrl && !logoFailed ? (
+                // A protected image proxy is used here; Next Image cannot forward
+                // the signed-in browser session when optimizing the source.
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={portalLogoUrl}
+                  alt={`Logo ${portalBranding.name}`}
+                  onError={() => setLogoFailed(true)}
+                  className={cn(
+                    "border border-border bg-white object-contain shadow-lg",
+                    hasTeacherBrandHeader
+                      ? "h-14 w-14 rounded-2xl p-1 ring-4 ring-primary/10"
+                      : "h-8 w-8 rounded-xl",
+                  )}
+                />
+              ) : (
+                <div className={cn(
+                  `flex items-center justify-center bg-gradient-to-br ${config.gradient} shadow-lg`,
+                  hasTeacherBrandHeader ? "h-14 w-14 rounded-2xl ring-4 ring-primary/10" : "h-8 w-8 rounded-xl",
+                )}>
+                  <GraduationCap className={cn("text-white", hasTeacherBrandHeader ? "h-6 w-6" : "h-4 w-4")} />
+                </div>
+              )}
+              {hasTeacherBrandHeader && portalLogoUrl && !logoFailed && (
+                <span className={`absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-gradient-to-br ${config.gradient} ring-2 ring-card`} aria-hidden="true">
+                  <GraduationCap className="h-2.5 w-2.5 text-white" />
+                </span>
+              )}
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className={cn(
+                "font-bold text-foreground",
+                hasTeacherBrandHeader
+                  ? "line-clamp-2 text-[15px] leading-snug"
+                  : "max-w-[155px] truncate text-sm leading-none",
+              )}>
                 {portalBranding.name}
               </p>
-              <p className={`text-[10px] font-medium ${config.color} leading-none mt-0.5`}>{config.label}</p>
+              <p className={cn(
+                `font-semibold ${config.color}`,
+                hasTeacherBrandHeader
+                  ? "mt-1 text-[9px] uppercase leading-none tracking-[0.14em]"
+                  : "mt-0.5 text-[10px] leading-none",
+              )}>{config.label}</p>
             </div>
           </Link>
-          <div className="flex items-center gap-1">
+          <div className={cn("flex items-center gap-1", hasTeacherBrandHeader && "ml-1 self-start")}>
             <button
               type="button"
               onClick={onDesktopHide}
