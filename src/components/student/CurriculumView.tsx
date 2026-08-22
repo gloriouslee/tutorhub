@@ -10,7 +10,6 @@ import {
   AlertTriangle,
   ArrowRight,
   BookOpen,
-  CalendarDays,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
@@ -257,11 +256,12 @@ export default function CurriculumView({
           const chapterDone = chapterLessons.filter(isCompleted).length;
           const chapterOpen = expanded.has(chapter.id);
           return (
-            <section key={chapter.id} className="overflow-hidden rounded-xl border border-border/70 bg-card shadow-sm">
+            <section key={chapter.id} className="overflow-hidden rounded-xl border border-l-4 border-border/70 border-l-primary/60 bg-card shadow-sm">
               <button
                 type="button"
                 onClick={() => toggle(chapter.id)}
-                className="flex w-full items-center gap-3 px-4 py-3.5 text-left transition hover:bg-muted/30"
+                aria-expanded={chapterOpen}
+                className="flex w-full items-center gap-3 bg-primary/[0.04] px-4 py-3.5 text-left transition hover:bg-primary/[0.07]"
               >
                 <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-xs font-bold text-primary">
                   {chapterIndex + 1}
@@ -276,26 +276,35 @@ export default function CurriculumView({
               </button>
 
               {chapterOpen && (
-                <div className="border-t border-border/60 bg-muted/10 p-2 md:p-3">
+                <div className="relative space-y-2 border-t border-border/60 bg-muted/10 py-3 pl-8 pr-3 sm:pl-10">
+                  <span aria-hidden="true" className="absolute bottom-3 left-4 top-3 w-px bg-primary/25" />
                   {chapter.sessions.map((session, sessionIndex) => {
                     const sessionOpen = expanded.has(session.id);
                     const sessionDone = session.lessons.filter(isCompleted).length;
                     if (session.lessons.length === 0) return null;
+                    const sessionComplete = sessionDone === session.lessons.length;
                     return (
-                      <div key={session.id} className="mb-2 overflow-hidden rounded-xl border border-border/60 bg-background last:mb-0">
+                      <div
+                        key={session.id}
+                        className={`relative rounded-xl border shadow-sm ${sessionComplete ? "border-emerald-200/80 bg-emerald-50/35 dark:border-emerald-900/70 dark:bg-emerald-950/15" : "border-border/60 bg-background"}`}
+                      >
+                        <span aria-hidden="true" className="absolute -left-4 top-5 h-px w-4 bg-primary/25 sm:-left-6 sm:w-6" />
                         <button
                           type="button"
                           onClick={() => toggle(session.id)}
-                          className="flex w-full items-center gap-2.5 px-3.5 py-3 text-left transition hover:bg-muted/30"
+                          aria-expanded={sessionOpen}
+                          className="flex w-full items-center gap-2.5 rounded-t-xl px-3.5 py-3 text-left transition hover:bg-muted/30"
                         >
                           {sessionOpen ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />}
-                          <CalendarDays className="h-4 w-4 shrink-0 text-primary" />
-                          <span className="min-w-0 flex-1 truncate text-xs font-semibold text-foreground">Buổi {sessionIndex + 1}: {session.title}</span>
+                          <span className={`inline-flex h-7 min-w-16 shrink-0 items-center justify-center rounded-lg px-2 text-[11px] font-bold ${sessionComplete ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300" : "bg-primary/10 text-primary"}`}>
+                            Buổi {sessionIndex + 1}
+                          </span>
+                          <span className="min-w-0 flex-1 truncate text-xs font-semibold text-foreground">{session.title}</span>
                           <span className="text-[10px] text-muted-foreground">{sessionDone}/{session.lessons.length}</span>
                         </button>
 
                         {sessionOpen && (
-                          <div className="grid gap-2 border-t border-border/50 p-2.5 md:grid-cols-2 xl:grid-cols-3">
+                          <div className="grid gap-2 rounded-b-xl border-t border-border/50 bg-background/65 p-2.5 md:grid-cols-2 xl:grid-cols-3">
                             {session.lessons.map((lesson) => {
                               const completed = isCompleted(lesson);
                               const locked = examLocked(lesson, completed);

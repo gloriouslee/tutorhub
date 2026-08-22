@@ -1218,6 +1218,9 @@ test("teacher class curriculum uses a compact full-width workspace", async () =>
   assert.match(curriculum, /w-full space-y-3/);
   assert.match(curriculum, /Cấu trúc lộ trình/);
   assert.doesNotMatch(curriculum, /max-w-3xl/);
+  assert.match(curriculum, /border-l-4 border-border\/60 border-l-primary\/60/);
+  assert.match(curriculum, /absolute bottom-3 left-4 top-3 w-px bg-primary\/25/);
+  assert.match(curriculum, /pl-8 pr-3 sm:pl-10/);
 
   // Trạng thái gấp/mở phải được nhớ theo lớp: bung sẵn mọi buổi mỗi lần vào lại
   // là lý do người dùng phải cuộn rất nhiều.
@@ -1276,6 +1279,9 @@ test("student curriculum launches a focused full-screen learning player", async 
   assert.match(curriculum, /Bắt đầu học/);
   assert.match(curriculum, /Tiếp tục học/);
   assert.doesNotMatch(curriculum, /lg:h-\[600px\]/);
+  assert.match(curriculum, /border-l-4 border-border\/70 border-l-primary\/60/);
+  assert.match(curriculum, /aria-expanded=\{chapterOpen\}/);
+  assert.match(curriculum, /aria-expanded=\{sessionOpen\}/);
   assert.doesNotMatch(studentClass, /onWatch=\{/);
   assert.match(studentClass, /\/student\/classes\/\$\{classId\}\/learn\/\$\{lessonId\}/);
 

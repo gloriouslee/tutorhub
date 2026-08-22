@@ -1078,11 +1078,11 @@ export default function CurriculumTab({ classId, schedule, students = [], gradeL
           <div
             key={chapter.id}
             {...(canSort ? itemProps("chapters", ci) : {})}
-            className={`overflow-hidden rounded-xl border border-border/60 bg-card shadow-sm ${canSort ? itemClass("chapters", ci) : ""}`}
+            className={`overflow-hidden rounded-xl border border-l-4 border-border/60 border-l-primary/60 bg-card shadow-sm ${canSort ? itemClass("chapters", ci) : ""}`}
           >
             {/* Chapter header */}
             <div
-              className="flex cursor-pointer select-none items-center gap-2.5 bg-muted/30 px-3.5 py-2.5 transition-colors hover:bg-muted/50"
+              className="flex cursor-pointer select-none items-center gap-2.5 bg-primary/[0.045] px-3.5 py-2.5 transition-colors hover:bg-primary/[0.075]"
               onClick={() => toggle(chapter.id)}
             >
               <DragHandle
@@ -1112,21 +1112,38 @@ export default function CurriculumTab({ classId, schedule, students = [], gradeL
 
             {/* Sessions */}
             {chExpanded && (
-              <div className="divide-y divide-border/50">
+              <div className="relative space-y-2 border-t border-border/50 bg-muted/10 py-3 pl-8 pr-3 sm:pl-10">
+                <span aria-hidden="true" className="absolute bottom-3 left-4 top-3 w-px bg-primary/25" />
                 {chapterSessions.map((session, si) => {
                   const sExpanded = isOpen(session.id);
                   const sessionLessons = visibleLessonsOf(session);
                   const publishedCount = session.lessons.filter(l => l.is_published).length;
-                  const state = SESSION_STATE_META[sessionState(session.date)];
+                  const stateKey = sessionState(session.date);
+                  const state = SESSION_STATE_META[stateKey];
+                  const sessionTone = stateKey === "today"
+                    ? "border-primary/40 bg-primary/[0.045]"
+                    : stateKey === "upcoming"
+                      ? "border-sky-200/80 bg-sky-50/40 dark:border-sky-900/70 dark:bg-sky-950/15"
+                      : stateKey === "unscheduled"
+                        ? "border-amber-200/80 bg-amber-50/35 dark:border-amber-900/70 dark:bg-amber-950/15"
+                        : "border-border/60 bg-background";
+                  const sessionNumberTone = stateKey === "today"
+                    ? "bg-primary text-primary-foreground"
+                    : stateKey === "upcoming"
+                      ? "bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300"
+                      : stateKey === "unscheduled"
+                        ? "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300"
+                        : "bg-muted text-muted-foreground";
                   return (
                     <div
                       key={session.id}
                       {...(canSort ? itemProps(`sessions:${chapter.id}`, si) : {})}
-                      className={`bg-card ${canSort ? itemClass(`sessions:${chapter.id}`, si) : ""}`}
+                      className={`relative rounded-xl border shadow-sm ${sessionTone} ${canSort ? itemClass(`sessions:${chapter.id}`, si) : ""}`}
                     >
+                      <span aria-hidden="true" className="absolute -left-4 top-5 h-px w-4 bg-primary/25 sm:-left-6 sm:w-6" />
                       {/* Session header — wraps on mobile so the title isn't squeezed */}
                       <div
-                        className="flex cursor-pointer select-none flex-wrap items-center gap-x-2 gap-y-1.5 px-4 py-2 transition-colors hover:bg-muted/30"
+                        className="flex cursor-pointer select-none flex-wrap items-center gap-x-2 gap-y-1.5 rounded-t-xl px-3 py-2.5 transition-colors hover:bg-muted/30"
                         onClick={() => toggle(session.id)}
                       >
                         {/* Left: chevron + số buổi + tên (chiếm cả hàng trên mobile) */}
@@ -1137,7 +1154,7 @@ export default function CurriculumTab({ classId, schedule, students = [], gradeL
                           label="Kéo để đổi thứ tự buổi"
                         />
                         {sExpanded ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" /> : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
-                        <span className="text-xs text-muted-foreground shrink-0 w-12 sm:w-14">Buổi {si + 1}</span>
+                        <span className={`inline-flex h-6 min-w-14 shrink-0 items-center justify-center rounded-lg px-2 text-[11px] font-bold ${sessionNumberTone}`}>Buổi {si + 1}</span>
                         <span className="flex-1 min-w-0 text-sm font-medium text-foreground" onClick={e => e.stopPropagation()}>
                           <InlineEdit
                             value={session.title}
@@ -1219,7 +1236,7 @@ export default function CurriculumTab({ classId, schedule, students = [], gradeL
 
                       {/* Lessons */}
                       {sExpanded && (
-                        <div className="space-y-1.5 px-4 pb-2.5">
+                        <div className="space-y-1.5 rounded-b-xl border-t border-border/45 bg-background/55 px-3 py-2.5 sm:pl-8">
                           {sessionLessons.length === 0 && (
                             <p className="text-xs text-muted-foreground py-2 italic">
                               {filtering ? "Không có nội dung khớp bộ lọc." : "Chưa có nội dung nào."}
