@@ -514,13 +514,21 @@ export default function TeacherClassesPage() {
               return (
                 <Card
                   key={cls.id}
-                  className="overflow-hidden hover:shadow-xl hover:-translate-y-1 transition-all duration-300 group animate-fade-in border-border/50 flex flex-col"
+                  className="relative cursor-pointer overflow-hidden hover:shadow-xl hover:-translate-y-1 transition-all duration-300 group animate-fade-in border-border/50 flex flex-col"
                   style={{ animationDelay: `${i * 80}ms` }}
                 >
                   {/* Color bar */}
                   <div className="h-1.5 w-full shrink-0" style={{ background: cls.color }} />
 
-                  <CardHeader className="pb-3 bg-muted/10">
+                  {/* Stretched link: toàn bộ phần thông tin của thẻ mở trang quản lý.
+                      Khu vực thao tác bên dưới có z-index riêng nên vẫn hoạt động độc lập. */}
+                  <Link
+                    href={`/teacher/classes/${cls.id}`}
+                    aria-label={`Quản lý lớp ${cls.class_name}`}
+                    className="absolute inset-0 z-0 rounded-[inherit] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
+                  />
+
+                  <CardHeader className="pointer-events-none relative z-10 pb-3 bg-muted/10">
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex items-center gap-3 min-w-0">
                         <div
@@ -541,7 +549,7 @@ export default function TeacherClassesPage() {
                     </div>
                   </CardHeader>
 
-                  <CardContent className="space-y-3 flex-1 flex flex-col pt-3">
+                  <CardContent className="pointer-events-none relative z-10 space-y-3 flex-1 flex flex-col pt-3">
                     {/* Grade badge */}
                     {cls.grade && (
                       <div className="flex items-center gap-1.5">
@@ -584,32 +592,32 @@ export default function TeacherClassesPage() {
                     </div>
 
                     {/* Actions */}
-                    <div className="flex items-center gap-2 pt-1 mt-auto border-t border-border/50">
+                    <div className="pointer-events-none relative z-20 flex items-center gap-2 pt-1 mt-auto border-t border-border/50">
                       {liveLink ? (
                         <Button
                           size="sm"
                           variant="gradient"
-                          className="flex-1"
+                          className="pointer-events-auto flex-1"
                           onClick={() => window.open(liveLink, "_blank", "noopener,noreferrer")}
                         >
                           <Video className="h-3.5 w-3.5 mr-1.5" /> Mở Online
                         </Button>
                       ) : (
-                        <Link href={`/teacher/classes/${cls.id}?tab=schedule`} className="flex-1">
-                          <Button size="sm" variant="outline" className="w-full gap-1.5 text-muted-foreground">
+                        <Button asChild size="sm" variant="outline" className="pointer-events-auto flex-1 gap-1.5 text-muted-foreground">
+                          <Link href={`/teacher/classes/${cls.id}?tab=schedule`}>
                             <Video className="h-3.5 w-3.5" /> Thêm link
-                          </Button>
-                        </Link>
-                      )}
-                      <Link href={`/teacher/classes/${cls.id}`}>
-                        <Button size="sm" variant="outline" className="gap-1.5">
-                          <Settings className="h-3.5 w-3.5" /> Quản lý
+                          </Link>
                         </Button>
-                      </Link>
+                      )}
+                      <Button asChild size="sm" variant="outline" className="pointer-events-auto gap-1.5">
+                        <Link href={`/teacher/classes/${cls.id}`}>
+                          <Settings className="h-3.5 w-3.5" /> Quản lý
+                        </Link>
+                      </Button>
                       <Button
                         size="sm"
                         variant="outline"
-                        className="px-2.5"
+                        className="pointer-events-auto px-2.5"
                         aria-label={`Nhân bản lớp ${cls.class_name}`}
                         title="Nhân bản lớp (không sao chép học viên)"
                         disabled={classAction !== null}
@@ -625,7 +633,7 @@ export default function TeacherClassesPage() {
                       <Button
                         size="sm"
                         variant="outline"
-                        className="px-2.5 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                        className="pointer-events-auto px-2.5 text-destructive hover:bg-destructive/10 hover:text-destructive"
                         aria-label={`Xóa lớp ${cls.class_name}`}
                         title="Xóa lớp"
                         disabled={classAction !== null}
