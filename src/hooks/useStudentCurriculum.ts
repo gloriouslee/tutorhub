@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import {
-  getStudentCurriculum,
+  getStudentLearningSnapshot,
   type CurriculumChapter,
 } from "@/lib/storage";
 
@@ -54,7 +54,8 @@ function refreshEntry(
   if (!force && fresh) return Promise.resolve(entry.data!);
 
   entry.error = null;
-  const request = getStudentCurriculum(classId)
+  const request = getStudentLearningSnapshot([classId])
+    .then((snapshot) => snapshot.curricula[classId] ?? [])
     .then((chapters) => {
       entry.data = chapters;
       entry.fetchedAt = Date.now();

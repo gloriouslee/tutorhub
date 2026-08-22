@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { LearningModeBadge } from "@/components/shared";
 import { getSubmissionsByStudent, type SubmissionRecord } from "@/lib/supabase/submissions";
-import { kvGet, getTeacherHomework, getAllTeacherAttendance, getClassScheduleOverride, getStudentPackages, getStudentLessonProgress, saveStudentLessonProgress, getClassMaterials, getExamResult, getExamScoresByStudent, incrementMaterialDownload, isAssignedToStudent, type StudentPackage, type CurriculumSession, type StoredClassMaterial, type StoredExamScore } from "@/lib/storage";
+import { kvGet, getTeacherHomework, getAllTeacherAttendance, getStudentPackages, getStudentLessonProgress, saveStudentLessonProgress, getClassMaterials, getStudentLearningSnapshot, getExamScoresByStudent, incrementMaterialDownload, isAssignedToStudent, type StudentPackage, type CurriculumSession, type StoredClassMaterial, type StoredExamScore, type StudentLearningSnapshot } from "@/lib/storage";
 import CurriculumView from "@/components/student/CurriculumView";
 import StudentOverviewTab from "@/components/student/StudentOverviewTab";
 import StudentHomeworkTab from "@/components/student/StudentHomeworkTab";
@@ -297,13 +297,13 @@ export default function StudentClassDetailPage() {
 
   useEffect(() => {
     setManualHomeworkLoaded(false);
-    getClassScheduleOverride(classId).then(ov => setScheduleOverride(ov as ClassInfo["schedule"] | null));
+    setScheduleOverride((cls?.schedule ?? null) as ClassInfo["schedule"] | null);
     getTeacherHomework<HomeworkItem>([classId])
       .then(all => setTeacherHomework(all.filter(h => h.class_id === classId && isAssignedToStudent(h.assigned_to, studentId))))
       .catch(() => setTeacherHomework([]))
       .finally(() => setManualHomeworkLoaded(true));
     getExamScoresByStudent(studentId).then(setStoredScores);
-  }, [classId, studentId]);
+  }, [classId, cls?.schedule, studentId]);
 
   useEffect(() => { getClassMaterials(classId).then(setUploadedMaterials); }, [classId]);
   const materials = useMemo(() => {
@@ -343,6 +343,8 @@ export default function StudentClassDetailPage() {
     let cancelled = false;
     setCurriculumHomeworkLoaded(false);
     void (async () => {
+      const learningSnapshot = await getStudentLearningSnapshot([classId])
+        .catch((): StudentLearningSnapshot => ({ curricula: {}, examResults: {} }));
       const today = new Date().toISOString().slice(0, 10);
       const byDate: Record<string, CurriculumSession> = {};
       const currHomeworkLoaders: Array<() => Promise<HomeworkItem>> = [];
@@ -369,7 +371,7 @@ export default function StudentClassDetailPage() {
               }));
             } else if (lesson.type === "exam") {
               currHomeworkLoaders.push(async () => {
-                const result = await getExamResult(classId, lesson.id, studentId).catch(() => null);
+                const result = learningSnapshot.examResults[`${classId}:${lesson.id}`] ?? null;
                 const manual = result
                   ? Object.values(result.manual_scores ?? {}).reduce((a, b) => a + b, 0)
                   : 0;

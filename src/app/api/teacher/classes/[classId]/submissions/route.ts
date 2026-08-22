@@ -80,15 +80,18 @@ export async function GET(
     if (registriesResponse.error) throw registriesResponse.error;
     if (fileResponse.error) throw fileResponse.error;
 
-    const candidateStudentIds = new Set((classScope.student_ids ?? []).map(String));
-    for (const row of registriesResponse.data ?? []) {
-      if (!Array.isArray(row.value)) continue;
-      row.value.forEach((studentId) => candidateStudentIds.add(String(studentId)));
-    }
-
-    const resultIds = examIds.flatMap((lessonId) =>
-      [...candidateStudentIds].map((studentId) => `${classId}_${lessonId}_${studentId}`),
+    const lessonByRegistryId = new Map(
+      examIds.map((lessonId) => [`${classId}_${lessonId}`, lessonId]),
     );
+    // The registry already contains the students who submitted each exam.
+    // Query only those exact rows instead of every exam × every class student.
+    const resultIds = (registriesResponse.data ?? []).flatMap((row) => {
+      const lessonId = lessonByRegistryId.get(String(row.id));
+      if (!lessonId || !Array.isArray(row.value)) return [];
+      return row.value.map(
+        (studentId) => `${classId}_${lessonId}_${String(studentId)}`,
+      );
+    });
     // Keep each PostgREST URL bounded even for large classes with many exams.
     const resultChunks = Array.from(
       { length: Math.ceil(resultIds.length / 50) },

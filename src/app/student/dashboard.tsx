@@ -11,13 +11,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   getNotifications, getNotificationStates, getTeacherHomework, getExamScoresByStudent,
-  getStudentCurriculum, getExamResult, getAllTeacherAttendance,
+  getStudentLearningSnapshot, getAllTeacherAttendance,
   isAssignedToStudent,
-  type TeacherAttendanceRecord,
+  type StudentLearningSnapshot, type TeacherAttendanceRecord,
 } from "@/lib/storage";
 import { getSubmissionsByStudent } from "@/lib/supabase/submissions";
 import Link from "next/link";
-import { formatDate, mapWithConcurrency } from "@/lib/utils";
+import { formatDate } from "@/lib/utils";
 import { useStudentContext } from "@/hooks/useStudentContext";
 import ScheduleCalendar from "@/components/student/ScheduleCalendar";
 import { useRouter } from "next/navigation";
@@ -76,13 +76,19 @@ export default function StudentDashboard() {
   useEffect(() => {
     if (!ready) return;
 
-    const curriculaPromise = Promise.all(
-      myClasses.map(async (cls) => ({
+    const learningSnapshotPromise = getStudentLearningSnapshot(
+      myClasses.map((cls) => cls.id),
+    ).catch((): StudentLearningSnapshot => ({ curricula: {}, examResults: {} }));
+    const curriculaPromise = learningSnapshotPromise.then((snapshot) =>
+      myClasses.map((cls) => ({
         classId: cls.id,
-        chapters: await getStudentCurriculum(cls.id).catch(() => []),
+        chapters: snapshot.curricula[cls.id] ?? [],
       })),
     );
-    const examResultsPromise = curriculaPromise.then(async (curricula) => {
+    const examResultsPromise = Promise.all([
+      curriculaPromise,
+      learningSnapshotPromise,
+    ]).then(([curricula, snapshot]) => {
       const exams = curricula.flatMap(({ classId, chapters }) =>
         chapters
           .flatMap(ch => ch.sessions)
@@ -90,11 +96,8 @@ export default function StudentDashboard() {
           .filter(lesson => lesson.type === "exam")
           .map(lesson => ({ classId, lesson })),
       );
-      const results = await mapWithConcurrency(
-        exams,
-        8,
-        ({ classId, lesson }) =>
-          getExamResult(classId, lesson.id, studentId).catch(() => null),
+      const results = exams.map(
+        ({ classId, lesson }) => snapshot.examResults[`${classId}:${lesson.id}`] ?? null,
       );
       return { exams, results };
     });

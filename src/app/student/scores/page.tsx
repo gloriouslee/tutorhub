@@ -13,7 +13,7 @@ import StudentScopeBar, {
   useStudentWorkspaceScope,
 } from "@/components/student/StudentScopeBar";
 import { useStudentContext } from "@/hooks/useStudentContext";
-import { getExamResult, getStudentCurriculum, type StoredExamScore } from "@/lib/storage";
+import { getStudentLearningSnapshot, type StoredExamScore } from "@/lib/storage";
 import { formatDate } from "@/lib/utils";
 import {
   AlertCircle,
@@ -183,17 +183,16 @@ export default function StudentScoresPage() {
           return response.json() as Promise<StoredExamScore[]>;
         });
 
-        const classResultsRequest = Promise.all(myClasses.map(async (cls) => {
-          const chapters = await getStudentCurriculum(cls.id);
+        const classResultsRequest = getStudentLearningSnapshot(
+          myClasses.map((cls) => cls.id),
+        ).then((snapshot) => myClasses.map((cls) => {
+          const chapters = snapshot.curricula[cls.id] ?? [];
           const examLessons = chapters
             .flatMap((chapter) => chapter.sessions)
             .flatMap((session) => session.lessons)
             .filter((lesson) => lesson.type === "exam");
-          const results = await Promise.all(examLessons.map((lesson) => (
-            getExamResult(cls.id, lesson.id, studentId).catch(() => null)
-          )));
-          return examLessons.flatMap<ResultRecord>((lesson, index) => {
-            const result = results[index];
+          return examLessons.flatMap<ResultRecord>((lesson) => {
+            const result = snapshot.examResults[`${cls.id}:${lesson.id}`];
             if (!result) return [];
             const manualScore = Object.values(result.manual_scores ?? {}).reduce((sum, value) => sum + value, 0);
             return [{

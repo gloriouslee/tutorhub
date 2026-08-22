@@ -955,7 +955,8 @@ test("teacher profile, schedule and submissions use canonical stores", async () 
   assert.match(snapshotRoute, /classScope\.tutor_id !== identity\.teacherId/);
   assert.match(snapshotRoute, /\.from\("kv_exam_results"\)/);
   assert.match(snapshotRoute, /\.from\("hw_submissions"\)/);
-  assert.match(snapshotRoute, /candidateStudentIds/);
+  assert.match(snapshotRoute, /lessonByRegistryId/);
+  assert.doesNotMatch(snapshotRoute, /examIds\.flatMap[\s\S]{0,180}candidateStudentIds/);
   assert.match(classDetail, /getTeacherSubmissionSnapshot/);
   assert.match(curriculumTab, /getTeacherSubmissionSnapshot/);
   assert.match(homeworkPage, /getTeacherSubmissionSnapshot/);
@@ -970,6 +971,7 @@ test("student portal keeps paid material, submissions and progress server-scoped
   const curriculumRoute = await read(
     "src/app/api/student/curriculum/[classId]/route.ts",
   );
+  const curriculumServer = await read("src/lib/student-learning-server.ts");
   const progressRoute = await read("src/app/api/student/progress/route.ts");
   const classPage = await read("src/app/student/classes/[classId]/page.tsx");
   const player = await read("src/components/student/ClassLearningPlayer.tsx");
@@ -982,8 +984,9 @@ test("student portal keeps paid material, submissions and progress server-scoped
   assert.match(materialsRoute, /access_granted: canAccessFull/);
   assert.match(materialsRoute, /videoUrl: _videoUrl/);
   assert.match(curriculumRoute, /\.contains\("student_ids", \[actor\.studentId\]\)/);
-  assert.match(curriculumRoute, /questions: _questions/);
-  assert.match(curriculumRoute, /publicExamContent/);
+  assert.match(curriculumRoute, /sanitizeStudentCurriculum/);
+  assert.match(curriculumServer, /questions: _questions/);
+  assert.match(curriculumServer, /publicExamContent/);
   assert.match(progressRoute, /actor\?\.role !== "student"/);
   assert.match(classPage, /useStudentCurriculum/);
   assert.match(classPage, /getStudentLessonProgress/);
@@ -1106,7 +1109,8 @@ test("student class and material screens avoid known sequential request waterfal
 
   assert.doesNotMatch(classesPage, /getOnlineLink|for \(const cls of myClasses\)/);
   assert.match(classesPage, /const liveLink = cls\.zoom_link/);
-  assert.match(scoresPage, /Promise\.all\(myClasses\.map/);
+  assert.match(scoresPage, /getStudentLearningSnapshot/);
+  assert.doesNotMatch(scoresPage, /getExamResult|getStudentCurriculum/);
   assert.match(browseView, /getStudentPackagesForClasses/);
   assert.match(browseView, /Promise\.all\(pkgIds\.map/);
 });
@@ -1192,8 +1196,9 @@ test("homework navigation and data loading always provide immediate feedback", a
 
   assert.match(teacherHomework, /loadingHomework/);
   assert.match(teacherHomework, /<HomeworkLoadingState \/>/);
-  // Ba nguồn độc lập phải tải song song; bài nộp tải sau vì cần id bài tập.
-  assert.match(teacherHomework, /const \[manual, curriculumPerClass, students\] = await Promise\.all/);
+  // Ba nguồn độc lập tải song song; toàn bộ curriculum được batch theo lớp.
+  assert.match(teacherHomework, /const \[manual, curriculaByClass, students\] = await Promise\.all/);
+  assert.match(teacherHomework, /getCurricula\(classIds\)/);
   // Chấm ngay trong hàng đợi, không điều hướng sang trang khác.
   assert.match(teacherHomework, /<SubmissionGrader/);
 

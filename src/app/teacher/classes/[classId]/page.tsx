@@ -10,13 +10,12 @@ import { Badge } from "@/components/ui/badge";
 import { LearningModeBadge } from "@/components/shared";
 import {
   getStudentCommentsMany, saveStudentComment,
-  getClassScheduleOverride,
-  getOnlineLink, saveOnlineLink,
+  saveOnlineLink,
   getCurriculum, type CurriculumSession as CurriculumSessionData,
   getStudentPackages, saveStudentPackages, type StudentPackage,
   getClassMaterials, type StoredClassMaterial,
   kvGet,
-  getClasses, getStudents, removeStudentFromClass,
+  getStudents, removeStudentFromClass,
   getTeacherHomework, upsertTeacherHomework, removeTeacherHomework,
   getAllTeacherAttendance,
 } from "@/lib/storage";
@@ -222,14 +221,10 @@ export default function TeacherClassDetailPage() {
 
   // DB class row (Supabase) — nguồn chính cho danh sách student_ids của lớp
   const [dbStudentIds, setDbStudentIds] = useState<string[] | null>(null);
+  const cls = myClasses.find(c => c.id === classId);
   useEffect(() => {
-    getClasses()
-      .then(list => {
-        const row = list.find(c => c.id === classId);
-        if (row) setDbStudentIds((row.student_ids as string[] | null) ?? []);
-      })
-      .catch(() => {});
-  }, [classId]);
+    setDbStudentIds((cls?.student_ids as string[] | null | undefined) ?? null);
+  }, [cls?.student_ids]);
 
   useEffect(() => {
     getStudents()
@@ -251,20 +246,11 @@ export default function TeacherClassDetailPage() {
   // Student packages per class (persisted to localStorage)
   const [studentPackages, setStudentPackages] = useState<Record<string, StudentPackage>>({});
 
-  const cls = myClasses.find(c => c.id === classId);
-
   useEffect(() => {
     if (!cls) return;
-    async function load() {
-      const override = await getClassScheduleOverride(classId);
-      setCurrentSchedule(override ?? cls!.schedule);
-      // null = chưa từng đặt → dùng zoom_link mặc định; "" = giáo viên đã xóa → không hiện link
-      const stored = await getOnlineLink(classId);
-      const saved = stored === null ? (cls!.zoom_link ?? "") : stored;
-      setOnlineLink(saved);
-      setOnlineLinkDraft(saved);
-    }
-    load();
+    setCurrentSchedule(cls.schedule);
+    setOnlineLink(cls.zoom_link ?? "");
+    setOnlineLinkDraft(cls.zoom_link ?? "");
   }, [classId, cls]);
 
   // Load session notes from localStorage

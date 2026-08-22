@@ -52,13 +52,51 @@ interface AccountContextState {
 }
 
 const CACHE_TTL_MS = 120_000;
+const SESSION_CACHE_KEY = "tutorhub_account_context_v1";
 
 let cachedContext: AccountContext | null = null;
 let cachedAt = 0;
 let inFlight: Promise<AccountContext> | null = null;
 let cacheGeneration = 0;
 
+function hydrateSessionCache() {
+  if (cachedContext || typeof window === "undefined") return;
+  try {
+    const raw = window.sessionStorage.getItem(SESSION_CACHE_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw) as {
+      context?: AccountContext;
+      cachedAt?: number;
+    };
+    if (
+      parsed.context
+      && typeof parsed.cachedAt === "number"
+      && Date.now() - parsed.cachedAt < CACHE_TTL_MS
+    ) {
+      cachedContext = parsed.context;
+      cachedAt = parsed.cachedAt;
+    } else {
+      window.sessionStorage.removeItem(SESSION_CACHE_KEY);
+    }
+  } catch {
+    // Ignore browsers that block session storage.
+  }
+}
+
+function persistSessionCache(context: AccountContext) {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.setItem(
+      SESSION_CACHE_KEY,
+      JSON.stringify({ context, cachedAt }),
+    );
+  } catch {
+    // Memory cache remains available when storage is blocked or full.
+  }
+}
+
 function getFreshCachedContext(): AccountContext | null {
+  hydrateSessionCache();
   if (!cachedContext || Date.now() - cachedAt >= CACHE_TTL_MS) return null;
   return cachedContext;
 }
@@ -82,6 +120,7 @@ export function loadAccountContext(): Promise<AccountContext> {
       if (generation === cacheGeneration) {
         cachedContext = context;
         cachedAt = Date.now();
+        persistSessionCache(context);
       }
       return context;
     })
@@ -99,6 +138,7 @@ export function resetAccountContextCache() {
   inFlight = null;
   invalidateClientQueries();
   if (typeof window !== "undefined") {
+    try { window.sessionStorage.removeItem(SESSION_CACHE_KEY); } catch {}
     window.dispatchEvent(new Event("account-context-reset"));
   }
 }

@@ -115,11 +115,29 @@ export async function kvGet<T>(key: string, fallback: T): Promise<T> {
   }, 30_000);
 }
 
+function invalidateKvRelated(table: string) {
+  if (table === "kv_curriculum") {
+    invalidateClientQueries(
+      "teacher-curricula:",
+      "student-curriculum:",
+      "student-learning-snapshot:",
+      "teacher-submission-snapshot:",
+    );
+  }
+  if (table === "kv_exam_results" || table === "kv_exam_submissions") {
+    invalidateClientQueries(
+      "student-learning-snapshot:",
+      "teacher-submission-snapshot:",
+    );
+  }
+}
+
 export async function kvSet<T>(key: string, value: T): Promise<void> {
   kvWriteLocal(key, value);
   const route = kvRoute(key);
   if (!route) return;
   invalidateClientQueries(`kv:${route.table}:${route.id}`);
+  invalidateKvRelated(route.table);
   try {
     const { error } = await supabase
       .from(route.table)
@@ -151,6 +169,7 @@ export async function kvDelete(key: string): Promise<void> {
   const route = kvRoute(key);
   if (!route) return;
   invalidateClientQueries(`kv:${route.table}:${route.id}`);
+  invalidateKvRelated(route.table);
   try {
     const { error } = await supabase.from(route.table).delete().eq("id", route.id);
     if (error) console.error(`Error deleting ${route.table}/${route.id}:`, error);
@@ -163,6 +182,7 @@ async function getEntity<T>(
   key: string,
   table: string,
   query: () => Promise<{ data: T[] | null; error: unknown }>,
+  ttlMs = 30_000,
 ): Promise<T[]> {
   return cachedClientQuery(`entity:${table}`, async () => {
     try {
@@ -182,7 +202,7 @@ async function getEntity<T>(
     const local = readLocal<T>(key);
     if (local !== null) return local;
     return [];
-  }, 30_000);
+  }, ttlMs);
 }
 
 function reportQueryFailure(table: string, error: unknown) {
@@ -593,7 +613,8 @@ export async function getNotifications(): Promise<Notification[]> {
   return getEntity<Notification>(
     ENTITY_KEYS.notifications,
     "notifications",
-    () => supabase.from("notifications").select("*").order("created_at", { ascending: false }) as any
+    () => supabase.from("notifications").select("*").order("created_at", { ascending: false }) as any,
+    120_000,
   );
 }
 
@@ -619,7 +640,7 @@ export async function getNotificationStates(): Promise<Record<string, { isDelete
         { isDeleted: row.is_deleted === true },
       ]),
     );
-  }, 20_000);
+  }, 60_000);
 }
 
 export async function markNotificationState(
@@ -1038,6 +1059,26 @@ export async function getCurriculum(classId: string): Promise<CurriculumChapter[
   return kvGet<CurriculumChapter[]>(`tutorhub_curriculum_${classId}`, []);
 }
 
+/** Read several teacher-owned curricula in one PostgREST round trip. */
+export async function getCurricula(
+  classIds: readonly string[],
+): Promise<Record<string, CurriculumChapter[]>> {
+  const ids = [...new Set(classIds.filter(Boolean))];
+  if (ids.length === 0) return {};
+  const key = normalizedQueryKey("teacher-curricula", { classIds: ids });
+  return cachedClientQuery(key, async () => {
+    const { data, error } = await supabase
+      .from("kv_curriculum")
+      .select("id,value")
+      .in("id", ids);
+    if (error) throw error;
+    const rows = new Map(
+      (data ?? []).map((row) => [String(row.id), row.value as CurriculumChapter[]]),
+    );
+    return Object.fromEntries(ids.map((id) => [id, rows.get(id) ?? []]));
+  }, 60_000);
+}
+
 /** Published, assigned and answer-free curriculum for the signed-in student. */
 export async function getStudentCurriculum(classId: string): Promise<CurriculumChapter[]> {
   return cachedClientQuery(`student-curriculum:${classId}`, async () => {
@@ -1264,6 +1305,32 @@ export async function getInvoices(): Promise<TuitionInvoice[]> {
     reportQueryFailure("invoices", error instanceof Error ? error.message : "unknown_error");
     return [];
   }
+}
+
+export interface StudentLearningSnapshot {
+  curricula: Record<string, CurriculumChapter[]>;
+  examResults: Record<string, StoredExamResult>;
+}
+
+/**
+ * One authenticated request for all published curricula and the signed-in
+ * student's matching online-exam results. This replaces the old
+ * class -> curriculum -> exam -> result request waterfall.
+ */
+export async function getStudentLearningSnapshot(
+  classIds: readonly string[],
+): Promise<StudentLearningSnapshot> {
+  const ids = [...new Set(classIds.filter(Boolean))];
+  if (ids.length === 0) return { curricula: {}, examResults: {} };
+  const key = normalizedQueryKey("student-learning-snapshot", { classIds: ids });
+  return cachedClientQuery(key, async () => {
+    const response = await fetch(
+      `/api/student/learning-snapshot?class_ids=${encodeURIComponent(ids.join(","))}`,
+      { cache: "no-store", credentials: "same-origin" },
+    );
+    if (!response.ok) throw new Error("student_learning_snapshot_unavailable");
+    return response.json() as Promise<StudentLearningSnapshot>;
+  }, 60_000);
 }
 
 /** Load invoices while preserving transport errors for screens that render retry states. */

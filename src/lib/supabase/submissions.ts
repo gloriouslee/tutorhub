@@ -72,7 +72,12 @@ export async function insertSubmission(
     .select("data")
     .single();
   if (error) { console.error("Insert submission error:", error.message); return null; }
-  invalidateClientQueries("submission-records:", "homework-submissions:", "sidebar-badges:");
+  invalidateClientQueries(
+    "submission-records:",
+    "homework-submissions:",
+    "teacher-submission-snapshot:",
+    "sidebar-badges:",
+  );
   return data.data as SubmissionRecord;
 }
 
@@ -136,6 +141,10 @@ export async function updateGrade(
     .update({ data: updated })
     .eq("id", submissionId);
   if (error) console.error("Update grade error:", error.message);
-  if (!error) invalidateClientQueries("submission-records:", "homework-submissions:");
+  if (!error) invalidateClientQueries(
+    "submission-records:",
+    "homework-submissions:",
+    "teacher-submission-snapshot:",
+  );
   return !error;
 }

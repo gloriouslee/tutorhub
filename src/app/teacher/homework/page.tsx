@@ -12,7 +12,7 @@ import SubmissionGrader, {
   type GradableSubmission,
 } from "@/components/teacher/SubmissionGrader";
 import {
-  getCurriculum, getHwSubmissions, getStudents,
+  getCurricula, getHwSubmissions, getStudents,
   getTeacherHomework, removeTeacherHomework, upsertTeacherHomework,
 } from "@/lib/storage";
 import { getSubmissionsByHomeworks } from "@/lib/supabase/submissions";
@@ -100,10 +100,13 @@ export default function TeacherHomeworkPage() {
       const classIds = myClasses.map((cls) => cls.id);
       const today = toLocalDateKey(new Date());
 
-      const [manual, curriculumPerClass, students] = await Promise.all([
+      const [manual, curriculaByClass, students] = await Promise.all([
         getTeacherHomework<Record<string, unknown>>(classIds).catch(() => []),
-        Promise.all(myClasses.map(async (cls) => {
-          const chapters = await getCurriculum(cls.id).catch(() => []);
+        getCurricula(classIds).catch((): Awaited<ReturnType<typeof getCurricula>> => ({})),
+        getStudents().catch(() => []),
+      ]);
+      const curriculumPerClass = myClasses.map((cls) => {
+          const chapters = curriculaByClass[cls.id] ?? [];
           const rows: Assignment[] = [];
           chapters.forEach((chapter) =>
             chapter.sessions.forEach((session) =>
@@ -131,9 +134,7 @@ export default function TeacherHomeworkPage() {
             ),
           );
           return rows;
-        })),
-        getStudents().catch(() => []),
-      ]);
+        });
       if (cancelled) return;
 
       const curriculum = curriculumPerClass.flat();

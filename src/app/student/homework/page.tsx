@@ -24,7 +24,7 @@ import {
   getSubmissionsByStudent,
   type SubmissionRecord,
 } from "@/lib/supabase/submissions";
-import { getTeacherHomework, getStudentCurriculum, getExamResult, isAssignedToStudent } from "@/lib/storage";
+import { getTeacherHomework, getStudentLearningSnapshot, isAssignedToStudent, type StudentLearningSnapshot } from "@/lib/storage";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const ACCEPTED = ".pdf,.doc,.docx,.jpg,.jpeg,.png";
@@ -126,10 +126,14 @@ export default function StudentHomeworkPage() {
       }
     }
 
-    const curriculumPromise = Promise.all(myClassIds.map(async cid => {
-      const chapters = await safely(getStudentCurriculum(cid), []);
+    const learningSnapshotPromise = safely(
+      getStudentLearningSnapshot(myClassIds),
+      { curricula: {}, examResults: {} } as StudentLearningSnapshot,
+    );
+    const curriculumPromise = learningSnapshotPromise.then((snapshot) => Promise.all(myClassIds.map(async cid => {
+      const chapters = snapshot.curricula[cid] ?? [];
       const items: HomeworkItem[] = [];
-      const examItems: Promise<HomeworkItem>[] = [];
+      const examItems: HomeworkItem[] = [];
       const today = new Date().toISOString().slice(0, 10);
 
       for (const ch of chapters) {
@@ -144,30 +148,26 @@ export default function StudentHomeworkPage() {
                 file_url: (lesson as any).file_url,
               });
             } else if (lesson.type === "exam") {
-              examItems.push(
-                safely(getExamResult(cid, lesson.id, STUDENT_ID), null)
-                  .then(result => {
-                    const manual = result
-                      ? Object.values(result.manual_scores ?? {}).reduce((a, b) => a + b, 0)
-                      : 0;
-                    return {
-                      id: lesson.id, class_id: cid, title: lesson.title,
-                      description: (lesson as any).description,
-                      due_date: (lesson as any).exam_opens_at?.slice(0, 10) ?? s.date ?? today,
-                      created_at: s.date, kind: "exam" as const,
-                      exam_done: !!result,
-                      exam_score: result ? Math.round((result.score + manual) * 100) / 100 : undefined,
-                      exam_total: result?.total,
-                    };
-                  }),
-              );
+              const result = snapshot.examResults[`${cid}:${lesson.id}`] ?? null;
+              const manual = result
+                ? Object.values(result.manual_scores ?? {}).reduce((a, b) => a + b, 0)
+                : 0;
+              examItems.push({
+                id: lesson.id, class_id: cid, title: lesson.title,
+                description: (lesson as any).description,
+                due_date: (lesson as any).exam_opens_at?.slice(0, 10) ?? s.date ?? today,
+                created_at: s.date, kind: "exam" as const,
+                exam_done: !!result,
+                exam_score: result ? Math.round((result.score + manual) * 100) / 100 : undefined,
+                exam_total: result?.total,
+              });
             }
           }
         }
       }
 
-      return [...items, ...await Promise.all(examItems)];
-    }));
+      return [...items, ...examItems];
+    })));
 
     Promise.all([
       safely(getTeacherHomework<HomeworkItem>(myClassIds), []),
