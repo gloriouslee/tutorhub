@@ -465,10 +465,10 @@ test("issuing tuition notifies the class without leaking one student's amount", 
   assert.match(route, /if \(!existing\?\.length\)/);
 });
 
-test("class discovery hides enrolled and active registration classes", () => {
+test("class discovery allows approved-but-removed students to re-register", () => {
   assert.equal(isDiscoverableClass({ enrolled: true, registration_status: null }), false);
   assert.equal(isDiscoverableClass({ enrolled: false, registration_status: "pending" }), false);
-  assert.equal(isDiscoverableClass({ enrolled: false, registration_status: "approved" }), false);
+  assert.equal(isDiscoverableClass({ enrolled: false, registration_status: "approved" }), true);
   assert.equal(isDiscoverableClass({ enrolled: false, registration_status: "rejected" }), true);
   assert.equal(isDiscoverableClass({ enrolled: false, registration_status: "cancelled" }), true);
   assert.equal(isDiscoverableClass({ enrolled: false, registration_status: null }), true);
@@ -578,6 +578,37 @@ test("class registration is student-created and teacher-reviewed", async () => {
   assert.match(migration, /requested_package/);
   assert.match(migration, /requested_unit_price/);
   assert.match(migration, /insert into public\.kv_student_packages/);
+});
+
+test("teacher class lifecycle is owner-scoped and clones no student data", async () => {
+  const classRoute = await read("src/app/api/teacher/classes/[classId]/route.ts");
+  const removeRoute = await read(
+    "src/app/api/teacher/classes/[classId]/students/[studentId]/route.ts",
+  );
+  const classPage = await read("src/app/teacher/classes/page.tsx");
+  const detailPage = await read("src/app/teacher/classes/[classId]/page.tsx");
+  const migration = await read(
+    "supabase/migrations/20260822143202_repair_class_lifecycle_and_registration_packages.sql",
+  );
+
+  assert.match(classRoute, /actor\?\.role !== "teacher"/);
+  assert.match(classRoute, /teacher_clone_class_secure/);
+  assert.match(classRoute, /teacher_delete_class_secure/);
+  assert.match(classRoute, /hasValidMutationOrigin/);
+  assert.match(removeRoute, /teacher_remove_student_from_class_secure/);
+  assert.match(removeRoute, /p_teacher_id: actor\.teacherId/);
+  assert.match(classPage, /action: "clone"/);
+  assert.match(classPage, /method: "DELETE"/);
+  assert.match(detailPage, /Học viên vẫn có thể đăng ký lại/);
+
+  assert.match(migration, /drop constraint if exists class_registration_requested_package_check/);
+  assert.match(migration, /'online', 'advanced', 'offline'/);
+  assert.match(migration, /source_class\.class_name \|\| ' \(Bản sao\)'/);
+  assert.match(migration, /'\{\}'::text\[\]/);
+  assert.match(migration, /jsonb_set\(value, '\{students\}', '\{\}'::jsonb/);
+  assert.match(migration, /set status = 'cancelled'/);
+  assert.doesNotMatch(migration, /insert into public\.hw_submissions/);
+  assert.doesNotMatch(migration, /insert into public\.class_attendance/);
 });
 
 test("class catalog exposes session-only roadmap and sanitized materials", async () => {

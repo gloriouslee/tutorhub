@@ -1757,23 +1757,23 @@ export async function recordTuitionPayment(
   }
 }
 
-/** Xóa học viên khỏi sĩ số lớp trong DB (bảng classes.student_ids). */
+/**
+ * Xóa học viên khỏi lớp qua API nguyên tử: sĩ số, gói học, dữ liệu học phí và
+ * yêu cầu đã duyệt đều được đóng để học viên có thể đăng ký lại sau này.
+ */
 export async function removeStudentFromClass(classId: string, studentId: string): Promise<void> {
-  try {
-    const { data: cls } = await supabase
-      .from("classes")
-      .select("id, student_ids")
-      .eq("id", classId)
-      .maybeSingle();
-    const ids = (cls?.student_ids as string[] | null) ?? [];
-    if (ids.includes(studentId)) {
-      await supabase
-        .from("classes")
-        .update({ student_ids: ids.filter(x => x !== studentId) })
-        .eq("id", classId);
-      invalidateClientQueries("entity:classes");
-    }
-  } catch { /* offline — DB sẽ không đổi, extra-students local vẫn được cập nhật */ }
+  const response = await fetch(
+    `/api/teacher/classes/${encodeURIComponent(classId)}/students/${encodeURIComponent(studentId)}`,
+    {
+      method: "DELETE",
+      credentials: "same-origin",
+    },
+  );
+  if (!response.ok) {
+    const result = await response.json().catch(() => ({})) as { error?: string };
+    throw new Error(result.error ?? "student_remove_failed");
+  }
+  invalidateClientQueries("entity:classes", "student-packages:", "class-tuition:");
 }
 
 export async function deleteTuitionPayment(classId: string, studentId: string, paymentId: string): Promise<void> {

@@ -187,10 +187,18 @@ export async function GET(req: NextRequest) {
 
   const catalog = publicCatalog.map((item) => {
     const request = latestRequests.get(item.id);
+    const enrolled = enrolledClassIds.has(item.id);
+    // Older removals only changed classes.student_ids and left the last request
+    // approved. Treat that stale state as cancelled so existing affected
+    // students can re-register immediately, even before a new removal occurs.
+    const registrationStatus =
+      request?.status === "approved" && !enrolled
+        ? "cancelled"
+        : request?.status ?? null;
     return {
       ...item,
-      enrolled: enrolledClassIds.has(item.id),
-      registration_status: request?.status ?? null,
+      enrolled,
+      registration_status: registrationStatus,
       registration_id: request?.id ?? null,
       registration_package: request?.requested_package ?? null,
     };

@@ -6,6 +6,5 @@ export function isDiscoverableClass(
   return (
     !item.enrolled
     && item.registration_status !== "pending"
-    && item.registration_status !== "approved"
   );
 }

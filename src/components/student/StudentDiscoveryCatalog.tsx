@@ -48,8 +48,19 @@ function requestLabel(status?: string | null) {
   if (status === "pending") return "Đang chờ giáo viên duyệt";
   if (status === "approved") return "Đã được duyệt";
   if (status === "rejected") return "Đã bị từ chối · Có thể đăng ký lại";
+  if (status === "cancelled") return "Đăng ký lại lớp";
   return "Đăng ký lớp";
 }
+
+const REGISTRATION_ERROR: Record<string, string> = {
+  already_enrolled: "Bạn đang theo học lớp này.",
+  class_not_found: "Lớp học không còn tồn tại.",
+  invalid_package_type: "Gói học đã chọn không hợp lệ.",
+  registration_package_unavailable:
+    "Gói học này chưa được hệ thống hỗ trợ. Vui lòng tải lại trang rồi thử lại.",
+  tuition_unavailable: "Chưa thể tải học phí của lớp. Vui lòng thử lại.",
+  invalid_origin: "Phiên làm việc không hợp lệ. Vui lòng tải lại trang.",
+};
 
 function RegisterButton({
   item,
@@ -87,8 +98,12 @@ function RegisterButton({
       const result = await response.json();
       if (!response.ok) throw new Error(String(result.error ?? "request_failed"));
       onRegistered(String(result.id));
-    } catch {
-      setError("Chưa thể gửi yêu cầu. Vui lòng thử lại.");
+    } catch (reason) {
+      const code = reason instanceof Error ? reason.message : "";
+      setError(
+        REGISTRATION_ERROR[code]
+        ?? "Chưa thể gửi yêu cầu. Vui lòng thử lại.",
+      );
       setSaving(false);
     }
   }

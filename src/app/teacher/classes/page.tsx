@@ -9,9 +9,10 @@ import { Badge } from "@/components/ui/badge";
 import { LearningModeBadge, SectionHeader } from "@/components/shared";
 import { getOnlineLink, getTeacherExtraClasses, upsertTeacherExtraClass } from "@/lib/storage";
 import { useTeacherContext } from "@/hooks/useTeacherContext";
+import { resetAccountContextCache } from "@/hooks/useAccountContext";
 import {
   BookOpen, Clock, Video, MapPin, Users, Settings, Search,
-  GraduationCap, X, Plus, Trash2, Check,
+  GraduationCap, X, Plus, Trash2, Check, Copy, Loader2,
 } from "lucide-react";
 import { WEEKDAYS_VI, weekdayLabelVi } from "@/lib/weekday";
 
@@ -341,16 +342,24 @@ export default function TeacherClassesPage() {
   const [onlineLinks,  setOnlineLinks]  = useState<Record<string, string>>({});
   const [extraClasses, setExtraClasses] = useState<ExtraClass[]>([]);
   const [showCreate,   setShowCreate]   = useState(false);
+  const [hiddenClassIds, setHiddenClassIds] = useState<Set<string>>(new Set());
+  const [classAction, setClassAction] = useState<{
+    classId: string;
+    action: "clone" | "delete";
+  } | null>(null);
+  const [classActionError, setClassActionError] = useState("");
 
   useEffect(() => {
     if (!teacherId) return;
     loadExtraClasses().then(list => setExtraClasses(list.filter(c => c.tutor_id === teacherId)));
   }, [teacherId]);
 
-  const myClasses = useMemo(
-    () => [...dbClasses, ...extraClasses],
-    [dbClasses, extraClasses]
-  );
+  const myClasses = useMemo(() => {
+    const byId = new Map(
+      [...dbClasses, ...extraClasses].map((item) => [item.id, item]),
+    );
+    return [...byId.values()].filter((item) => !hiddenClassIds.has(item.id));
+  }, [dbClasses, extraClasses, hiddenClassIds]);
 
   // Load saved online links from localStorage
   useEffect(() => {
@@ -381,6 +390,62 @@ export default function TeacherClassesPage() {
     setExtraClasses(prev => [cls, ...prev]);
   }
 
+  async function cloneClass(cls: ExtraClass) {
+    setClassAction({ classId: cls.id, action: "clone" });
+    setClassActionError("");
+    try {
+      const response = await fetch(
+        `/api/teacher/classes/${encodeURIComponent(cls.id)}`,
+        {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "clone" }),
+        },
+      );
+      const result = await response.json() as ExtraClass & { error?: string };
+      if (!response.ok) throw new Error(result.error ?? "class_clone_failed");
+      setExtraClasses((current) => [result, ...current]);
+      resetAccountContextCache();
+    } catch {
+      setClassActionError(
+        `Không thể nhân bản lớp “${cls.class_name}”. Vui lòng thử lại.`,
+      );
+    } finally {
+      setClassAction(null);
+    }
+  }
+
+  async function deleteClass(cls: ExtraClass) {
+    const studentCount = cls.student_ids?.length ?? 0;
+    const warning = studentCount > 0
+      ? ` Lớp hiện có ${studentCount} học viên.`
+      : "";
+    if (!window.confirm(
+      `Xóa vĩnh viễn lớp “${cls.class_name}”?${warning} Nội dung lớp sẽ bị xóa và không thể hoàn tác.`,
+    )) return;
+
+    setClassAction({ classId: cls.id, action: "delete" });
+    setClassActionError("");
+    try {
+      const response = await fetch(
+        `/api/teacher/classes/${encodeURIComponent(cls.id)}`,
+        { method: "DELETE", credentials: "same-origin" },
+      );
+      const result = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(result.error ?? "class_delete_failed");
+      setHiddenClassIds((current) => new Set(current).add(cls.id));
+      setExtraClasses((current) => current.filter((item) => item.id !== cls.id));
+      resetAccountContextCache();
+    } catch {
+      setClassActionError(
+        `Không thể xóa lớp “${cls.class_name}”. Vui lòng thử lại.`,
+      );
+    } finally {
+      setClassAction(null);
+    }
+  }
+
   return (
     <PortalLayout role="teacher" userName={teacherName || "Giáo viên"} pageTitle="Lớp học của tôi">
       <div className="space-y-6 max-w-6xl mx-auto">
@@ -393,6 +458,12 @@ export default function TeacherClassesPage() {
             </Button>
           }
         />
+
+        {classActionError && (
+          <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {classActionError}
+          </div>
+        )}
 
         {/* ── Summary stats ─────────────────────────────── */}
         <div className="grid grid-cols-3 gap-4">
@@ -535,6 +606,38 @@ export default function TeacherClassesPage() {
                           <Settings className="h-3.5 w-3.5" /> Quản lý
                         </Button>
                       </Link>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="px-2.5"
+                        aria-label={`Nhân bản lớp ${cls.class_name}`}
+                        title="Nhân bản lớp (không sao chép học viên)"
+                        disabled={classAction !== null}
+                        onClick={() => void cloneClass(cls as ExtraClass)}
+                      >
+                        {classAction?.classId === cls.id
+                          && classAction.action === "clone" ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Copy className="h-3.5 w-3.5" />
+                          )}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="px-2.5 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                        aria-label={`Xóa lớp ${cls.class_name}`}
+                        title="Xóa lớp"
+                        disabled={classAction !== null}
+                        onClick={() => void deleteClass(cls as ExtraClass)}
+                      >
+                        {classAction?.classId === cls.id
+                          && classAction.action === "delete" ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Trash2 className="h-3.5 w-3.5" />
+                          )}
+                      </Button>
                     </div>
                   </CardContent>
                 </Card>

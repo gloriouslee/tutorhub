@@ -15,7 +15,7 @@ import {
   getCurriculum, type CurriculumSession as CurriculumSessionData,
   getStudentPackages, saveStudentPackages, type StudentPackage,
   getClassMaterials, type StoredClassMaterial,
-  kvGet, kvUpdate,
+  kvGet,
   getClasses, getStudents, removeStudentFromClass,
   getTeacherHomework, upsertTeacherHomework, removeTeacherHomework,
   getAllTeacherAttendance,
@@ -25,6 +25,7 @@ import { useWindowFocusRevision } from "@/hooks/useWindowFocusRevision";
 import { toLocalDateKey } from "@/lib/utils";
 import { ClassSchedule, type Student } from "@/types";
 import { useTeacherContext } from "@/hooks/useTeacherContext";
+import { resetAccountContextCache } from "@/hooks/useAccountContext";
 import {
   resolveTeacherClassWorkspace,
   type CurriculumContentFilter,
@@ -534,11 +535,22 @@ export default function TeacherClassDetailPage() {
   const classStudents = storedClassStudents;
 
   async function handleRemoveStudent(student: { id: string; full_name: string }) {
-    if (!window.confirm(`Xóa ${student.full_name} khỏi lớp?`)) return;
-    await kvUpdate<string[]>(`tutorhub_class_extra_students_${classId}`, [], ids => ids.filter(id => id !== student.id));
-    setExtraStudentIds(prev => prev.filter(id => id !== student.id));
-    await removeStudentFromClass(classId, student.id);
-    setDbStudentIds(prev => (prev ? prev.filter(id => id !== student.id) : prev));
+    if (!window.confirm(
+      `Xóa ${student.full_name} khỏi lớp? Học viên vẫn có thể đăng ký lại sau này.`,
+    )) return;
+    try {
+      await removeStudentFromClass(classId, student.id);
+      setExtraStudentIds(prev => prev.filter(id => id !== student.id));
+      setDbStudentIds(prev => (prev ? prev.filter(id => id !== student.id) : prev));
+      setStudentPackages((current) => {
+        const next = { ...current };
+        delete next[student.id];
+        return next;
+      });
+      resetAccountContextCache();
+    } catch {
+      window.alert("Không thể xóa học viên khỏi lớp. Vui lòng thử lại.");
+    }
   }
 
   async function handleSetPackage(studentId: string, pkg: StudentPackage) {

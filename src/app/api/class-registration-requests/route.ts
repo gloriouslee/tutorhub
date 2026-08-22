@@ -8,6 +8,7 @@ import {
   tuitionForPackage,
 } from "@/lib/registration-pricing";
 import type { RegistrationPackage } from "@/lib/class-registration-types";
+import { logEvent } from "@/lib/logger";
 
 export const dynamic = "force-dynamic";
 
@@ -119,14 +120,18 @@ export async function POST(req: NextRequest) {
   if (!isNonEmptyString(body.class_id, 100)) {
     return NextResponse.json({ error: "invalid_class_id" }, { status: 400 });
   }
+  const packageType =
+    typeof body.package_type === "string"
+      ? body.package_type.trim().toLowerCase()
+      : "";
   if (
-    body.package_type !== "online"
-    && body.package_type !== "advanced"
-    && body.package_type !== "offline"
+    packageType !== "online"
+    && packageType !== "advanced"
+    && packageType !== "offline"
   ) {
     return NextResponse.json({ error: "invalid_package_type" }, { status: 400 });
   }
-  const requestedPackage = body.package_type as RegistrationPackage;
+  const requestedPackage = packageType as RegistrationPackage;
   const source = body.source === "material" ? "material" : "class";
   const note =
     typeof body.note === "string" ? body.note.trim().slice(0, 1000) : null;
@@ -203,7 +208,34 @@ export async function POST(req: NextRequest) {
     .select("*")
     .single();
   if (error) {
-    return NextResponse.json({ error: "registration_create_failed" }, { status: 500 });
+    // A concurrent double-click may race past the earlier pending lookup. Return
+    // the already-created request instead of surfacing a false failure.
+    if (error.code === "23505") {
+      const { data: pending } = await admin
+        .from("class_registration_requests")
+        .select("*")
+        .eq("student_id", actor.studentId)
+        .eq("requested_class_id", body.class_id)
+        .eq("status", "pending")
+        .maybeSingle();
+      if (pending) return NextResponse.json(pending, { status: 200 });
+    }
+    logEvent("error", "class_registration_create_failed", {
+      classId: body.class_id,
+      requestedPackage,
+      databaseCode: error.code,
+      databaseMessage: error.message,
+    });
+    if (error.code === "23514") {
+      return NextResponse.json(
+        { error: "registration_package_unavailable" },
+        { status: 409 },
+      );
+    }
+    return NextResponse.json(
+      { error: "registration_create_failed" },
+      { status: 500 },
+    );
   }
   return NextResponse.json(data, { status: 201 });
 }
