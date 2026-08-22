@@ -23,6 +23,7 @@ import ScheduleCalendar from "@/components/student/ScheduleCalendar";
 import { useRouter } from "next/navigation";
 import { AreaChart, Area, Tooltip, ResponsiveContainer } from "recharts";
 import StudentGrowthPanel from "@/components/student/StudentGrowthPanel";
+import { isAttendedStatus } from "@/lib/attendance";
 
 interface HomeworkItem {
   id: string;
@@ -43,7 +44,7 @@ function buildAttendanceChart(records: TeacherAttendanceRecord[]) {
     const monthRecords = records.filter((record) => record.date.startsWith(key));
     const counted = monthRecords.filter((record) => record.status !== "excused");
     const attended = counted.filter(
-      (record) => record.status === "present" || record.status === "late",
+      (record) => isAttendedStatus(record.status),
     ).length;
     return {
       month: `T${date.getMonth() + 1}`,
@@ -134,7 +135,7 @@ export default function StudentDashboard() {
     }).then((records) => {
       const counted = records.filter((record) => record.status !== "excused");
       const attended = counted.filter(
-        (record) => record.status === "present" || record.status === "late",
+        (record) => isAttendedStatus(record.status),
       ).length;
       setAttendanceRate(
         counted.length > 0 ? Math.round((attended / counted.length) * 100) : null,

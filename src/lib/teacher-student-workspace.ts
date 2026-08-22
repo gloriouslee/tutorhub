@@ -98,7 +98,7 @@ export type StudentScoreRecord = {
 export type StudentAttendanceRecord = {
   classId: string;
   date: string;
-  status: "present" | "absent" | "late" | "excused";
+  status: "present" | "online" | "absent" | "late" | "excused";
 };
 
 export type StudentHomeworkRecord = {

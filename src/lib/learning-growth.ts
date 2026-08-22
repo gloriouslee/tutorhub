@@ -20,7 +20,7 @@ export interface SupportStudentSnapshot {
   classId: string;
   className: string;
   scores: { value: number; recordedAt: string }[];
-  attendance: { status: "present" | "absent" | "late" | "excused"; date: string }[];
+  attendance: { status: "present" | "online" | "absent" | "late" | "excused"; date: string }[];
   homework: { dueAt: string; submittedAt: string | null }[];
 }
 

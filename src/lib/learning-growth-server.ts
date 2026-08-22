@@ -25,6 +25,7 @@ import type {
   StudentWorkspaceProfile,
   StudentWorkspaceSummary,
 } from "@/lib/teacher-student-workspace";
+import { isAttendedStatus } from "@/lib/attendance";
 
 type AdminClient = ReturnType<typeof createAdminClient>;
 
@@ -68,7 +69,7 @@ type GrowthAttendance = {
   classId: string;
   studentId: string;
   date: string;
-  status: "present" | "absent" | "late" | "excused";
+  status: "present" | "online" | "absent" | "late" | "excused";
 };
 
 type GrowthScore = {
@@ -336,7 +337,7 @@ async function loadGrowthDataset(admin: AdminClient, classes: GrowthClass[]): Pr
   const attendance = (attendanceResponse.data ?? []).flatMap((row) => {
     const data = object(row.data);
     const status = String(data.status ?? "");
-    if (!["present", "absent", "late", "excused"].includes(status)) return [];
+    if (!["present", "online", "absent", "late", "excused"].includes(status)) return [];
     return [{
       classId: String(row.class_id),
       studentId: String(row.student_id),
@@ -431,14 +432,18 @@ async function syncXp(admin: AdminClient, dataset: GrowthDataset, allowedStudent
   }
 
   for (const record of dataset.attendance) {
-    if (!allowedStudentIds.has(record.studentId) || (record.status !== "present" && record.status !== "late")) continue;
+    if (!allowedStudentIds.has(record.studentId) || !isAttendedStatus(record.status)) continue;
     events.push({
       student_id: record.studentId,
       class_id: record.classId,
       source_type: "attendance",
       source_id: `${record.classId}:${record.date}`,
-      points: record.status === "present" ? 10 : 4,
-      reason: record.status === "present" ? "Tham gia buổi học" : "Tham gia buổi học dù đến muộn",
+      points: record.status === "late" ? 4 : 10,
+      reason: record.status === "late"
+        ? "Tham gia buổi học dù đến muộn"
+        : record.status === "online"
+          ? "Tham gia buổi học online"
+          : "Tham gia buổi học",
       metadata: { status: record.status },
       occurred_at: `${record.date}T12:00:00.000Z`,
     });
@@ -497,7 +502,11 @@ async function syncXp(admin: AdminClient, dataset: GrowthDataset, allowedStudent
     const rows = (storedEvents ?? []).filter((row) => String(row.student_id) === studentId);
     const totalXp = rows.reduce((sum, row) => sum + validNumber(row.points), 0);
     const onTime = rows.filter((row) => row.source_type === "homework" && object(row.metadata).on_time === true).length;
-    const present = rows.filter((row) => row.source_type === "attendance" && object(row.metadata).status === "present").length;
+    const present = rows.filter((row) => {
+      if (row.source_type !== "attendance") return false;
+      const status = object(row.metadata).status;
+      return status === "present" || status === "online";
+    }).length;
     const improvements = rows.filter((row) => row.source_type === "improvement").length;
     const earned = new Set<string>();
     if (totalXp >= 20) earned.add("first_steps");
@@ -644,7 +653,7 @@ async function syncGoals(
       homeworkCompleted: submissions.length,
       averageScore: scores.length > 0 ? Math.round((scores.reduce((sum, row) => sum + row.value100 / 10, 0) / scores.length) * 10) / 10 : 0,
       attendanceRate: attendance.length > 0
-        ? Math.round((attendance.filter((row) => row.status === "present" || row.status === "late").length / attendance.length) * 100)
+        ? Math.round((attendance.filter((row) => isAttendedStatus(row.status)).length / attendance.length) * 100)
         : 0,
       lessonsCompleted: progress.length,
       xpEarned: xp.reduce((sum, row) => sum + validNumber(row.points), 0),
@@ -1009,8 +1018,9 @@ function metricsForStudentClasses(
   const scores = dataset.scores.filter((item) => item.studentId === studentId && classIds.has(item.classId));
   const attendance = dataset.attendance.filter((item) => item.studentId === studentId && classIds.has(item.classId));
   const accountableAttendance = attendance.filter((item) => item.status !== "excused");
-  const attended = accountableAttendance.filter((item) => item.status === "present" || item.status === "late");
+  const attended = accountableAttendance.filter((item) => isAttendedStatus(item.status));
   const present = attendance.filter((item) => item.status === "present").length;
+  const online = attendance.filter((item) => item.status === "online").length;
   const late = attendance.filter((item) => item.status === "late").length;
   const homework = dataset.homework.filter((item) => classIds.has(item.classId) && assignedToStudent(item.assignedTo, studentId));
   const latestSubmissions = latestSubmissionByHomework(dataset, studentId);
@@ -1034,7 +1044,9 @@ function metricsForStudentClasses(
     attendanceRate: accountableAttendance.length > 0
       ? Math.round((attended.length / accountableAttendance.length) * 100)
       : null,
-    punctualityRate: present + late > 0 ? Math.round((present / (present + late)) * 100) : null,
+    punctualityRate: present + online + late > 0
+      ? Math.round(((present + online) / (present + online + late)) * 100)
+      : null,
     absences: attendance.filter((item) => item.status === "absent").length,
     lates: late,
     homeworkSubmittedRate: dueHomework.length > 0 ? Math.round((submitted.length / dueHomework.length) * 100) : null,
@@ -1356,6 +1368,7 @@ export async function generateWeeklyReportsForTeacher(
       summary: {
         attendance: {
           present: attendance.filter((item) => item.status === "present").length,
+          online: attendance.filter((item) => item.status === "online").length,
           late: attendance.filter((item) => item.status === "late").length,
           absent: attendance.filter((item) => item.status === "absent").length,
           total: attendance.filter((item) => item.status !== "excused").length,

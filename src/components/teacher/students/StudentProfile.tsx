@@ -36,6 +36,7 @@ import {
   Trash2,
   TrendingUp,
   UserRoundPlus,
+  Wifi,
   X,
   XCircle,
 } from "lucide-react";
@@ -74,6 +75,7 @@ const TAB_ITEMS: { value: StudentWorkspaceTab; label: string; Icon: React.Elemen
 
 const ATTENDANCE = {
   present: { label: "Có mặt", Icon: CheckCircle2, className: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300" },
+  online: { label: "Học online", Icon: Wifi, className: "bg-sky-50 text-sky-700 dark:bg-sky-950/30 dark:text-sky-300" },
   late: { label: "Đi trễ", Icon: Clock, className: "bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-300" },
   absent: { label: "Vắng", Icon: XCircle, className: "bg-red-50 text-red-700 dark:bg-red-950/30 dark:text-red-300" },
   excused: { label: "Có phép", Icon: AlertTriangle, className: "bg-blue-50 text-blue-700 dark:bg-blue-950/30 dark:text-blue-300" },
@@ -295,6 +297,7 @@ export default function StudentProfile({ studentId }: { studentId: string }) {
   const homework = profile.homework.filter((item) => classId === "all" || item.classId === classId);
   const chartData = [...scores].slice(0, 10).reverse().map((item) => ({ name: new Date(item.recordedAt).toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit" }), score: item.value10, title: item.title }));
   const present = attendance.filter((item) => item.status === "present").length;
+  const online = attendance.filter((item) => item.status === "online").length;
   const late = attendance.filter((item) => item.status === "late").length;
   const absent = attendance.filter((item) => item.status === "absent").length;
   const excused = attendance.filter((item) => item.status === "excused").length;
@@ -358,8 +361,8 @@ export default function StudentProfile({ studentId }: { studentId: string }) {
           </Tabs.Content>
 
           <Tabs.Content value="attendance" className="mt-5 space-y-4 outline-none">
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">{[
-              { label: "Có mặt", value: present, meta: ATTENDANCE.present }, { label: "Đi trễ", value: late, meta: ATTENDANCE.late }, { label: "Vắng", value: absent, meta: ATTENDANCE.absent }, { label: "Có phép", value: excused, meta: ATTENDANCE.excused },
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">{[
+              { label: "Có mặt", value: present, meta: ATTENDANCE.present }, { label: "Học online", value: online, meta: ATTENDANCE.online }, { label: "Đi trễ", value: late, meta: ATTENDANCE.late }, { label: "Vắng", value: absent, meta: ATTENDANCE.absent }, { label: "Có phép", value: excused, meta: ATTENDANCE.excused },
             ].map(({ label, value, meta }) => <Card key={label}><CardContent className="flex items-center gap-3 p-4"><span className={`rounded-xl p-2 ${meta.className}`}><meta.Icon className="h-4 w-4" /></span><div><p className="text-xl font-black">{value}</p><p className="text-[10px] text-muted-foreground">{label}</p></div></CardContent></Card>)}<Card className="col-span-2 sm:col-span-1"><CardContent className="p-4 text-center"><p className={`text-xl font-black ${tone(metrics.punctualityRate)}`}>{percentageLabel(metrics.punctualityRate)}</p><p className="text-[10px] text-muted-foreground">Tỷ lệ đúng giờ</p></CardContent></Card></div>
             <div className="flex justify-end"><Button asChild size="sm" variant="outline"><Link href={`/teacher/attendance?class=${encodeURIComponent(selectedClassId)}`}><Pencil className="mr-1.5 h-3.5 w-3.5" />Cập nhật chuyên cần</Link></Button></div>
             <Card><CardContent className="p-0">{attendance.length === 0 ? <div className="py-14 text-center text-sm text-muted-foreground">Chưa có dữ liệu chuyên cần.</div> : <div className="divide-y divide-border/70">{attendance.slice(0, attendanceLimit).map((record) => { const meta = ATTENDANCE[record.status]; return <div key={`${record.classId}-${record.date}`} className="flex items-center gap-3 p-4"><span className={`rounded-xl p-2 ${meta.className}`}><meta.Icon className="h-4 w-4" /></span><div className="min-w-0 flex-1"><p className="font-semibold">{new Date(`${record.date}T12:00:00+07:00`).toLocaleDateString("vi-VN", { weekday: "long", day: "2-digit", month: "2-digit", year: "numeric" })}</p><p className="mt-0.5 text-xs text-muted-foreground">{classMap.get(record.classId)?.name}</p></div><Badge variant="outline" className={meta.className}>{meta.label}</Badge></div>; })}{attendance.length > attendanceLimit && <div className="p-4 text-center"><Button type="button" size="sm" variant="outline" onClick={() => setAttendanceLimit((value) => value + 20)}>Xem thêm</Button></div>}</div>}</CardContent></Card>

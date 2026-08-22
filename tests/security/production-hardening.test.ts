@@ -29,8 +29,24 @@ import {
   goalProgressPercent,
   xpLevel,
 } from "../../src/lib/learning-growth";
+import {
+  attendanceMarksChanged,
+  isAttendedStatus,
+  toggleAttendanceStatus,
+} from "../../src/lib/attendance";
 
 const read = (path: string) => readFile(path, "utf8");
+
+test("attendance supports online participation and reversible marks", () => {
+  assert.equal(isAttendedStatus("online"), true);
+  assert.equal(isAttendedStatus("absent"), false);
+
+  const online = toggleAttendanceStatus({}, "student-1", "online");
+  assert.deepEqual(online, { "student-1": "online" });
+  assert.deepEqual(toggleAttendanceStatus(online, "student-1", "online"), {});
+  assert.equal(attendanceMarksChanged({}, online), true);
+  assert.equal(attendanceMarksChanged(online, { "student-1": "online" }), false);
+});
 
 test("class workspace URLs normalize legacy and punctuated tab values", () => {
   assert.deepEqual(resolveStudentClassWorkspace("homework,"), { tab: "homework", content: "all" });
@@ -1352,6 +1368,21 @@ test("guardian invitation retries are idempotent and authenticated reads are bri
   assert.match(storage, /normalizedQueryKey\("teacher-attendance"/);
   assert.match(storage, /invalidateClientQueries\("teacher-homework:"\)/);
   assert.match(accountContext, /invalidateClientQueries\(\)/);
+});
+
+test("teacher attendance can reset persisted marks and edit past sessions", async () => {
+  const storage = await read("src/lib/storage.ts");
+  const attendancePage = await read("src/app/teacher/attendance/page.tsx");
+  const sessionsTab = await read("src/components/teacher/SessionsTab.tsx");
+
+  assert.match(storage, /replaceClassAttendanceForDate/);
+  assert.match(storage, /from\("class_attendance"\)[\s\S]*?\.delete\(\)/);
+  assert.match(attendancePage, /Xin học online/);
+  assert.match(attendancePage, /Reset buổi này/);
+  assert.match(attendancePage, /max=\{today\(\)\}/);
+  assert.match(sessionsTab, /Điểm danh bù/);
+  assert.match(sessionsTab, /Sửa điểm danh/);
+  assert.match(sessionsTab, /Điểm danh ngày khác/);
 });
 
 test("teacher student workspace keeps aggregates scoped and notes attributable", async () => {

@@ -15,6 +15,7 @@ import { useTeacherContext } from "@/hooks/useTeacherContext";
 import type { Class, Student } from "@/types";
 import { weekdayLabelVi } from "@/lib/weekday";
 import LearningSupportPanel from "@/components/teacher/LearningSupportPanel";
+import { isAttendedStatus } from "@/lib/attendance";
 
 // Days that have class today (computed from schedule)
 function getTodaySessions(classes: Class[]) {
@@ -50,7 +51,7 @@ function attendanceChart(records: TeacherAttendanceRecord[]) {
     const rows = records.filter((record) => record.date.startsWith(key));
     return {
       month: `T${date.getMonth() + 1}`,
-      present: rows.filter((record) => record.status === "present" || record.status === "late").length,
+      present: rows.filter((record) => isAttendedStatus(record.status)).length,
       absent: rows.filter((record) => record.status === "absent").length,
     };
   });
@@ -65,7 +66,7 @@ function studentAttendanceRate(
   );
   if (rows.length === 0) return 0;
   const attended = rows.filter(
-    (record) => record.status === "present" || record.status === "late",
+    (record) => isAttendedStatus(record.status),
   ).length;
   return Math.round((attended / rows.length) * 100);
 }

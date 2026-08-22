@@ -606,6 +606,7 @@ export default function TeacherClassDetailPage() {
     const records = dedupedHistory.filter(r => r.date === dateStr && r.class_id === cid);
     return {
       present: records.filter(r => r.status === "present").length,
+      online: records.filter(r => r.status === "online").length,
       late: records.filter(r => r.status === "late").length,
       absent: records.filter(r => r.status === "absent").length,
     };

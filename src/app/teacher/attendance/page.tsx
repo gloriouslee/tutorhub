@@ -7,16 +7,21 @@ import { Button } from "@/components/ui/button";
 import { AttendanceBadge, LearningModeBadge, SectionHeader } from "@/components/shared";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { formatDate, toLocalDateKey } from "@/lib/utils";
-import { getAllTeacherAttendance, saveClassAttendance, getTeacherExtraClasses, getStudents } from "@/lib/storage";
+import { getAllTeacherAttendance, replaceClassAttendanceForDate, getTeacherExtraClasses, getStudents } from "@/lib/storage";
+import {
+  attendanceMarksChanged,
+  toggleAttendanceStatus,
+  type AttendanceStatus,
+} from "@/lib/attendance";
 import { useTeacherContext } from "@/hooks/useTeacherContext";
 import type { Student } from "@/types";
 import {
   CheckSquare, Users, UserCheck, UserX, Clock,
-  CalendarDays, ChevronLeft, ChevronRight, Save,
+  CalendarDays, ChevronLeft, ChevronRight, Save, Wifi, RotateCcw, X,
 } from "lucide-react";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-type Status = "present" | "absent" | "late" | "excused";
+type Status = AttendanceStatus;
 
 // ── Persistence ───────────────────────────────────────────────────────────────
 interface SavedRecord {
@@ -34,10 +39,6 @@ async function loadSaved(classIds: string[]): Promise<SavedRecord[]> {
     return [];
   }
 }
-async function persistSaved(records: SavedRecord[]) {
-  await saveClassAttendance(records);
-}
-
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function today(): string { return toLocalDateKey(new Date()); }
 
@@ -88,6 +89,8 @@ export default function TeacherAttendancePage() {
   const [savedRecords,    setSavedRecords]    = useState<SavedRecord[]>([]);
   const [students,        setStudents]        = useState<Student[]>([]);
   const [saveFlash,       setSaveFlash]       = useState(false);
+  const [saving,          setSaving]          = useState(false);
+  const [saveError,       setSaveError]       = useState("");
 
   const selectedClass = teacherClasses.find(c => c.id === selectedClassId) ?? teacherClasses[0];
 
@@ -98,6 +101,10 @@ export default function TeacherAttendancePage() {
       setSelectedClassId(requestedClass);
     } else if (!selectedClassId) {
       setSelectedClassId(teacherClasses[0].id);
+    }
+    const requestedDate = new URLSearchParams(window.location.search).get("date");
+    if (requestedDate && /^\d{4}-\d{2}-\d{2}$/.test(requestedDate) && requestedDate <= today()) {
+      setDate(requestedDate);
     }
   }, [teacherClassKey, selectedClassId, teacherClasses]);
 
@@ -116,7 +123,9 @@ export default function TeacherAttendancePage() {
     const newMarks: Record<string, Status> = {};
 
     const entries = savedRecords.filter(
-      r => r.class_id === selectedClass.id && r.date === date
+      r => r.class_id === selectedClass.id
+        && r.date === date
+        && (selectedClass.student_ids ?? []).includes(r.student_id)
     );
     entries.forEach(r => { newMarks[r.student_id] = r.status; });
 
@@ -128,10 +137,27 @@ export default function TeacherAttendancePage() {
     return students.filter(s => (selectedClass.student_ids ?? []).includes(s.id));
   }, [selectedClass, students]);
 
+  const savedMarks = useMemo(() => {
+    if (!selectedClass) return {};
+    const managedStudentIds = new Set(classStudents.map((student) => student.id));
+    return Object.fromEntries(
+      savedRecords
+        .filter((record) =>
+          record.class_id === selectedClass.id
+          && record.date === date
+          && managedStudentIds.has(record.student_id)
+        )
+        .map((record) => [record.student_id, record.status]),
+    ) as Record<string, Status>;
+  }, [classStudents, date, savedRecords, selectedClass]);
+
   const markedCount  = Object.keys(marks).length;
   const presentCount = Object.values(marks).filter(s => s === "present").length;
+  const onlineCount  = Object.values(marks).filter(s => s === "online").length;
   const lateCount    = Object.values(marks).filter(s => s === "late").length;
   const absentCount  = Object.values(marks).filter(s => s === "absent").length;
+  const hasChanges = attendanceMarksChanged(marks, savedMarks);
+  const isMakeupAttendance = date < today();
 
   const history = useMemo(() => {
     if (!selectedClass) return [];
@@ -143,23 +169,51 @@ export default function TeacherAttendancePage() {
   }, [selectedClass, savedRecords]);
 
   function mark(studentId: string, status: Status) {
-    setMarks(prev => ({ ...prev, [studentId]: status }));
+    setMarks((current) => toggleAttendanceStatus(current, studentId, status));
+    setSaveError("");
+  }
+
+  function clearMark(studentId: string) {
+    setMarks((current) => {
+      const next = { ...current };
+      delete next[studentId];
+      return next;
+    });
+    setSaveError("");
   }
 
   async function handleSave() {
-    if (!selectedClass) return;
+    if (!selectedClass || !hasChanges || saving) return;
+    setSaving(true);
+    setSaveError("");
+    const managedStudentIds = classStudents.map((student) => student.id);
+    const managedSet = new Set(managedStudentIds);
     const existing = savedRecords.filter(
-      r => !(r.class_id === selectedClass.id && r.date === date)
+      r => !(
+        r.class_id === selectedClass.id
+        && r.date === date
+        && managedSet.has(r.student_id)
+      ),
     );
     const newEntries: SavedRecord[] = Object.entries(marks).map(([student_id, status]) => ({
       class_id: selectedClass.id, student_id, date, status,
       saved_at: new Date().toISOString(),
     }));
-    // Per-row upsert: chỉ ghi các dòng vừa thay đổi (không rewrite cả bảng).
-    await persistSaved(newEntries);
-    setSavedRecords([...newEntries, ...existing]);
-    setSaveFlash(true);
-    setTimeout(() => setSaveFlash(false), 2000);
+    try {
+      await replaceClassAttendanceForDate(
+        selectedClass.id,
+        date,
+        newEntries,
+        managedStudentIds,
+      );
+      setSavedRecords([...newEntries, ...existing]);
+      setSaveFlash(true);
+      setTimeout(() => setSaveFlash(false), 2000);
+    } catch {
+      setSaveError("Không thể lưu điểm danh. Vui lòng thử lại.");
+    } finally {
+      setSaving(false);
+    }
   }
 
   if (!ready) {
@@ -183,17 +237,17 @@ export default function TeacherAttendancePage() {
       <div className="space-y-6 max-w-5xl mx-auto">
         <SectionHeader
           title="Điểm danh học viên"
-          subtitle="Ghi nhận chuyên cần cho các lớp của bạn"
+          subtitle="Điểm danh hôm nay hoặc chọn ngày đã qua để điểm danh bù"
           action={
             <Button
               variant={saveFlash ? "default" : "gradient"}
               className={saveFlash ? "bg-emerald-600 hover:bg-emerald-600 text-white" : ""}
               onClick={handleSave}
-              disabled={markedCount === 0}
+              disabled={!hasChanges || saving}
             >
               {saveFlash
                 ? <><CheckSquare className="h-4 w-4 mr-1.5" /> Đã lưu!</>
-                : <><Save className="h-4 w-4 mr-1.5" /> Lưu điểm danh</>}
+                : <><Save className="h-4 w-4 mr-1.5" /> {saving ? "Đang lưu…" : "Lưu điểm danh"}</>}
             </Button>
           }
         />
@@ -218,10 +272,11 @@ export default function TeacherAttendancePage() {
         </div>
 
         {/* ── Stats row ─────────────────────────────────── */}
-        <div className="grid grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
           {[
             { label: "Học viên",  value: classStudents.length, icon: Users,      color: "text-primary" },
             { label: "Có mặt",   value: presentCount,          icon: UserCheck,  color: "text-emerald-600 dark:text-emerald-400" },
+            { label: "Học online", value: onlineCount,          icon: Wifi,       color: "text-sky-600 dark:text-sky-400" },
             { label: "Đi trễ",   value: lateCount,             icon: Clock,      color: "text-amber-600 dark:text-amber-400" },
             { label: "Vắng mặt", value: absentCount,           icon: UserX,      color: "text-red-600 dark:text-red-400" },
           ].map(s => (
@@ -245,7 +300,14 @@ export default function TeacherAttendancePage() {
             <Card className="shadow-none border-border/60">
               <CardHeader className="pb-3 border-b border-border/60">
                 <div className="flex items-center justify-between gap-3">
-                  <CardTitle className="text-sm font-semibold">{selectedClass?.class_name}</CardTitle>
+                  <div>
+                    <CardTitle className="text-sm font-semibold">{selectedClass?.class_name}</CardTitle>
+                    <p className={`mt-1 text-xs ${isMakeupAttendance ? "font-medium text-violet-600" : "text-muted-foreground"}`}>
+                      {isMakeupAttendance
+                        ? "Đang điểm danh bù cho một buổi đã qua"
+                        : "Điểm danh buổi hôm nay"}
+                    </p>
+                  </div>
 
                   {/* Date picker */}
                   <div className="flex items-center gap-1.5">
@@ -260,6 +322,7 @@ export default function TeacherAttendancePage() {
                       <input
                         type="date"
                         value={date}
+                        max={today()}
                         onChange={e => setDate(e.target.value)}
                         className="text-xs text-foreground bg-transparent outline-none cursor-pointer"
                       />
@@ -271,12 +334,22 @@ export default function TeacherAttendancePage() {
                     >
                       <ChevronRight className="h-4 w-4" />
                     </button>
+                    {date !== today() && (
+                      <button
+                        type="button"
+                        onClick={() => setDate(today())}
+                        className="rounded-lg px-2 py-1 text-xs font-medium text-primary hover:bg-primary/10"
+                      >
+                        Hôm nay
+                      </button>
+                    )}
                   </div>
                 </div>
 
                 {/* Legend */}
                 <div className="flex items-center gap-3 text-[11px] text-muted-foreground mt-2">
                   <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-emerald-500" />Có mặt</span>
+                  <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-sky-500" />Xin học online</span>
                   <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-amber-500" />Đi trễ</span>
                   <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-red-500" />Vắng mặt</span>
                 </div>
@@ -304,44 +377,65 @@ export default function TeacherAttendancePage() {
                               <p className="text-sm font-medium text-foreground leading-none">{student.full_name}</p>
                               <p className="text-xs text-muted-foreground mt-0.5">{student.grade} · {student.school}</p>
                             </div>
-                            <div className="flex items-center gap-1">
-                              {(["present", "late", "absent"] as const).map(s => (
+                            <div className="flex flex-wrap items-center justify-end gap-1">
+                              {(["present", "online", "late", "absent"] as const).map(s => (
                                 <button
                                   key={s}
+                                  type="button"
                                   onClick={() => mark(student.id, s)}
                                   className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
                                     status === s
                                       ? s === "present" ? "bg-emerald-500 text-white shadow-sm"
+                                        : s === "online" ? "bg-sky-500 text-white shadow-sm"
                                         : s === "late"    ? "bg-amber-500 text-white shadow-sm"
                                         :                   "bg-red-500 text-white shadow-sm"
                                       : "bg-muted text-muted-foreground hover:bg-accent"
                                   }`}
                                 >
-                                  {s === "present" ? "Có mặt" : s === "late" ? "Đi trễ" : "Vắng"}
+                                  {s === "present" ? "Có mặt" : s === "online" ? "Xin học online" : s === "late" ? "Đi trễ" : "Vắng"}
                                 </button>
                               ))}
+                              {status && (
+                                <button
+                                  type="button"
+                                  onClick={() => clearMark(student.id)}
+                                  className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                                  aria-label={`Bỏ điểm danh ${student.full_name}`}
+                                  title="Đưa về chưa điểm danh"
+                                >
+                                  <X className="h-3.5 w-3.5" />
+                                </button>
+                              )}
                             </div>
                           </div>
                         );
                       })}
                     </div>
 
-                    <div className="flex items-center justify-between pt-3 border-t border-border mt-3">
+                    <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-border mt-3">
                       <p className="text-xs text-muted-foreground">
                         Đã điểm danh <span className="font-semibold text-foreground">{markedCount}</span>/{classStudents.length} học viên
                       </p>
-                      <Button
-                        size="sm"
-                        variant={saveFlash ? "default" : "gradient"}
-                        className={saveFlash ? "bg-emerald-600 hover:bg-emerald-600 text-white" : ""}
-                        onClick={handleSave}
-                        disabled={markedCount === 0}
-                      >
-                        {saveFlash
-                          ? <><CheckSquare className="h-3.5 w-3.5 mr-1" /> Đã lưu!</>
-                          : <><Save className="h-3.5 w-3.5 mr-1" /> Lưu</>}
-                      </Button>
+                      <div className="flex items-center gap-2">
+                        {markedCount > 0 && (
+                          <Button size="sm" variant="outline" onClick={() => setMarks({})}>
+                            <RotateCcw className="mr-1 h-3.5 w-3.5" /> Reset buổi này
+                          </Button>
+                        )}
+                        <Button
+                          size="sm"
+                          variant={saveFlash ? "default" : "gradient"}
+                          className={saveFlash ? "bg-emerald-600 hover:bg-emerald-600 text-white" : ""}
+                          onClick={handleSave}
+                          disabled={!hasChanges || saving}
+                        >
+                          {saveFlash
+                            ? <><CheckSquare className="h-3.5 w-3.5 mr-1" /> Đã lưu!</>
+                            : <><Save className="h-3.5 w-3.5 mr-1" /> {saving ? "Đang lưu…" : "Lưu"}</>}
+                        </Button>
+                      </div>
                     </div>
+                    {saveError && <p role="alert" className="mt-2 text-xs text-red-600">{saveError}</p>}
                   </>
                 )}
               </CardContent>

@@ -4,6 +4,7 @@
 // view giáo viên truyền `classIds` để lọc về đúng lớp mình dạy.
 
 import type { TuitionInvoice, StoredExamScore } from "@/lib/storage";
+import { isAttendedStatus } from "@/lib/attendance";
 import type { Class, Student, Teacher, Attendance } from "@/types";
 
 const MONTHS_VI = ["Th.1", "Th.2", "Th.3", "Th.4", "Th.5", "Th.6", "Th.7", "Th.8", "Th.9", "Th.10", "Th.11", "Th.12"];
@@ -154,7 +155,7 @@ export interface Kpis {
   studentCount: number;
   classCount: number;
   teacherCount: number;
-  avgAttendancePct: number;   // present+late trên tổng
+  avgAttendancePct: number;   // present+online+late trên tổng
   avgScore: number;           // thang 10
 }
 
@@ -170,7 +171,7 @@ export function computeKpis(data: AnalyticsData, classIds?: Set<string>): Kpis {
     : data.teachers.length;
 
   const att = data.attendance.filter(a => inClass(a.class_id));
-  const present = att.filter(a => a.status === "present" || a.status === "late").length;
+  const present = att.filter(a => isAttendedStatus(a.status)).length;
   const avgAttendancePct = att.length > 0 ? Math.round((present / att.length) * 100) : 0;
 
   const scores = data.examScores.filter(s => inClass(s.class_id));
@@ -285,7 +286,7 @@ export function attendanceTrend(data: AnalyticsData, months: number, classIds?: 
     const pct = (n: number) => (recs.length > 0 ? Math.round((n / recs.length) * 100) : 0);
     return {
       month: b.label,
-      coMat: pct(recs.filter(a => a.status === "present" || a.status === "late").length),
+      coMat: pct(recs.filter(a => isAttendedStatus(a.status)).length),
       treGio: pct(recs.filter(a => a.status === "late").length),
       vangMat: pct(recs.filter(a => a.status === "absent").length),
     };
@@ -298,7 +299,7 @@ export function attendanceByClass(data: AnalyticsData, classIds?: Set<string>): 
   for (const a of data.attendance) {
     if (classIds && !classIds.has(a.class_id)) continue;
     const cur = agg.get(a.class_id) ?? { ok: 0, n: 0 };
-    if (a.status === "present" || a.status === "late") cur.ok += 1;
+    if (isAttendedStatus(a.status)) cur.ok += 1;
     cur.n += 1;
     agg.set(a.class_id, cur);
   }

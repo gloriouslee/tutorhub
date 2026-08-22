@@ -141,7 +141,7 @@ export function dueStatus(dueDate: string): { label: string; color: string } {
 
 // ── Attendance types ─────────────────────────────────────────────────────────
 
-export type AttendanceStatus = "present" | "absent" | "late";
+export type AttendanceStatus = "present" | "online" | "absent" | "late" | "excused";
 
 export interface SavedAttendanceRecord {
   class_id: string;

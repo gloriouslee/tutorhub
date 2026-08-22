@@ -14,8 +14,9 @@ import {
   getTeacherHomework,
   type StoredExamScore,
 } from "@/lib/storage";
+import { isAttendedStatus } from "@/lib/attendance";
 
-export type AttendanceStatus = "present" | "absent" | "late" | "excused";
+export type AttendanceStatus = "present" | "online" | "absent" | "late" | "excused";
 
 export interface ChildAttendanceRecord {
   id:         string;
@@ -49,11 +50,11 @@ export async function loadChildrenAttendance(studentIds: string[]): Promise<Chil
 }
 
 // Tỉ lệ chuyên cần chuẩn (đồng bộ trang học viên):
-// (present + late) / (tổng bản ghi − excused). Không có bản ghi → null.
+// (present + online + late) / (tổng bản ghi − excused). Không có bản ghi → null.
 export function attendanceRate(records: ChildAttendanceRecord[]): number | null {
   if (records.length === 0) return null;
   const excused  = records.filter(r => r.status === "excused").length;
-  const attended = records.filter(r => r.status === "present" || r.status === "late").length;
+  const attended = records.filter(r => isAttendedStatus(r.status)).length;
   const denom = records.length - excused;
   return denom > 0 ? Math.round((attended / denom) * 100) : null;
 }

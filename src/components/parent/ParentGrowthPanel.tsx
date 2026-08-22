@@ -28,7 +28,7 @@ type Goal = {
   periodEnd: string;
 };
 type WeeklySummary = {
-  attendance?: { present?: number; late?: number; absent?: number; total?: number };
+  attendance?: { present?: number; online?: number; late?: number; absent?: number; total?: number };
   homework?: { assigned?: number; submitted?: number };
   scores?: { count?: number; average?: number | null };
   completedLessons?: number;
@@ -91,7 +91,7 @@ export default function ParentGrowthPanel() {
   if (!data || data.children.length === 0 || !child) return null;
 
   const reportStats = [
-    { label: "Chuyên cần", value: summary?.attendance?.total ? `${(summary.attendance.present ?? 0) + (summary.attendance.late ?? 0)}/${summary.attendance.total}` : "—", icon: CalendarCheck2, color: "text-emerald-600 bg-emerald-100 dark:bg-emerald-900/30" },
+    { label: "Chuyên cần", value: summary?.attendance?.total ? `${(summary.attendance.present ?? 0) + (summary.attendance.online ?? 0) + (summary.attendance.late ?? 0)}/${summary.attendance.total}` : "—", icon: CalendarCheck2, color: "text-emerald-600 bg-emerald-100 dark:bg-emerald-900/30" },
     { label: "Bài đã nộp", value: `${summary?.homework?.submitted ?? 0}/${summary?.homework?.assigned ?? 0}`, icon: BookOpenCheck, color: "text-blue-600 bg-blue-100 dark:bg-blue-900/30" },
     { label: "Điểm TB", value: summary?.scores?.average != null ? `${summary.scores.average}/10` : "—", icon: TrendingUp, color: "text-violet-600 bg-violet-100 dark:bg-violet-900/30" },
     { label: "XP tuần", value: `+${summary?.xpEarned ?? 0}`, icon: Sparkles, color: "text-amber-600 bg-amber-100 dark:bg-amber-900/30" },

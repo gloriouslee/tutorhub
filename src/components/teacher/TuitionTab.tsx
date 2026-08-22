@@ -10,6 +10,7 @@ import {
   type PackagePrices, type TuitionBillingMode,
 } from "@/lib/storage";
 import { formatCurrency } from "@/lib/utils";
+import { isAttendedStatus } from "@/lib/attendance";
 import {
   Wallet, Plus, Check, X, Trash2, Clock, AlertCircle, CheckCircle2,
   Settings, FileText, Receipt, CalendarCheck, RotateCcw,
@@ -51,7 +52,7 @@ const PKG_COLOR: Record<PackageType, string> = {
 function attendedSessions(att: TeacherAttendanceRecord[], classId: string, studentId: string, period: string): number {
   return att.filter(a =>
     a.class_id === classId && a.student_id === studentId &&
-    a.date.startsWith(period) && (a.status === "present" || a.status === "late")
+    a.date.startsWith(period) && isAttendedStatus(a.status)
   ).length;
 }
 

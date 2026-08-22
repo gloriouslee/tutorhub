@@ -1,12 +1,17 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import Link from "next/link";
+import { useState, useEffect, useMemo } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { saveClassAttendance, type CurriculumSession as CurriculumSessionData } from "@/lib/storage";
+import { replaceClassAttendanceForDate, type CurriculumSession as CurriculumSessionData } from "@/lib/storage";
+import {
+  attendanceMarksChanged,
+  toggleAttendanceStatus,
+} from "@/lib/attendance";
 import {
   Clock, FileText, Save, CheckCircle2, CalendarDays, CheckSquare,
-  UserCheck, UserX, Map,
+  UserCheck, UserX, Map, Wifi, RotateCcw, X,
 } from "lucide-react";
 import {
   formatDate,
@@ -61,6 +66,26 @@ function CurriculumSessionPreview({ session }: { session: CurriculumSessionData 
 
 // ── Inline attendance panel (inside session cards) ────────────────────────────
 
+function attendanceMarksFor(
+  records: SavedAttendanceRecord[],
+  classId: string,
+  date: string,
+  studentIds: readonly string[],
+): Record<string, AttendanceStatus> {
+  const marks: Record<string, AttendanceStatus> = {};
+  const managedStudentIds = new Set(studentIds);
+  for (const record of records) {
+    if (
+      record.class_id === classId
+      && record.date === date
+      && managedStudentIds.has(record.student_id)
+    ) {
+      marks[record.student_id] = record.status;
+    }
+  }
+  return marks;
+}
+
 function InlineAttendancePanel({
   classId,
   date,
@@ -74,26 +99,25 @@ function InlineAttendancePanel({
   savedRecords: SavedAttendanceRecord[];
   onSaved: (updated: SavedAttendanceRecord[]) => void;
 }) {
-  const buildMarks = (recs: SavedAttendanceRecord[]) => {
-    const m: Record<string, AttendanceStatus> = {};
-    for (const rec of recs) {
-      if (rec.class_id === classId && rec.date === date) {
-        m[rec.student_id] = rec.status;
-      }
-    }
-    return m;
-  };
-
-  const [marks, setMarks] = useState<Record<string, AttendanceStatus>>(() => buildMarks(savedRecords));
+  const studentIds = useMemo(() => students.map((student) => student.id), [students]);
+  const [marks, setMarks] = useState<Record<string, AttendanceStatus>>(
+    () => attendanceMarksFor(savedRecords, classId, date, studentIds),
+  );
   const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
 
   // Re-sync when the persisted attendance records arrive.
   useEffect(() => {
-    setMarks(buildMarks(savedRecords));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [savedRecords]);
+    setMarks(attendanceMarksFor(savedRecords, classId, date, studentIds));
+  }, [classId, date, savedRecords, studentIds]);
 
   async function handleSave() {
+    if (saving) return;
+    setSaving(true);
+    setSaveError("");
+    const managedStudentIds = students.map((student) => student.id);
+    const managedSet = new Set(managedStudentIds);
     const newRecs: SavedAttendanceRecord[] = Object.entries(marks).map(([student_id, status]) => ({
       class_id: classId,
       student_id,
@@ -102,29 +126,48 @@ function InlineAttendancePanel({
       saved_at: new Date().toISOString(),
     }));
     const updated: SavedAttendanceRecord[] = [
-      ...savedRecords.filter(r => !(r.class_id === classId && r.date === date)),
+      ...savedRecords.filter(r => !(
+        r.class_id === classId
+        && r.date === date
+        && managedSet.has(r.student_id)
+      )),
       ...newRecs,
     ];
-    // Per-row upsert: chỉ ghi các dòng điểm danh vừa thay đổi.
     try {
-      await saveClassAttendance(newRecs);
-    } catch {}
-    onSaved(updated);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2500);
+      await replaceClassAttendanceForDate(
+        classId,
+        date,
+        newRecs,
+        managedStudentIds,
+      );
+      onSaved(updated);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
+    } catch {
+      setSaveError("Không thể lưu điểm danh. Vui lòng thử lại.");
+    } finally {
+      setSaving(false);
+    }
   }
 
+  const persistedMarks = attendanceMarksFor(savedRecords, classId, date, studentIds);
+  const hasChanges = attendanceMarksChanged(marks, persistedMarks);
   const presentCount = Object.values(marks).filter(s => s === "present").length;
+  const onlineCount  = Object.values(marks).filter(s => s === "online").length;
   const lateCount    = Object.values(marks).filter(s => s === "late").length;
   const absentCount  = Object.values(marks).filter(s => s === "absent").length;
 
   return (
     <div className="mt-3 border border-border/60 rounded-xl overflow-hidden">
       {/* Stats row */}
-      <div className="grid grid-cols-3 divide-x divide-border/60 bg-muted/20">
+      <div className="grid grid-cols-2 divide-x divide-border/60 bg-muted/20 sm:grid-cols-4">
         <div className="px-4 py-2 text-center">
           <p className="text-base font-bold text-emerald-600">{presentCount}</p>
           <p className="text-[10px] text-emerald-600/80 font-medium">Có mặt</p>
+        </div>
+        <div className="px-4 py-2 text-center">
+          <p className="text-base font-bold text-sky-600">{onlineCount}</p>
+          <p className="text-[10px] text-sky-600/80 font-medium">Học online</p>
         </div>
         <div className="px-4 py-2 text-center">
           <p className="text-base font-bold text-amber-600">{lateCount}</p>
@@ -150,40 +193,71 @@ function InlineAttendancePanel({
                   <p className="text-xs text-muted-foreground truncate">{student.school}</p>
                 </div>
               </div>
-              <div className="flex items-center gap-1.5 shrink-0">
+              <div className="flex flex-wrap items-center justify-end gap-1.5 shrink-0">
                 <button
-                  onClick={() => setMarks(prev => ({ ...prev, [student.id]: "present" }))}
+                  type="button"
+                  onClick={() => setMarks(prev => toggleAttendanceStatus(prev, student.id, "present"))}
                   className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all border ${status === "present" ? "bg-emerald-500 text-white border-emerald-500 shadow-sm" : "bg-background border-border text-muted-foreground hover:border-emerald-400 hover:text-emerald-600"}`}
                 >
                   <UserCheck className="h-3 w-3" />Có mặt
                 </button>
                 <button
-                  onClick={() => setMarks(prev => ({ ...prev, [student.id]: "late" }))}
+                  type="button"
+                  onClick={() => setMarks(prev => toggleAttendanceStatus(prev, student.id, "online"))}
+                  className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all border ${status === "online" ? "bg-sky-500 text-white border-sky-500 shadow-sm" : "bg-background border-border text-muted-foreground hover:border-sky-400 hover:text-sky-600"}`}
+                >
+                  <Wifi className="h-3 w-3" />Xin học online
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMarks(prev => toggleAttendanceStatus(prev, student.id, "late"))}
                   className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all border ${status === "late" ? "bg-amber-500 text-white border-amber-500 shadow-sm" : "bg-background border-border text-muted-foreground hover:border-amber-400 hover:text-amber-600"}`}
                 >
                   <Clock className="h-3 w-3" />Đi trễ
                 </button>
                 <button
-                  onClick={() => setMarks(prev => ({ ...prev, [student.id]: "absent" }))}
+                  type="button"
+                  onClick={() => setMarks(prev => toggleAttendanceStatus(prev, student.id, "absent"))}
                   className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all border ${status === "absent" ? "bg-red-500 text-white border-red-500 shadow-sm" : "bg-background border-border text-muted-foreground hover:border-red-400 hover:text-red-500"}`}
                 >
                   <UserX className="h-3 w-3" />Vắng
                 </button>
+                {status && (
+                  <button
+                    type="button"
+                    onClick={() => setMarks((current) => {
+                      const next = { ...current };
+                      delete next[student.id];
+                      return next;
+                    })}
+                    className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                    aria-label={`Bỏ điểm danh ${student.full_name}`}
+                    title="Đưa về chưa điểm danh"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
               </div>
             </div>
           );
         })}
       </div>
       {/* Save row */}
-      <div className="px-4 py-3 bg-muted/10 border-t border-border/40 flex items-center gap-3">
-        <Button size="sm" variant="gradient" className="h-8" onClick={handleSave}>
-          <Save className="h-3.5 w-3.5 mr-1.5" />Lưu điểm danh
+      <div className="px-4 py-3 bg-muted/10 border-t border-border/40 flex flex-wrap items-center gap-3">
+        {Object.keys(marks).length > 0 && (
+          <Button size="sm" variant="outline" className="h-8" onClick={() => setMarks({})}>
+            <RotateCcw className="h-3.5 w-3.5 mr-1.5" />Reset buổi này
+          </Button>
+        )}
+        <Button size="sm" variant="gradient" className="h-8" onClick={handleSave} disabled={!hasChanges || saving}>
+          <Save className="h-3.5 w-3.5 mr-1.5" />{saving ? "Đang lưu…" : "Lưu điểm danh"}
         </Button>
         {saved && (
           <span className="flex items-center gap-1 text-xs text-emerald-600 font-medium">
             <CheckCircle2 className="h-3.5 w-3.5" />Đã lưu
           </span>
         )}
+        {saveError && <span role="alert" className="text-xs font-medium text-red-600">{saveError}</span>}
       </div>
     </div>
   );
@@ -222,15 +296,20 @@ export default function SessionsTab({
   setOpenAttendanceDate: React.Dispatch<React.SetStateAction<string | null>>;
   setHomeworkModalForSession: (dateStr: string | null) => void;
   setSessionNotesPanel: (dateStr: string | null) => void;
-  getAttendanceStatsForDate: (dateStr: string, cid: string) => { present: number; late: number; absent: number };
+  getAttendanceStatsForDate: (dateStr: string, cid: string) => { present: number; online: number; late: number; absent: number };
 }) {
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h3 className="text-lg font-bold text-foreground">Buổi học</h3>
-          <p className="text-sm text-muted-foreground">8 tuần qua + 4 tuần tới</p>
+          <p className="text-sm text-muted-foreground">Điểm danh hôm nay, điểm danh bù 12 tuần gần nhất hoặc chọn một ngày cũ hơn</p>
         </div>
+        <Button asChild size="sm" variant="outline">
+          <Link href={`/teacher/attendance?class=${encodeURIComponent(classId)}`}>
+            <CalendarDays className="mr-1.5 h-3.5 w-3.5" />Điểm danh ngày khác
+          </Link>
+        </Button>
       </div>
 
       {/* Upcoming & today */}
@@ -291,14 +370,20 @@ export default function SessionsTab({
                   >
                     <FileText className="h-3.5 w-3.5 mr-1.5" />Tài liệu
                   </Button>
-                  <Button
-                    size="sm"
-                    variant={openAttendanceDate === session.date ? "gradient" : "outline"}
-                    className="text-xs h-8"
-                    onClick={() => setOpenAttendanceDate(prev => prev === session.date ? null : session.date)}
-                  >
-                    <UserCheck className="h-3.5 w-3.5 mr-1.5" />Điểm danh
-                  </Button>
+                  {session.isToday ? (
+                    <Button
+                      size="sm"
+                      variant={openAttendanceDate === session.date ? "gradient" : "outline"}
+                      className="text-xs h-8"
+                      onClick={() => setOpenAttendanceDate(prev => prev === session.date ? null : session.date)}
+                    >
+                      <UserCheck className="h-3.5 w-3.5 mr-1.5" />Điểm danh
+                    </Button>
+                  ) : (
+                    <Button size="sm" variant="outline" className="text-xs h-8" disabled>
+                      Chưa đến buổi học
+                    </Button>
+                  )}
                 </div>
               </div>
               {currSession && currSession.lessons.length > 0 && (
@@ -328,20 +413,20 @@ export default function SessionsTab({
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <h4 className="text-sm font-semibold text-foreground flex items-center gap-2">
-            <Clock className="h-4 w-4 text-muted-foreground" /> Đã qua
+            <Clock className="h-4 w-4 text-muted-foreground" /> Điểm danh bù buổi đã qua
             <span className="text-xs font-normal text-muted-foreground">({pastSessions.length} buổi)</span>
           </h4>
           <button
             onClick={() => setShowPastSessions(v => !v)}
             className="text-xs text-primary hover:underline font-medium"
           >
-            {showPastSessions ? "Ẩn" : `Xem ${pastSessions.length} buổi đã qua`}
+            {showPastSessions ? "Ẩn các buổi đã qua" : `Mở ${pastSessions.length} buổi để điểm danh bù`}
           </button>
         </div>
 
         {showPastSessions && pastSessions.slice().reverse().map((session, i) => {
           const stats = getAttendanceStatsForDate(session.date, classId);
-          const hasStats = stats.present + stats.late + stats.absent > 0;
+          const hasStats = stats.present + stats.online + stats.late + stats.absent > 0;
           const currSession = curriculumByDate[session.date];
           return (
             <Card key={`past_${session.date}_${session.start_time}_${i}`} className="border-border/50 bg-muted/10 hover:shadow-sm transition-all">
@@ -369,6 +454,7 @@ export default function SessionsTab({
                       {hasStats && (
                         <p className="text-xs text-muted-foreground mt-0.5">
                           <span className="text-emerald-600 font-medium">{stats.present} có mặt</span>
+                          {stats.online > 0 && <span className="text-sky-600 font-medium"> · {stats.online} học online</span>}
                           {stats.late > 0 && <span className="text-amber-600 font-medium"> · {stats.late} đi trễ</span>}
                           {stats.absent > 0 && <span className="text-red-500 font-medium"> · {stats.absent} vắng</span>}
                         </p>
@@ -382,7 +468,7 @@ export default function SessionsTab({
                       className="text-xs h-8"
                       onClick={() => setOpenAttendanceDate(prev => prev === session.date ? null : session.date)}
                     >
-                      <UserCheck className="h-3.5 w-3.5 mr-1.5" />Điểm danh
+                      <UserCheck className="h-3.5 w-3.5 mr-1.5" />{hasStats ? "Sửa điểm danh" : "Điểm danh bù"}
                     </Button>
                   </div>
                 </div>

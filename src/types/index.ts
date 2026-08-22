@@ -70,7 +70,7 @@ export interface Attendance {
   class_id: string;
   student_id: string;
   attendance_date: string;
-  status: "present" | "absent" | "late" | "excused";
+  status: "present" | "online" | "absent" | "late" | "excused";
   notes?: string;
   created_at: string;
 }

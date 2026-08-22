@@ -10,6 +10,7 @@ import type {
 } from "@/components/teacher/classDetail.types";
 import type { CurriculumSession } from "@/lib/storage";
 import { toLocalDateKey } from "@/lib/utils";
+import { isAttendedStatus } from "@/lib/attendance";
 import { weekdayLabelVi } from "@/lib/weekday";
 import type { ClassSchedule } from "@/types";
 import {
@@ -117,7 +118,7 @@ export default function OverviewTab({
     ? Math.round((completedSubmissions / expectedSubmissions) * 100)
     : null;
   const attendedRecords = attendanceRecords.filter(
-    (record) => record.status === "present" || record.status === "late",
+    (record) => isAttendedStatus(record.status),
   ).length;
   const attendanceRate = attendanceRecords.length > 0
     ? Math.round((attendedRecords / attendanceRecords.length) * 100)

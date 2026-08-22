@@ -6,7 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { SectionHeader } from "@/components/shared";
 import { formatDate } from "@/lib/utils";
-import { CheckCircle2, Clock, XCircle, Calendar, User, BookOpen, AlertCircle } from "lucide-react";
+import { CheckCircle2, Clock, XCircle, Calendar, User, BookOpen, AlertCircle, Wifi } from "lucide-react";
 import { useParentContext } from "@/hooks/useParentContext";
 import {
   loadChildrenAttendance, attendanceRate, classNameOf,
@@ -34,6 +34,7 @@ export default function ParentAttendancePage() {
   // Stats
   const totalSessions = attendanceHistory.length;
   const presentCount = attendanceHistory.filter(a => a.status === "present").length;
+  const onlineCount = attendanceHistory.filter(a => a.status === "online").length;
   const lateCount = attendanceHistory.filter(a => a.status === "late").length;
   const absentCount = attendanceHistory.filter(a => a.status === "absent").length;
 
@@ -43,6 +44,8 @@ export default function ParentAttendancePage() {
     switch (status) {
       case "present":
         return { label: "Có mặt", icon: CheckCircle2, color: "text-emerald-600", bg: "bg-emerald-100", border: "border-emerald-200" };
+      case "online":
+        return { label: "Học online", icon: Wifi, color: "text-sky-600", bg: "bg-sky-100", border: "border-sky-200" };
       case "late":
         return { label: "Đi muộn", icon: Clock, color: "text-amber-600", bg: "bg-amber-100", border: "border-amber-200" };
       case "absent":
@@ -93,7 +96,7 @@ export default function ParentAttendancePage() {
         </div>
 
         {/* Stats Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-4">
           <Card className="border-border/50 shadow-sm bg-gradient-to-br from-card to-card/50">
             <CardContent className="p-6">
               <div className="flex justify-between items-start">
@@ -123,6 +126,21 @@ export default function ParentAttendancePage() {
                 </div>
               </div>
               <p className="text-xs text-emerald-600/70 dark:text-emerald-400/70 mt-4 font-medium">Buổi học đúng giờ</p>
+            </CardContent>
+          </Card>
+
+          <Card className="border-sky-200 dark:border-sky-900/50 shadow-sm bg-sky-50/50 dark:bg-sky-950/20">
+            <CardContent className="p-6">
+              <div className="flex justify-between items-start">
+                <div>
+                  <p className="text-sm font-medium text-sky-600/80 dark:text-sky-400/80 mb-1">Học online</p>
+                  <h3 className="text-3xl font-black text-sky-600 dark:text-sky-400">{onlineCount}</h3>
+                </div>
+                <div className="h-12 w-12 rounded-2xl bg-sky-100 dark:bg-sky-900/50 flex items-center justify-center">
+                  <Wifi className="h-6 w-6 text-sky-600 dark:text-sky-400" />
+                </div>
+              </div>
+              <p className="text-xs text-sky-600/70 dark:text-sky-400/70 mt-4 font-medium">Tham gia từ xa</p>
             </CardContent>
           </Card>
 

@@ -1,5 +1,6 @@
 import { createClient } from "./supabase/client";
 import { Student, Teacher, Class, Payment, Attendance, Notification, ClassSchedule } from "@/types";
+import type { AttendanceStatus } from "@/lib/attendance";
 import {
   cachedClientQuery,
   invalidateClientQueries,
@@ -321,7 +322,7 @@ export interface TeacherAttendanceRecord {
   class_id: string;
   student_id: string;
   date: string;      // YYYY-MM-DD
-  status: "present" | "absent" | "late" | "excused";
+  status: AttendanceStatus;
   saved_at: string;
 }
 export interface AttendanceQuery {
@@ -373,6 +374,40 @@ export async function saveClassAttendance(records: TeacherAttendanceRecord[]): P
   if (error) {
     console.error("saveClassAttendance:", error);
     throw error;
+  }
+  invalidateClientQueries("teacher-attendance:");
+}
+
+/**
+ * Thay toàn bộ điểm danh của các học viên đang được quản lý trong một buổi.
+ * Các lựa chọn bị bỏ/reset được xóa thật khỏi Supabase; lịch sử của học viên đã
+ * rời lớp không nằm trong managedStudentIds vẫn được giữ nguyên.
+ */
+export async function replaceClassAttendanceForDate(
+  classId: string,
+  date: string,
+  records: TeacherAttendanceRecord[],
+  managedStudentIds: readonly string[],
+): Promise<void> {
+  const managedIds = [...new Set(managedStudentIds.filter(Boolean))];
+  const keepIds = new Set(records.map((record) => record.student_id));
+
+  if (records.length > 0) {
+    await saveClassAttendance(records);
+  }
+
+  const clearedIds = managedIds.filter((studentId) => !keepIds.has(studentId));
+  if (clearedIds.length > 0) {
+    const { error } = await supabase
+      .from("class_attendance")
+      .delete()
+      .eq("class_id", classId)
+      .eq("attendance_date", date)
+      .in("student_id", clearedIds);
+    if (error) {
+      console.error("replaceClassAttendanceForDate(delete):", error);
+      throw error;
+    }
   }
   invalidateClientQueries("teacher-attendance:");
 }

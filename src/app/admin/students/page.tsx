@@ -19,6 +19,7 @@ import {
 } from "@/lib/storage";
 import { Student } from "@/types";
 import { StudentGuardianManager } from "@/components/guardians/StudentGuardianManager";
+import { isAttendedStatus } from "@/lib/attendance";
 
 export default function AdminStudentsPage() {
   const [students, setStudents] = useState<Student[]>([]);
@@ -218,7 +219,7 @@ export default function AdminStudentsPage() {
                         ?? studentPayments.find(p => p.payment_status === "pending")
                         ?? studentPayments[studentPayments.length - 1];
                       const attRecords = attendance.filter(a => a.student_id === student.id);
-                      const presentCount = attRecords.filter(a => a.status === "present").length;
+                      const presentCount = attRecords.filter(a => isAttendedStatus(a.status)).length;
                       const attRate = attRecords.length > 0 ? Math.round((presentCount / attRecords.length) * 100) : null;
 
                       return (

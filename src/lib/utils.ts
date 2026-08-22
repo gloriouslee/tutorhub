@@ -76,6 +76,8 @@ export function getAttendanceColor(status: string): string {
   switch (status) {
     case "present":
       return "text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20";
+    case "online":
+      return "text-sky-600 bg-sky-50 dark:bg-sky-900/20";
     case "absent":
       return "text-red-600 bg-red-50 dark:bg-red-900/20";
     case "late":

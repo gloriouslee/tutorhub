@@ -20,6 +20,7 @@ import { getInvoices, getNotifications, type TuitionInvoice, type StoredExamScor
 import type { Notification } from "@/types";
 import { weekdayLabelVi } from "@/lib/weekday";
 import ParentGrowthPanel from "@/components/parent/ParentGrowthPanel";
+import { isAttendedStatus } from "@/lib/attendance";
 
 
 // Trạng thái hiển thị cho hóa đơn thật: quá hạn khi chưa thanh toán và trễ hạn.
@@ -105,7 +106,7 @@ export default function ParentDashboard() {
     for (const r of attendance.filter(a => a.student_id === activeChild?.id)) {
       const key = r.date.slice(0, 7); // YYYY-MM
       const e = byMonth.get(key) ?? { present: 0, absent: 0 };
-      if (r.status === "present" || r.status === "late") e.present++;
+      if (isAttendedStatus(r.status)) e.present++;
       else if (r.status === "absent") e.absent++;
       byMonth.set(key, e);
     }

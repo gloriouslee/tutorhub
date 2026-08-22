@@ -26,13 +26,14 @@ import {
   BookOpen, Clock, Video, ArrowLeft, FileText, Download,
   PlayCircle, StickyNote, Pin, Eye, ChevronRight, GraduationCap,
   Calendar, Presentation, Tag, Lock, ShieldAlert, CheckCircle2, AlertCircle,
-  Check, Map, CalendarDays, UserCheck, UserX, Timer, Minus,
+  Check, Map, CalendarDays, UserCheck, UserX, Timer, Minus, Wifi,
   ClipboardList, ChevronDown, Send, XCircle, CheckSquare, Search, Trophy,
 } from "lucide-react";
 import { formatDate, mapWithConcurrency, toLocalDateKey } from "@/lib/utils";
+import { isAttendedStatus } from "@/lib/attendance";
 import { useStudentContext } from "@/hooks/useStudentContext";
 
-type AttendanceStatus = "present" | "absent" | "late" | "excused";
+type AttendanceStatus = "present" | "online" | "absent" | "late" | "excused";
 
 interface SavedAttendanceRecord {
   class_id: string;
@@ -44,6 +45,7 @@ interface SavedAttendanceRecord {
 
 const ATTENDANCE_META: Record<AttendanceStatus, { label: string; icon: React.ElementType; color: string; bg: string }> = {
   present: { label: "Có mặt",  icon: UserCheck, color: "text-emerald-700 dark:text-emerald-400", bg: "bg-emerald-100 dark:bg-emerald-900/30" },
+  online:  { label: "Học online", icon: Wifi, color: "text-sky-700 dark:text-sky-400", bg: "bg-sky-100 dark:bg-sky-900/30" },
   late:    { label: "Muộn",    icon: Timer,      color: "text-amber-700 dark:text-amber-400",     bg: "bg-amber-100 dark:bg-amber-900/30" },
   excused: { label: "Có phép", icon: Check,      color: "text-blue-700 dark:text-blue-400",       bg: "bg-blue-100 dark:bg-blue-900/30" },
   absent:  { label: "Vắng",   icon: UserX,      color: "text-red-700 dark:text-red-400",         bg: "bg-red-100 dark:bg-red-900/30" },
@@ -558,11 +560,11 @@ export default function StudentClassDetailPage() {
   const upcomingSessions = allSessions.filter(s => s.date > todayStr);
 
   // Chuẩn chuyên cần: excused không tính vắng, loại khỏi cả tử số lẫn mẫu số
-  // tỷ lệ = (present + late) / (tổng buổi - excused)
+  // tỷ lệ = (present + online + late) / (tổng buổi - excused)
   const pastRecords = pastSessions.map(s =>
     savedAttendance.find(r => r.class_id === classId && r.student_id === CURRENT_STUDENT_ID && r.date === s.date)
   );
-  const attendedCount = pastRecords.filter(r => r?.status === "present" || r?.status === "late").length;
+  const attendedCount = pastRecords.filter(r => r && isAttendedStatus(r.status)).length;
   const excusedCount  = pastRecords.filter(r => r?.status === "excused").length;
   const sessionRateDenom = pastSessions.length - excusedCount;
   const attendanceRate = sessionRateDenom > 0
@@ -1175,11 +1177,12 @@ export default function StudentClassDetailPage() {
 
             const total    = merged.length;
             const present  = merged.filter(r => r.status === "present").length;
+            const online   = merged.filter(r => r.status === "online").length;
             const late     = merged.filter(r => r.status === "late").length;
             const absent   = merged.filter(r => r.status === "absent").length;
             const excused  = merged.filter(r => r.status === "excused").length;
-            const attended = present + late;
-            // Chuẩn: tỷ lệ = (present + late) / (total - excused) — có phép không tính vắng
+            const attended = present + online + late;
+            // Có phép không tính vắng; học online vẫn là tham gia buổi học.
             const rate     = total - excused > 0 ? Math.round((attended / (total - excused)) * 100) : 100;
 
             const rateColor = rate >= 90 ? "from-emerald-500 to-emerald-600"
@@ -1188,6 +1191,7 @@ export default function StudentClassDetailPage() {
 
             const STATUS_CFG = {
               present: { label: "Có mặt",   Icon: UserCheck, color: "text-emerald-600 dark:text-emerald-400", bg: "bg-emerald-50 dark:bg-emerald-900/20", badge: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 border-0" },
+              online:  { label: "Học online", Icon: Wifi, color: "text-sky-600 dark:text-sky-400", bg: "bg-sky-50 dark:bg-sky-900/20", badge: "bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-400 border-0" },
               late:    { label: "Đi trễ",   Icon: Timer,     color: "text-amber-600 dark:text-amber-400",     bg: "bg-amber-50 dark:bg-amber-900/20",     badge: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 border-0" },
               excused: { label: "Có phép",  Icon: Check,     color: "text-blue-600 dark:text-blue-400",       bg: "bg-blue-50 dark:bg-blue-900/20",       badge: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 border-0" },
               absent:  { label: "Vắng mặt", Icon: XCircle,   color: "text-red-600 dark:text-red-400",         bg: "bg-red-50 dark:bg-red-900/20",         badge: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 border-0" },
@@ -1196,7 +1200,7 @@ export default function StudentClassDetailPage() {
             return (
               <div className="space-y-6">
                 {/* Stats row */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                   <Card className={`bg-gradient-to-br ${rateColor} text-white shadow-md border-0`}>
                     <CardContent className="p-5 flex flex-col items-center justify-center text-center">
                       <CheckSquare className="h-6 w-6 opacity-80 mb-2" />
@@ -1206,6 +1210,7 @@ export default function StudentClassDetailPage() {
                   </Card>
                   {([
                     { count: present, key: "present" },
+                    { count: online,  key: "online" },
                     { count: late,    key: "late" },
                     { count: absent,  key: "absent" },
                   ] as const).map(({ count, key }) => {
@@ -1268,6 +1273,7 @@ export default function StudentClassDetailPage() {
                         {[
                           { label: "Tổng số buổi", value: total },
                           { label: "Có mặt",        value: present },
+                          { label: "Học online",    value: online },
                           { label: "Đi trễ",        value: late },
                           { label: "Vắng mặt",      value: absent },
                           { label: "Tỷ lệ chuyên cần", value: `${rate}%` },
